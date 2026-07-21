@@ -24,6 +24,7 @@ quick-xml = { version = "0.37", features = ["serialize"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "json"] }
 unicode-segmentation = "1"
 chrono = "0.4"
+regex = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

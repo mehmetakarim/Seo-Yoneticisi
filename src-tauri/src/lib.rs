@@ -39,6 +39,7 @@ pub fn run() {
             commands::mark_meta_done,
             commands::mark_details_done,
             commands::generate_meta,
+            commands::generate_details,
             commands::get_settings,
             commands::save_settings,
             commands::set_theme,

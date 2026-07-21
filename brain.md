@@ -4,7 +4,7 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-07-21
-**Aktif faz:** Faz 2 ✅ tamamlandı (Gemini meta üretimi) → Faz 3 (details) bekliyor
+**Aktif faz:** Faz 3 ✅ tamamlandı (details üretimi) → 3 fazın tamamı BİTTİ 🎉
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main, ✅ push edildi)
 
 ## Faz 2 kararları (kullanıcı onayı)
@@ -96,14 +96,38 @@ sonra "Tamamlandı" işaretler.
 - Test komutu: `GEMINI_API_KEY=... cargo test gen_meta_real -- --ignored --nocapture`
 - ⚠️ Model isimleri zamanla değişebilir — 429 dışı "model bulunamadı" hatası gelirse MODEL_CHAIN güncelle.
 
-## 🔮 Faz 3 — Details (uzun açıklama) üretimi — SONRAKİ
+## ✅ Faz 3 — Details (uzun açıklama) üretimi — TAMAMLANDI
 
-- Ayrı Gemini çağrısı; `details` HTML gönderilir, **yapı korunur** (section/col-md/img/h2/p sırası + class'lar aynı),
-  sadece h2/p metinleri yenilenir
-- Üretimden önce tüm `<img src>` URL'leri Rust'ta listeye çıkarılır; dönen HTML'de src bozulmuşsa
-  orijinalleriyle geri yazılır (kredi harcamadan görsel güvenliği)
-- Kart 2'yi aktif et: "Açıklamayı Üret" + "Açıklamayı Tamamlandı" + details_status validasyonu
-  (word_count ≥ 50, density %2–3 — yardımcılar `validation.rs`'te hazır)
+### Yapıldı — yaklaşım: **structure-preserving splice** (send-full-HTML yerine daha sağlam)
+- **`gemini.rs::generate_details`**: orijinal HTML iskeletinden h2/p iç metinleri sırayla çıkarılır
+  (`extract_segments`, byte-indeksli, ASCII-lowercase kopyayla hizalı), Gemini bunları JSON dizi olarak
+  yeniden yazar, aynı konumlara `splice` edilir. section/col-md/class/`<img>` HİÇ dokunulmaz →
+  görsel güvenliği by-design. Model fallback zinciri + uzunluk uyuşmazsa tek retry + best-effort
+  (eksik parça → orijinali korunur). `sanitize_inline`: yalnızca <strong>/<b>/<em>/<br> izinli,
+  <img>/<script>/başlık etiketi enjeksiyonu atılır. Ek güvenlik: img src listesi üretim öncesi/sonrası
+  karşılaştırılır, farklıysa orijinal HTML döner.
+- **db.rs**: `seo_status.draft_details` kolonu idempotent migration (`add_column_if_missing`).
+- **validation.rs**: `details_badge` (done→Tamamlandı, boş→Eksik, kelime≥50 & yoğunluk 1.5–3.5→Uygun,
+  aksi Hatalı) + `overall_status` (iki boyutlu: meta+details → Eksik/Hatalı/Bekliyor/Uygun/Tamamlandı,
+  prototipteki `overall()` mantığı).
+- **commands.rs**: `generate_details(sku)` (draft_details'e yazar), `read_detail` + `list_products`
+  artık meta_badge + details_badge + overall döner. Filtreler overall'a göre → **"Açıklama Bekliyor" aktif**.
+- **Frontend**: DetailsSeoCard üret butonu aktif + spinner + "Uzun içerik üretiliyor…" overlay,
+  önizleme/metrikler draft_details ?? feed'den, durum rozeti details_badge. ProductList dual gösterge
+  artık meta_badge + details_badge. store counts/rows overall'a göre. `⇧G` = açıklama üret kısayolu.
+  ProductDetail draft_details ?? details geçirir.
+
+### Doğrulama
+- 20/20 cargo birim testi (extract_segments/splice/sanitize/img birim testleri dahil)
+- **Gerçek API testi** (`gen_details_real`): iskelet + 2 img korundu, h2/p yeniden yazıldı,
+  hedef kelime <strong> ile vurgulandı, 131 kelime ✅
+- Frontend build temiz, tauri dev runtime hatasız (migration mevcut DB'de sorunsuz)
+
+## 🎯 Sonraki olası işler (opsiyonel — 3 faz bitti)
+- Toplu üretim (seçili ürünler için sırayla meta/details) + ilerleme çubuğu
+- Gemini kota/kullanım göstergesi, model seçimi Ayarlar'da
+- IdeaSoft'a doğrudan yazma (şu an kullanıcı elle kopyalıyor) — API varsa
+- details üretiminde de yoğunluk hedef dışıysa tek retry (şu an sadece uzunluk uyuşmazlığında retry)
 
 ---
 

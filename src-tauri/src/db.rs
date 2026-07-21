@@ -59,6 +59,40 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("Şema oluşturulamadı: {e}"))?;
+
+    migrate(conn)?;
+    Ok(())
+}
+
+/// Eski DB'lere sonradan eklenen kolonları idempotent şekilde ekler.
+fn migrate(conn: &Connection) -> Result<(), String> {
+    add_column_if_missing(conn, "seo_status", "draft_details", "TEXT")?;
+    Ok(())
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    col_type: &str,
+) -> Result<(), String> {
+    let exists: bool = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .and_then(|mut stmt| {
+            let names: Vec<String> = stmt
+                .query_map([], |row| row.get::<_, String>(1))?
+                .filter_map(Result::ok)
+                .collect();
+            Ok(names.iter().any(|n| n == column))
+        })
+        .map_err(|e| format!("{table} kolonları okunamadı: {e}"))?;
+    if !exists {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {col_type}"),
+            [],
+        )
+        .map_err(|e| format!("{table}.{column} eklenemedi: {e}"))?;
+    }
     Ok(())
 }
 

@@ -75,13 +75,13 @@ function okBadge(b: string) {
             <Icon name="check" :size="11" :stroke-width="3" />Tamamlandı
           </span>
           <div v-else class="dual">
-            <span class="mini" :class="{ ok: okBadge(p.badge) }">
-              <Icon v-if="okBadge(p.badge)" name="check" :size="10" :stroke-width="3.4" />
+            <span class="mini" :class="{ ok: okBadge(p.meta_badge) }">
+              <Icon v-if="okBadge(p.meta_badge)" name="check" :size="10" :stroke-width="3.4" />
               <span v-else class="ring"></span>
               Meta
             </span>
-            <span class="mini" :class="{ ok: p.details_done }">
-              <Icon v-if="p.details_done" name="check" :size="10" :stroke-width="3.4" />
+            <span class="mini" :class="{ ok: okBadge(p.details_badge) }">
+              <Icon v-if="okBadge(p.details_badge)" name="check" :size="10" :stroke-width="3.4" />
               <span v-else class="ring"></span>
               Açıkl.
             </span>
@@ -96,7 +96,8 @@ function okBadge(b: string) {
 
     <div class="shortcuts">
       <span><kbd>↑↓</kbd> gezin</span>
-      <span><kbd>G</kbd> meta üret</span>
+      <span><kbd>G</kbd> meta</span>
+      <span><kbd>⇧G</kbd> açıklama</span>
       <span><kbd>D</kbd> tamamla</span>
       <span><kbd>⌘F</kbd> ara</span>
     </div>

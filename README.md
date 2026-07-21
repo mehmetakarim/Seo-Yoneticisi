@@ -72,7 +72,19 @@ cd src-tauri
 GEMINI_API_KEY=... cargo test gen_meta_real -- --ignored --nocapture
 ```
 
-## Faz 3 (sonraki) — details
+## Faz 3 (tamamlandı) — details üretimi
 
-Yapılacak: details HTML üretimi (yapı korunur, sadece h2/p metni yenilenir), img-src koruma,
-details_status validasyonu (word_count ≥ 50, density %2–3). Ayrıntı: `brain.md`.
+"Açıklamayı Üret" / `⇧G` kısayolu:
+- `gemini.rs::generate_details` — **yapı korunur**: orijinal HTML iskeletinden h2/p iç metinleri
+  çıkarılıp Gemini'ye yeniden yazdırılır, aynı konuma splice edilir. section/class/`<img>` dokunulmaz
+  (görsel güvenliği by-design; ayrıca img src invariant kontrolü + `<strong>/<em>` dışı etiket temizliği).
+- İki boyutlu liste durumu aktif: **Açıklama Bekliyor** filtresi (meta done + details pending),
+  Kart 2 durum rozeti (kelime ≥ 50, yoğunluk 1.5–3.5).
+- Sonuç `seo_status.draft_details`'e yazılır (feed'in `details` alanı korunur).
+
+Gerçek API testi:
+```bash
+GEMINI_API_KEY=... cargo test gen_details_real -- --ignored --nocapture
+```
+
+Üç fazın tamamı bitti. Yol haritası ve olası sonraki işler: `brain.md`.

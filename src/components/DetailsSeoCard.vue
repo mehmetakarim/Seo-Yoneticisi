@@ -5,13 +5,22 @@ import { density, wordCount } from "../validation";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
 
+import { BADGE_LABEL } from "../validation";
+import type { MetaBadge } from "../types";
+
 const props = defineProps<{
   detailsHtml: string;
   keyword: string;
   detailsDone: boolean;
+  badge: MetaBadge;
 }>();
 
 const store = useStore();
+
+const badgeStyle = computed(() => ({
+  background: `var(--badge-${props.badge}-bg)`,
+  color: `var(--badge-${props.badge}-c)`,
+}));
 
 const words = computed(() => wordCount(props.detailsHtml));
 const hasContent = computed(() => !!props.detailsHtml && props.detailsHtml.trim().length > 0);
@@ -56,7 +65,7 @@ async function copyHtml() {
 }
 
 function genDetails() {
-  store.toast("Açıklama üretimi Faz 3'te aktif olacak.", "info");
+  store.generateDetails();
 }
 </script>
 
@@ -72,8 +81,8 @@ function genDetails() {
           <div class="head-sub">Ürün detay sayfası uzun içeriği</div>
         </div>
       </div>
-      <span class="status pending">
-        <span class="sdot"></span>Faz 2/3
+      <span class="status" :style="badgeStyle">
+        <span class="sdot" :style="{ background: badgeStyle.color }"></span>{{ BADGE_LABEL[badge] }}
       </span>
     </div>
 
@@ -94,6 +103,10 @@ function genDetails() {
         <div v-else class="preview-empty">
           <Icon name="clipboardList" :size="26" :stroke-width="1.6" />
           <span>Henüz açıklama içeriği yok — <b>Açıklamayı Üret</b> ile oluşturun.</span>
+        </div>
+        <div v-if="store.generatingDetails" class="gen-overlay">
+          <Icon name="loader" :size="22" :stroke-width="2.4" class="spin" style="color:var(--accent)" />
+          <span>Uzun içerik üretiliyor…</span>
         </div>
       </div>
 
@@ -135,11 +148,11 @@ function genDetails() {
 
     <div class="card-actions">
       <div class="gen-wrap">
-        <button class="gen" disabled @click="genDetails">
-          <Icon name="sparkles" :size="17" :stroke-width="1.9" />
-          Açıklamayı Üret
+        <button class="gen" :class="{ busy: store.generatingDetails }" :disabled="store.generatingDetails" @click="genDetails">
+          <Icon :name="store.generatingDetails ? 'loader' : 'sparkles'" :size="17" :stroke-width="store.generatingDetails ? 2.2 : 1.9" :class="{ spin: store.generatingDetails }" />
+          {{ store.generatingDetails ? "Üretiliyor…" : "Açıklamayı Üret" }}
         </button>
-        <span class="gen-sub">uzun içerik · daha fazla kredi · Faz 3</span>
+        <span class="gen-sub">uzun içerik · daha fazla kredi</span>
       </div>
       <div style="flex:1"></div>
       <button class="done" :class="{ active: detailsDone }" @click="store.toggleDetailsDone()">
@@ -373,9 +386,36 @@ function genDetails() {
   color: #fff;
   font-size: 14px;
   font-weight: 600;
-  cursor: not-allowed;
-  opacity: 0.55;
+  cursor: pointer;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}
+.gen:hover {
+  filter: brightness(1.05);
+}
+.gen.busy {
+  opacity: 0.75;
+  cursor: default;
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+.preview {
+  position: relative;
+}
+.gen-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay-bg);
+  backdrop-filter: blur(2px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 11px;
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--c-mid);
 }
 .gen-sub {
   font-size: 10.5px;

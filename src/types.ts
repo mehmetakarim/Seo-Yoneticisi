@@ -1,4 +1,10 @@
 export type MetaBadge = "eksik" | "hatali" | "uygun" | "tamamlandi";
+export type OverallStatus =
+  | "eksik"
+  | "hatali"
+  | "bekliyor"
+  | "uygun"
+  | "tamamlandi";
 
 export interface SyncSummary {
   run_at: string;
@@ -14,7 +20,9 @@ export interface ProductRow {
   name: string;
   brand: string | null;
   img_url: string | null;
-  badge: MetaBadge;
+  meta_badge: MetaBadge;
+  details_badge: MetaBadge;
+  overall: OverallStatus;
   meta_done: boolean;
   details_done: boolean;
 }
@@ -39,7 +47,10 @@ export interface ProductDetail {
   draft_title: string | null;
   draft_descriptions: string | null;
   draft_search_keywords: string | null;
+  draft_details: string | null;
   badge: MetaBadge;
+  details_badge: MetaBadge;
+  overall: OverallStatus;
 }
 
 export interface Settings {

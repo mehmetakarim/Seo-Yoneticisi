@@ -3377,6 +3377,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "quick-xml 0.37.5",
+ "regex",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",

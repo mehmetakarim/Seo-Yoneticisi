@@ -123,9 +123,10 @@ async function openProduct() {
       />
 
       <DetailsSeoCard
-        :details-html="detail.details ?? ''"
+        :details-html="detail.draft_details ?? detail.details ?? ''"
         :keyword="keyword"
         :details-done="detail.details_status === 'done'"
+        :badge="detail.details_badge"
       />
     </div>
 

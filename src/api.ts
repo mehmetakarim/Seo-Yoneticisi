@@ -29,6 +29,8 @@ export const api = {
   markMetaDone: (sku: string) => invoke<string>("mark_meta_done", { sku }),
   markDetailsDone: (sku: string) => invoke<string>("mark_details_done", { sku }),
   generateMeta: (sku: string) => invoke<ProductDetail>("generate_meta", { sku }),
+  generateDetails: (sku: string) =>
+    invoke<ProductDetail>("generate_details", { sku }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (feedUrl: string, geminiApiKey: string) =>
     invoke<void>("save_settings", { feedUrl, geminiApiKey }),

@@ -1,4 +1,6 @@
-use crate::validation::{meta_badge, MetaBadge, MetaInput};
+use crate::validation::{
+    details_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallStatus,
+};
 use crate::{db, feed, gemini, sync};
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -22,7 +24,9 @@ pub struct ProductRow {
     pub name: String,
     pub brand: Option<String>,
     pub img_url: Option<String>,
-    pub badge: MetaBadge,
+    pub meta_badge: MetaBadge,
+    pub details_badge: MetaBadge,
+    pub overall: OverallStatus,
     pub meta_done: bool,
     pub details_done: bool,
 }
@@ -48,7 +52,10 @@ pub struct ProductDetail {
     pub draft_title: Option<String>,
     pub draft_descriptions: Option<String>,
     pub draft_search_keywords: Option<String>,
+    pub draft_details: Option<String>,
     pub badge: MetaBadge,
+    pub details_badge: MetaBadge,
+    pub overall: OverallStatus,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,15 +73,17 @@ struct RowData {
     img_url: Option<String>,
     title: Option<String>,
     descriptions: Option<String>,
+    details: Option<String>,
     meta_status: String,
     details_status: String,
     target_keyword: Option<String>,
     draft_title: Option<String>,
     draft_descriptions: Option<String>,
+    draft_details: Option<String>,
 }
 
-/// Rozet, taslak varsa taslak (NULL değilse) yoksa feed değeri üzerinden hesaplanır.
-fn badge_of(r: &RowData) -> MetaBadge {
+/// Meta rozeti — taslak varsa taslak (NULL değilse) yoksa feed değeri üzerinden.
+fn meta_badge_of(r: &RowData) -> MetaBadge {
     let title = r.draft_title.as_deref().unwrap_or(r.title.as_deref().unwrap_or(""));
     let desc = r
         .draft_descriptions
@@ -86,6 +95,12 @@ fn badge_of(r: &RowData) -> MetaBadge {
         target_keyword: r.target_keyword.as_deref().unwrap_or(""),
         meta_done: r.meta_status == "done",
     })
+}
+
+/// Details rozeti — taslak varsa taslak yoksa feed details üzerinden.
+fn details_badge_of(r: &RowData) -> MetaBadge {
+    let html = r.draft_details.as_deref().unwrap_or(r.details.as_deref().unwrap_or(""));
+    details_badge(html, r.target_keyword.as_deref().unwrap_or(""), r.details_status == "done")
 }
 
 #[tauri::command]
@@ -114,9 +129,9 @@ pub fn list_products(
     let conn = state.conn.lock().unwrap();
     let mut stmt = conn
         .prepare(
-            "SELECT p.sku, p.name, p.brand, p.img_url, p.title, p.descriptions,
+            "SELECT p.sku, p.name, p.brand, p.img_url, p.title, p.descriptions, p.details,
                     COALESCE(s.meta_status,'pending'), COALESCE(s.details_status,'pending'),
-                    s.target_keyword, s.draft_title, s.draft_descriptions
+                    s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_details
              FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
              ORDER BY p.name COLLATE NOCASE",
         )
@@ -130,11 +145,13 @@ pub fn list_products(
                 img_url: row.get(3)?,
                 title: row.get(4)?,
                 descriptions: row.get(5)?,
-                meta_status: row.get(6)?,
-                details_status: row.get(7)?,
-                target_keyword: row.get(8)?,
-                draft_title: row.get(9)?,
-                draft_descriptions: row.get(10)?,
+                details: row.get(6)?,
+                meta_status: row.get(7)?,
+                details_status: row.get(8)?,
+                target_keyword: row.get(9)?,
+                draft_title: row.get(10)?,
+                draft_descriptions: row.get(11)?,
+                draft_details: row.get(12)?,
             })
         })
         .map_err(|e| format!("Ürün listesi okunamadı: {e}"))?
@@ -150,15 +167,19 @@ pub fn list_products(
         {
             continue;
         }
-        let badge = badge_of(&r);
+        let meta = meta_badge_of(&r);
+        let details = details_badge_of(&r);
+        let meta_done = r.meta_status == "done";
+        let details_done = r.details_status == "done";
+        let overall = overall_status(meta, details, meta_done, details_done);
         let keep = match f.as_str() {
             "" | "hepsi" => true, // filtre yok: tamamlananlar dahil her şey
-            "tumu" => badge != MetaBadge::Tamamlandi,
-            "eksik" => badge == MetaBadge::Eksik,
-            "hatali" => badge == MetaBadge::Hatali,
-            "uygun" => badge == MetaBadge::Uygun,
-            "tamamlandi" => badge == MetaBadge::Tamamlandi,
-            "bekliyor" => false, // "Açıklama Bekliyor" Faz 2'de dolacak
+            "tumu" => overall != OverallStatus::Tamamlandi,
+            "eksik" => overall == OverallStatus::Eksik,
+            "hatali" => overall == OverallStatus::Hatali,
+            "bekliyor" => overall == OverallStatus::Bekliyor,
+            "uygun" => overall == OverallStatus::Uygun,
+            "tamamlandi" => overall == OverallStatus::Tamamlandi,
             other => return Err(format!("Bilinmeyen filtre: {other}")),
         };
         if keep {
@@ -167,9 +188,11 @@ pub fn list_products(
                 name: r.name,
                 brand: r.brand,
                 img_url: r.img_url,
-                badge,
-                meta_done: r.meta_status == "done",
-                details_done: r.details_status == "done",
+                meta_badge: meta,
+                details_badge: details,
+                overall,
+                meta_done,
+                details_done,
             });
         }
     }
@@ -181,7 +204,8 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
         "SELECT p.sku, p.name, p.brand, p.main_category, p.category, p.quantity, p.url,
                 p.img_url, p.title, p.descriptions, p.keywords, p.search_keywords, p.details,
                 COALESCE(s.meta_status,'pending'), COALESCE(s.details_status,'pending'),
-                s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_search_keywords
+                s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_search_keywords,
+                s.draft_details
          FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
          WHERE p.sku = ?1",
         [&sku],
@@ -206,7 +230,10 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 draft_title: row.get(16)?,
                 draft_descriptions: row.get(17)?,
                 draft_search_keywords: row.get(18)?,
-                badge: MetaBadge::Eksik, // aşağıda hesaplanır
+                draft_details: row.get(19)?,
+                badge: MetaBadge::Eksik,       // aşağıda hesaplanır
+                details_badge: MetaBadge::Eksik, // aşağıda hesaplanır
+                overall: OverallStatus::Eksik,   // aşağıda hesaplanır
             })
         },
     )
@@ -215,15 +242,24 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
         other => format!("Ürün okunamadı: {other}"),
     })
     .map(|mut d| {
+        let kw = d.target_keyword.as_deref().unwrap_or("");
         d.badge = meta_badge(&MetaInput {
             title: d.draft_title.as_deref().unwrap_or(d.title.as_deref().unwrap_or("")),
             descriptions: d
                 .draft_descriptions
                 .as_deref()
                 .unwrap_or(d.descriptions.as_deref().unwrap_or("")),
-            target_keyword: d.target_keyword.as_deref().unwrap_or(""),
+            target_keyword: kw,
             meta_done: d.meta_status == "done",
         });
+        let details_html = d.draft_details.as_deref().unwrap_or(d.details.as_deref().unwrap_or(""));
+        d.details_badge = details_badge(details_html, kw, d.details_status == "done");
+        d.overall = overall_status(
+            d.badge,
+            d.details_badge,
+            d.meta_status == "done",
+            d.details_status == "done",
+        );
         d
     })
 }
@@ -361,6 +397,61 @@ pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<Pr
         ],
     )
     .map_err(|e| format!("Üretilen meta kaydedilemedi: {e}"))?;
+    read_detail(&conn, &sku)
+}
+
+/// Faz 3: details HTML'ini yapıyı koruyarak yeniden üretir, taslağa yazar.
+#[tauri::command]
+pub async fn generate_details(
+    state: State<'_, AppState>,
+    sku: String,
+) -> Result<ProductDetail, String> {
+    let (name, brand, category, main_category, details_html, keyword, api_key) = {
+        let conn = state.conn.lock().unwrap();
+        let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
+        conn.query_row(
+            "SELECT p.name, p.brand, p.category, p.main_category,
+                    COALESCE(s.draft_details, p.details), COALESCE(s.target_keyword,'')
+             FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
+             WHERE p.sku = ?1",
+            [&sku],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
+            other => format!("Ürün okunamadı: {other}"),
+        })
+        .map(|t| (t.0, t.1, t.2, t.3, t.4.unwrap_or_default(), t.5, key))?
+    };
+
+    if details_html.trim().is_empty() {
+        return Err("Bu ürünün feed'inde açıklama içeriği yok.".to_string());
+    }
+
+    let ctx = gemini::ProductContext {
+        name: &name,
+        brand: brand.as_deref(),
+        category: category.as_deref(),
+        main_category: main_category.as_deref(),
+    };
+    let new_html = gemini::generate_details(&api_key, &ctx, &details_html, &keyword).await?;
+
+    let conn = state.conn.lock().unwrap();
+    ensure_seo_row(&conn, &sku)?;
+    conn.execute(
+        "UPDATE seo_status SET draft_details = ?2, updated_at = ?3 WHERE sku = ?1",
+        params![sku, new_html, now_str()],
+    )
+    .map_err(|e| format!("Üretilen açıklama kaydedilemedi: {e}"))?;
     read_detail(&conn, &sku)
 }
 

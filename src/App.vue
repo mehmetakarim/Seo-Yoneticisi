@@ -47,7 +47,10 @@ function onKey(e: KeyboardEvent) {
     store.navigate(-1);
   } else if (!typing && (e.key === "g" || e.key === "G")) {
     e.preventDefault();
-    if (store.selectedSku) store.generateMeta();
+    if (!store.selectedSku) return;
+    // ⇧G = açıklama üret, G = meta üret
+    if (e.shiftKey) store.generateDetails();
+    else store.generateMeta();
   } else if (!typing && (e.key === "d" || e.key === "D")) {
     e.preventDefault();
     if (store.selectedSku) store.toggleMetaDone();

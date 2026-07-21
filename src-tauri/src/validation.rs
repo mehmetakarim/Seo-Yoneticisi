@@ -57,10 +57,61 @@ pub fn meta_badge(m: &MetaInput) -> MetaBadge {
     }
 }
 
-// ---- Faz 2/3 için hazır yardımcılar (Faz 1'de rozete bağlanmaz; testlerde doğrulanır) ----
+/// Details (uzun açıklama) durum rozeti — Faz 3.
+/// done → Tamamlandı; içerik boş → Eksik; kelime≥50 ve yoğunluk 1.5–3.5 → Uygun; aksi Hatalı.
+pub fn details_badge(details_html: &str, target_keyword: &str, details_done: bool) -> MetaBadge {
+    if details_done {
+        return MetaBadge::Tamamlandi;
+    }
+    let words = word_count(details_html);
+    if words == 0 {
+        return MetaBadge::Eksik;
+    }
+    let dens = keyword_density(details_html, target_keyword);
+    let word_ok = words >= 50;
+    let dens_ok = (1.5..=3.5).contains(&dens);
+    if word_ok && dens_ok {
+        MetaBadge::Uygun
+    } else {
+        MetaBadge::Hatali
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OverallStatus {
+    Eksik,
+    Hatali,
+    Bekliyor,
+    Uygun,
+    Tamamlandi,
+}
+
+/// İki boyutlu (Meta + Açıklama) liste durumu — prototipteki `overall()` mantığı.
+pub fn overall_status(
+    meta: MetaBadge,
+    details: MetaBadge,
+    meta_done: bool,
+    details_done: bool,
+) -> OverallStatus {
+    if meta_done && details_done {
+        return OverallStatus::Tamamlandi;
+    }
+    if meta_done && !details_done {
+        return OverallStatus::Bekliyor;
+    }
+    if meta == MetaBadge::Eksik || details == MetaBadge::Eksik {
+        return OverallStatus::Eksik;
+    }
+    if meta == MetaBadge::Hatali || details == MetaBadge::Hatali {
+        return OverallStatus::Hatali;
+    }
+    OverallStatus::Uygun
+}
+
+// ---- HTML yardımcıları (Faz 2/3) ----
 
 /// HTML etiketlerini ve entity'leri söküp düz metin döndürür.
-#[allow(dead_code)]
 pub fn html_strip(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
     let mut in_tag = false;
@@ -85,7 +136,6 @@ pub fn html_strip(html: &str) -> String {
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-#[allow(dead_code)]
 pub fn word_count(html: &str) -> usize {
     let text = html_strip(html);
     if text.is_empty() {
@@ -96,7 +146,6 @@ pub fn word_count(html: &str) -> usize {
 }
 
 /// Hedef kelime yoğunluğu (%). Kelime öbeği geçiş sayısı * öbek kelime sayısı / toplam kelime.
-#[allow(dead_code)]
 pub fn keyword_density(html: &str, keyword: &str) -> f64 {
     let words = word_count(html);
     let kw = keyword.trim().to_lowercase();

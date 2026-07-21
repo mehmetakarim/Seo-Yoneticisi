@@ -27,6 +27,7 @@ interface State {
   detail: ProductDetail | null;
   syncing: boolean;
   generating: boolean;
+  generatingDetails: boolean;
   lastSync: SyncSummary | null;
   showSummary: boolean;
   settings: Settings | null;
@@ -47,6 +48,7 @@ export const useStore = defineStore("app", {
     detail: null,
     syncing: false,
     generating: false,
+    generatingDetails: false,
     lastSync: null,
     showSummary: false,
     settings: null,
@@ -65,15 +67,15 @@ export const useStore = defineStore("app", {
         tumu: 0,
       };
       for (const r of state.allRows) {
-        if (r.badge === "tamamlandi") c.tamamlandi++;
+        if (r.overall === "tamamlandi") c.tamamlandi++;
         else {
           c.tumu++;
-          if (r.badge === "eksik") c.eksik++;
-          else if (r.badge === "hatali") c.hatali++;
-          else if (r.badge === "uygun") c.uygun++;
+          if (r.overall === "eksik") c.eksik++;
+          else if (r.overall === "hatali") c.hatali++;
+          else if (r.overall === "bekliyor") c.bekliyor++;
+          else if (r.overall === "uygun") c.uygun++;
         }
       }
-      // "Açıklama Bekliyor" Faz 2'de dolacak → şimdilik 0
       return c;
     },
     rows(state): ProductRow[] {
@@ -87,13 +89,11 @@ export const useStore = defineStore("app", {
           return false;
         switch (state.filter) {
           case "tumu":
-            return r.badge !== "tamamlandi";
+            return r.overall !== "tamamlandi";
           case "tamamlandi":
-            return r.badge === "tamamlandi";
-          case "bekliyor":
-            return false;
+            return r.overall === "tamamlandi";
           default:
-            return r.badge === state.filter;
+            return r.overall === state.filter;
         }
       });
     },
@@ -237,6 +237,24 @@ export const useStore = defineStore("app", {
         this.toast(String(e), "error");
       } finally {
         this.generating = false;
+      }
+    },
+
+    async generateDetails() {
+      if (!this.selectedSku || this.generatingDetails) return;
+      if (this.detail?.details_status === "done") {
+        this.toast("Bu ürünün açıklaması zaten tamamlandı işaretli.", "info");
+        return;
+      }
+      this.generatingDetails = true;
+      try {
+        this.detail = await api.generateDetails(this.selectedSku);
+        await this.reload();
+        this.toast("Açıklama üretildi · yapı korundu", "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.generatingDetails = false;
       }
     },
 
