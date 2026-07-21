@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($dest = \"C:\\\\Users\\\\Lenovo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Lenovo-Downloads-MaProject-seo-yoneticisi\\\\9b59e22d-f776-4f14-bf65-31cb91cff4d1\\\\scratchpad\\\\design\"; Get-ChildItem -Recurse $dest | ForEach-Object { $_.FullName.Replace\\($dest, ''\\) + \"  [\" + $_.Length + \"]\" })",
+      "PowerShell(cargo --version)",
+      "PowerShell(rustc --version)",
+      "PowerShell(node --version)",
+      "PowerShell(npm --version)"
+    ]
+  }
+}

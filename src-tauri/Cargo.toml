@@ -1,0 +1,26 @@
+[package]
+name = "seo-yoneticisi"
+version = "0.1.0"
+description = "IdeaSoft feed tabanlı SEO yönetim aracı"
+authors = ["mehmetakarim"]
+edition = "2021"
+
+[lib]
+name = "seo_yoneticisi_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
+unicode-segmentation = "1"
+chrono = "0.4"
