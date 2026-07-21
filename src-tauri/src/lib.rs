@@ -37,6 +37,8 @@ pub fn run() {
             commands::set_target_keyword,
             commands::save_meta_draft,
             commands::mark_meta_done,
+            commands::mark_details_done,
+            commands::generate_meta,
             commands::get_settings,
             commands::save_settings,
             commands::set_theme,

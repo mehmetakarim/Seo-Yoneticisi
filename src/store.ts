@@ -26,6 +26,7 @@ interface State {
   selectedSku: string | null;
   detail: ProductDetail | null;
   syncing: boolean;
+  generating: boolean;
   lastSync: SyncSummary | null;
   showSummary: boolean;
   settings: Settings | null;
@@ -45,6 +46,7 @@ export const useStore = defineStore("app", {
     selectedSku: null,
     detail: null,
     syncing: false,
+    generating: false,
     lastSync: null,
     showSummary: false,
     settings: null,
@@ -211,6 +213,31 @@ export const useStore = defineStore("app", {
       const next = await api.markMetaDone(this.selectedSku);
       this.detail.meta_status = next;
       await this.reload();
+    },
+
+    async toggleDetailsDone() {
+      if (!this.selectedSku || !this.detail) return;
+      const next = await api.markDetailsDone(this.selectedSku);
+      this.detail.details_status = next;
+      await this.reload();
+    },
+
+    async generateMeta() {
+      if (!this.selectedSku || this.generating) return;
+      if (this.detail?.meta_status === "done") {
+        this.toast("Bu ürün zaten tamamlandı işaretli.", "info");
+        return;
+      }
+      this.generating = true;
+      try {
+        this.detail = await api.generateMeta(this.selectedSku);
+        await this.reload();
+        this.toast("Meta üretildi · alanlar dolduruldu", "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.generating = false;
+      }
     },
 
     navigate(dir: 1 | -1) {

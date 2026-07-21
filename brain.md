@@ -4,8 +4,15 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-07-21
-**Aktif faz:** Faz 1 ✅ tamamlandı → Faz 2 başlangıcı bekliyor
-**Repo:** https://github.com/mehmetakarim/seo-yoneticisi (henüz push edilmedi)
+**Aktif faz:** Faz 2 ✅ tamamlandı (Gemini meta üretimi) → Faz 3 (details) bekliyor
+**Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main, ✅ push edildi)
+
+## Faz 2 kararları (kullanıcı onayı)
+- **Model: kademeli fallback zinciri** — biri günlük limite/429'a takılınca sıradaki modele geç.
+  Öneri sıra: `gemini-2.0-flash` → `gemini-2.5-flash` → `gemini-1.5-flash`.
+- **API anahtarı:** test için kullanıcı bir anahtar verdi → SADECE yerel testte kullan,
+  ASLA koda/git'e gömme; app zaten anahtarı SQLite settings'te (APPDATA) saklıyor.
+- **Kart 2:** "Açıklamayı Tamamlandı" toggle'ı Faz 2'de aktifleşecek (details ÜRETİMİ yine Faz 3).
 
 ---
 
@@ -61,33 +68,35 @@ sonra "Tamamlandı" işaretler.
 
 ---
 
-## 🔜 Faz 2 — Meta üretimi (Gemini) — SONRAKİ
+## ✅ Faz 2 — Meta üretimi (Gemini) — TAMAMLANDI
 
-**Hedef:** Meta kartındaki "Gemini ile Üret" butonunu ve `G` kısayolunu gerçek Gemini çağrısına bağlamak.
+### Yapıldı
+- **`gemini.rs`** gerçek implementasyon:
+  - Google Generative Language API v1beta, `system_instruction` + `responseSchema` (structured JSON)
+  - **Model fallback zinciri** `MODEL_CHAIN = [gemini-2.0-flash, gemini-2.5-flash, gemini-1.5-flash]`;
+    429/503 (kota) → sıradaki modele geç. Anahtar/ağ/biçim hatası → hemen dön (fallback anlamsız).
+  - **Tek retry** (spec) + iki denemenin daha az ihlal edenini seç (`violation_count`) +
+    son güvenlik `clamp_lengths` (fazla uzun title/descriptions'ı kelime sınırında grapheme-bazlı kırpar).
+  - `test_key` → models endpoint ile gerçek anahtar doğrulaması (üretim tüketmez).
+- **`commands.rs`**: `generate_meta(sku)` (kilit await'e taşınmaz), `mark_details_done(sku)`,
+  `test_gemini_key` async'e çevrildi. `read_detail` helper'ı get_product + generate_meta ortak kullanır.
+- **Frontend**: api.ts (generateMeta/markDetailsDone), store.ts (`generating` state + generateMeta/toggleDetailsDone),
+  MetaSeoCard "Gemini ile Üret" spinner + disabled, App.vue `G` kısayolu → generateMeta,
+  DetailsSeoCard "Açıklamayı Tamamlandı" toggle AKTİF. ProductDetail watch: `detail` nesnesini izler
+  (üretim sonrası alanlar tazelenir, yazarken ezilmez).
 
-### Yapılacaklar
-1. **`gemini.rs::generate_meta`** gerçek implementasyon:
-   - Google Generative Language API (gemini-1.5-flash veya güncel) — reqwest POST, JSON structured output
-   - Girdi: ürün adı + marka + kategori. Çıktı JSON: `target_keyword`, `title`, `descriptions`, `keywords`, `search_keywords`
-   - Ürün adından **hedef kelime türet** → title (20–60, hedef kelime içerir) + descriptions (50–155, hedef kelime içerir)
-     + keywords + searchKeywords (kullanıcının ürünü sitede nasıl arayacağı mantığıyla)
-   - Kural fail ederse **tek retry** ("kısalt/uzat" yönergesiyle)
-2. **Tauri komutu** `generate_meta(sku)`:
-   - API anahtarını settings'ten al (frontend'e sızdırma)
-   - Dönen 5 alanı `seo_status.draft_*` + `target_keyword`'e yaz, validasyonu yeniden çalıştır
-3. **`test_gemini_key`** gerçek bağlantı testine çevrilir (şu an sadece format kontrolü)
-4. **Frontend:**
-   - MetaSeoCard "Gemini ile Üret" → `store.generateMeta()` (spinner: `genMeta` state, prototipte var)
-   - `G` kısayolu → aynı aksiyon (App.vue'daki placeholder toast'ı kaldır)
-   - Üretim sonrası detay + liste rozetlerini tazele
-5. **"Açıklama Bekliyor" filtresi** mantığı netleşir (meta done + details pending) — şu an count hep 0
+### Doğrulama
+- 16/16 cargo testi geçti (clamp + violation birim testleri dahil)
+- **Gerçek API testi** (`gen_meta_real`, #[ignore], GEMINI_API_KEY env): Lenovo AIO ürünü için
+  title 49 / descriptions 143, hedef kelime içeriyor → **rozet: Uygun** ✅
+- Frontend build temiz, tauri dev runtime hatasız açıldı
 
-### Notlar / dikkat
-- Anahtar biçimi: `AIza…` · settings anahtarı zaten SQLite'ta saklanıyor
-- Rate limit / hata mesajlarını Türkçe kullanıcıya dön (`Result<_, String>`)
-- Prototipteki `doGenMeta` (support.js / .dc.html) örnek çıktı mantığını referans al
+### Dikkat / notlar
+- API anahtarı yalnızca yerel testte kullanıldı, **koda/git'e gömülmedi**. App anahtarı SQLite settings'te tutar.
+- Test komutu: `GEMINI_API_KEY=... cargo test gen_meta_real -- --ignored --nocapture`
+- ⚠️ Model isimleri zamanla değişebilir — 429 dışı "model bulunamadı" hatası gelirse MODEL_CHAIN güncelle.
 
-## 🔮 Faz 3 — Details (uzun açıklama) üretimi
+## 🔮 Faz 3 — Details (uzun açıklama) üretimi — SONRAKİ
 
 - Ayrı Gemini çağrısı; `details` HTML gönderilir, **yapı korunur** (section/col-md/img/h2/p sırası + class'lar aynı),
   sadece h2/p metinleri yenilenir
@@ -115,5 +124,7 @@ sonra "Tamamlandı" işaretler.
 - **Bu dosyayı güncelle:** her faz/önemli karar sonrası "Son güncelleme" + ilgili bölüm
 
 ## 🧩 Açık sorular / kullanıcı kararları bekleyen
-- [ ] Kart 2 "Açıklamayı Tamamlandı" Faz 1'de de aktif olsun mu? (şu an disabled)
-- [ ] Gemini model adı tercihi (gemini-1.5-flash mı, daha güncel mi?) — Faz 2 başında netleştir
+- [x] Kart 2 "Açıklamayı Tamamlandı" aktif olsun mu? → EVET, Faz 2'de aktifleştirildi.
+- [x] Gemini model tercihi? → Kademeli fallback zinciri (2.0-flash → 2.5-flash → 1.5-flash).
+- [ ] Faz 3: details üretiminde hangi model? (muhtemelen aynı zincir, ama uzun içerik → maliyet dikkat)
+- [ ] "Açıklama Bekliyor" filtresi: meta done + details pending mantığı Faz 3'te devreye alınacak (şu an count 0)

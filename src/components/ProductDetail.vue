@@ -16,11 +16,11 @@ const desc = ref("");
 const searchKw = ref("");
 const keyword = ref("");
 
-// Seçilen ürün değişince yerel alanları tazele
+// Detay nesnesi tazelenince (seçim, senkron veya Gemini üretimi) yerel alanları güncelle.
+// Not: taslak kaydı yalnızca listeyi yeniler, detail nesnesini değiştirmez → yazarken ezilmez.
 watch(
-  () => store.detail?.sku,
-  () => {
-    const d = store.detail;
+  () => store.detail,
+  (d) => {
     if (!d) return;
     title.value = d.draft_title ?? d.title ?? "";
     desc.value = d.draft_descriptions ?? d.descriptions ?? "";

@@ -47,7 +47,7 @@ function onKey(e: KeyboardEvent) {
     store.navigate(-1);
   } else if (!typing && (e.key === "g" || e.key === "G")) {
     e.preventDefault();
-    store.toast("Gemini ile meta üretimi Faz 2'de aktif olacak.", "info");
+    if (store.selectedSku) store.generateMeta();
   } else if (!typing && (e.key === "d" || e.key === "D")) {
     e.preventDefault();
     if (store.selectedSku) store.toggleMetaDone();

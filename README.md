@@ -58,7 +58,21 @@ Detay panelindeki elle düzenlemeler `seo_status` tablosuna **taslak** (`draft_*
 kaydedilir (600 ms debounce). Senkron feed'i güncellese bile taslaklar ve done/hedef kelime
 korunur. Faz 2'de Gemini çıktısı da bu taslak alanlarına yazılacak.
 
-## Faz sınırı
+## Faz 2 (tamamlandı) — Gemini meta üretimi
 
-Faz 1'de **yapılmaz**: gerçek Gemini çağrıları, details HTML optimizasyonu, img-src koruma.
-Butonlar placeholder; kısayol `G` ve details üretimi "Faz 2/3'te aktif" bilgisi verir.
+"Gemini ile Üret" / `G` kısayolu gerçek Gemini API'ye bağlı:
+- `gemini.rs` — v1beta structured output; **model fallback zinciri** (2.0-flash → 2.5-flash → 1.5-flash),
+  429/kota'da sıradaki modele geçer; tek retry + kelime sınırında kırpma ile uzunluk kuralı garanti.
+- Sonuç `seo_status.draft_*` + `target_keyword`'e yazılır, validasyon anında güncellenir.
+- Kart 2'nin "Açıklamayı Tamamlandı" toggle'ı aktif (details ÜRETİMİ Faz 3).
+
+Gerçek API testi:
+```bash
+cd src-tauri
+GEMINI_API_KEY=... cargo test gen_meta_real -- --ignored --nocapture
+```
+
+## Faz 3 (sonraki) — details
+
+Yapılacak: details HTML üretimi (yapı korunur, sadece h2/p metni yenilenir), img-src koruma,
+details_status validasyonu (word_count ≥ 50, density %2–3). Ayrıntı: `brain.md`.

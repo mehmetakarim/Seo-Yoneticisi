@@ -142,9 +142,9 @@ function genDetails() {
         <span class="gen-sub">uzun içerik · daha fazla kredi · Faz 3</span>
       </div>
       <div style="flex:1"></div>
-      <button class="done" disabled>
+      <button class="done" :class="{ active: detailsDone }" @click="store.toggleDetailsDone()">
         <Icon name="badgeCheck" :size="16" :stroke-width="2.2" />
-        Açıklamayı Tamamlandı işaretle
+        {{ detailsDone ? "Açıklama tamamlandı ✓" : "Açıklamayı Tamamlandı işaretle" }}
       </button>
     </div>
   </div>
@@ -388,13 +388,15 @@ function genDetails() {
   gap: 7px;
   height: 42px;
   padding: 0 16px;
-  border: 1px solid var(--c-border);
+  border: 1px solid var(--badge-uygun-bg);
   border-radius: 11px;
-  background: var(--c-input);
-  color: var(--c-soft);
+  background: var(--badge-uygun-bg);
+  color: var(--green);
   font-size: 13px;
   font-weight: 580;
-  cursor: not-allowed;
-  opacity: 0.6;
+  cursor: pointer;
+}
+.done:hover {
+  filter: brightness(0.98);
 }
 </style>

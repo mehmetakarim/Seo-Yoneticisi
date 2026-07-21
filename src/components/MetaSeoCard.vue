@@ -59,7 +59,7 @@ async function copy(field: string, text: string) {
 }
 
 function genMeta() {
-  store.toast("Gemini ile meta üretimi Faz 2'de aktif olacak.", "info");
+  store.generateMeta();
 }
 </script>
 
@@ -161,9 +161,9 @@ function genMeta() {
     </div>
 
     <div class="card-actions">
-      <button class="gen" @click="genMeta">
-        <Icon name="sparkles" :size="15" :stroke-width="1.9" />
-        Gemini ile Üret
+      <button class="gen" :class="{ busy: store.generating }" :disabled="store.generating" @click="genMeta">
+        <Icon :name="store.generating ? 'loader' : 'sparkles'" :size="15" :stroke-width="store.generating ? 2.2 : 1.9" :class="{ spin: store.generating }" />
+        {{ store.generating ? "Üretiliyor…" : "Gemini ile Üret" }}
       </button>
       <div style="flex:1"></div>
       <button class="done" :class="{ active: metaDone }" @click="emit('toggleDone')">
@@ -361,6 +361,13 @@ function genMeta() {
 }
 .gen:hover {
   filter: brightness(1.05);
+}
+.gen.busy {
+  opacity: 0.75;
+  cursor: default;
+}
+.spin {
+  animation: spin 0.8s linear infinite;
 }
 .done {
   display: inline-flex;

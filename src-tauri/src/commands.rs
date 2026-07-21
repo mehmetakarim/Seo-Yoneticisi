@@ -176,9 +176,7 @@ pub fn list_products(
     Ok(out)
 }
 
-#[tauri::command]
-pub fn get_product(state: State<'_, AppState>, sku: String) -> Result<ProductDetail, String> {
-    let conn = state.conn.lock().unwrap();
+fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
     conn.query_row(
         "SELECT p.sku, p.name, p.brand, p.main_category, p.category, p.quantity, p.url,
                 p.img_url, p.title, p.descriptions, p.keywords, p.search_keywords, p.details,
@@ -228,6 +226,12 @@ pub fn get_product(state: State<'_, AppState>, sku: String) -> Result<ProductDet
         });
         d
     })
+}
+
+#[tauri::command]
+pub fn get_product(state: State<'_, AppState>, sku: String) -> Result<ProductDetail, String> {
+    let conn = state.conn.lock().unwrap();
+    read_detail(&conn, &sku)
 }
 
 fn ensure_seo_row(conn: &Connection, sku: &str) -> Result<(), String> {
@@ -290,6 +294,77 @@ pub fn mark_meta_done(state: State<'_, AppState>, sku: String) -> Result<String,
 }
 
 #[tauri::command]
+pub fn mark_details_done(state: State<'_, AppState>, sku: String) -> Result<String, String> {
+    let conn = state.conn.lock().unwrap();
+    ensure_seo_row(&conn, &sku)?;
+    let current: String = conn
+        .query_row("SELECT details_status FROM seo_status WHERE sku = ?1", [&sku], |r| r.get(0))
+        .map_err(|e| format!("SEO durumu okunamadı: {e}"))?;
+    let next = if current == "done" { "pending" } else { "done" };
+    conn.execute(
+        "UPDATE seo_status SET details_status = ?2, updated_at = ?3 WHERE sku = ?1",
+        params![sku, next, now_str()],
+    )
+    .map_err(|e| format!("SEO durumu güncellenemedi: {e}"))?;
+    Ok(next.to_string())
+}
+
+/// Faz 2: Gemini ile meta üretir, sonucu taslak alanlarına + hedef kelimeye yazar.
+/// Not: SQLite kilidi await'lerin ötesine taşınmaz (Send güvenliği için bloklarda tutulur).
+#[tauri::command]
+pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<ProductDetail, String> {
+    let (name, brand, category, main_category, api_key) = {
+        let conn = state.conn.lock().unwrap();
+        let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
+        let row = conn
+            .query_row(
+                "SELECT name, brand, category, main_category FROM products WHERE sku = ?1",
+                [&sku],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
+                other => format!("Ürün okunamadı: {other}"),
+            })?;
+        (row.0, row.1, row.2, row.3, key)
+    };
+
+    let ctx = gemini::ProductContext {
+        name: &name,
+        brand: brand.as_deref(),
+        category: category.as_deref(),
+        main_category: main_category.as_deref(),
+    };
+    let meta = gemini::generate_meta(&api_key, &ctx).await?;
+
+    let conn = state.conn.lock().unwrap();
+    ensure_seo_row(&conn, &sku)?;
+    conn.execute(
+        "UPDATE seo_status SET target_keyword = ?2, draft_title = ?3, draft_descriptions = ?4,
+                draft_keywords = ?5, draft_search_keywords = ?6, updated_at = ?7
+         WHERE sku = ?1",
+        params![
+            sku,
+            meta.target_keyword.trim(),
+            meta.title.trim(),
+            meta.descriptions.trim(),
+            meta.keywords.trim(),
+            meta.search_keywords.trim(),
+            now_str(),
+        ],
+    )
+    .map_err(|e| format!("Üretilen meta kaydedilemedi: {e}"))?;
+    read_detail(&conn, &sku)
+}
+
+#[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     let conn = state.conn.lock().unwrap();
     Ok(Settings {
@@ -333,8 +408,8 @@ pub async fn test_feed_url(url: String) -> Result<i64, String> {
 }
 
 #[tauri::command]
-pub fn test_gemini_key(key: String) -> Result<String, String> {
-    gemini::check_key_format(&key)
+pub async fn test_gemini_key(key: String) -> Result<String, String> {
+    gemini::test_key(&key).await
 }
 
 #[tauri::command]
