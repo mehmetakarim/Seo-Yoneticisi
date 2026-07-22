@@ -1,0 +1,63 @@
+name: release
+
+# v* etiketiyle (ör. v0.1.0) tetiklenir; macOS (.dmg) + Windows (.exe) derleyip
+# GitHub Release'e yükler.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target universal-apple-darwin'
+            rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+          - platform: windows-latest
+            args: ''
+            rust_targets: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Rust kur
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      # rustls (aws-lc-rs) + jsonwebtoken (ring) Windows'ta assembly için NASM ister
+      - name: NASM kur (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: ilammy/setup-nasm@v1
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Frontend bağımlılıkları
+        run: npm ci
+
+      - name: Derle + Release yükle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'SEO Yöneticisi ${{ github.ref_name }}'
+          releaseBody: 'Otomatik derleme. macOS için .dmg, Windows için .exe kurulum dosyası ektedir. (İmzasız — ilk açılışta işletim sistemi uyarısını onaylayın.)'
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
