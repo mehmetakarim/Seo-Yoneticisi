@@ -67,6 +67,8 @@ pub fn init(conn: &Connection) -> Result<(), String> {
 /// Eski DB'lere sonradan eklenen kolonları idempotent şekilde ekler.
 fn migrate(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(conn, "seo_status", "draft_details", "TEXT")?;
+    // Faz 4: SEO araştırma çıktısı (SeoInsights JSON) ürün başına saklanır.
+    add_column_if_missing(conn, "seo_status", "research_json", "TEXT")?;
     Ok(())
 }
 

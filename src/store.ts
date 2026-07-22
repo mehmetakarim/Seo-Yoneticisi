@@ -4,6 +4,7 @@ import type {
   FilterKey,
   ProductDetail,
   ProductRow,
+  SeoInsights,
   Settings,
   SyncSummary,
 } from "./types";
@@ -28,6 +29,8 @@ interface State {
   syncing: boolean;
   generating: boolean;
   generatingDetails: boolean;
+  researching: boolean;
+  research: SeoInsights | null;
   lastSync: SyncSummary | null;
   showSummary: boolean;
   settings: Settings | null;
@@ -49,6 +52,8 @@ export const useStore = defineStore("app", {
     syncing: false,
     generating: false,
     generatingDetails: false,
+    researching: false,
+    research: null,
     lastSync: null,
     showSummary: false,
     settings: null,
@@ -163,10 +168,30 @@ export const useStore = defineStore("app", {
 
     async select(sku: string) {
       this.selectedSku = sku;
+      this.research = null; // araştırma ürüne özel — seçim değişince sıfırla
       try {
         this.detail = await api.getProduct(sku);
       } catch (e) {
         this.toast(String(e), "error");
+      }
+    },
+
+    async runResearch(seed?: string) {
+      if (!this.selectedSku || this.researching) return;
+      this.researching = true;
+      try {
+        this.research = await api.researchSeo(this.selectedSku, seed);
+        const n = this.research.target_candidates.length;
+        this.toast(
+          n
+            ? `Araştırma tamam · ${n} anahtar kelime fikri`
+            : "Araştırma tamam",
+          "ok",
+        );
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.researching = false;
       }
     },
 

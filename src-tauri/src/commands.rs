@@ -1,3 +1,4 @@
+use crate::seo_data::{self, SeoInsights};
 use crate::validation::{
     details_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallStatus,
 };
@@ -62,6 +63,15 @@ pub struct ProductDetail {
 pub struct Settings {
     pub feed_url: String,
     pub gemini_api_key: String,
+    /// Faz 4: Ahrefs free-tools captcha'sını çözmek için CapSolver anahtarı.
+    pub capsolver_api_key: String,
+    /// Faz 4: SEO araştırma ülke kodu (Ahrefs/Trends), varsayılan "tr".
+    pub seo_country: String,
+    /// Faz 5: GSC mülkü (ör. `sc-domain:kurumsalit.com` veya `https://site/`).
+    pub gsc_site_url: String,
+    /// Faz 5: yüklü service-account'un e-postası (yalnızca gösterim; private key sızmaz).
+    /// Boş → GSC yapılandırılmamış.
+    pub gsc_client_email: String,
     pub theme: Option<String>,
     pub last_backup_at: Option<String>,
 }
@@ -349,12 +359,15 @@ pub fn mark_details_done(state: State<'_, AppState>, sku: String) -> Result<Stri
 /// Not: SQLite kilidi await'lerin ötesine taşınmaz (Send güvenliği için bloklarda tutulur).
 #[tauri::command]
 pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<ProductDetail, String> {
-    let (name, brand, category, main_category, api_key) = {
+    let (name, brand, category, main_category, target_keyword, research_json, api_key) = {
         let conn = state.conn.lock().unwrap();
         let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
         let row = conn
             .query_row(
-                "SELECT name, brand, category, main_category FROM products WHERE sku = ?1",
+                "SELECT p.name, p.brand, p.category, p.main_category,
+                        COALESCE(s.target_keyword,''), s.research_json
+                 FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
+                 WHERE p.sku = ?1",
                 [&sku],
                 |r| {
                     Ok((
@@ -362,6 +375,8 @@ pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<Pr
                         r.get::<_, Option<String>>(1)?,
                         r.get::<_, Option<String>>(2)?,
                         r.get::<_, Option<String>>(3)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, Option<String>>(5)?,
                     ))
                 },
             )
@@ -369,14 +384,18 @@ pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<Pr
                 rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
                 other => format!("Ürün okunamadı: {other}"),
             })?;
-        (row.0, row.1, row.2, row.3, key)
+        (row.0, row.1, row.2, row.3, row.4, row.5, key)
     };
 
+    let insights = parse_insights(research_json.as_deref());
+    let kw = target_keyword.trim();
     let ctx = gemini::ProductContext {
         name: &name,
         brand: brand.as_deref(),
         category: category.as_deref(),
         main_category: main_category.as_deref(),
+        target_keyword: if kw.is_empty() { None } else { Some(kw) },
+        insights: insights.as_ref().filter(|i| i.has_data()),
     };
     let meta = gemini::generate_meta(&api_key, &ctx).await?;
 
@@ -406,12 +425,13 @@ pub async fn generate_details(
     state: State<'_, AppState>,
     sku: String,
 ) -> Result<ProductDetail, String> {
-    let (name, brand, category, main_category, details_html, keyword, api_key) = {
+    let (name, brand, category, main_category, details_html, keyword, research_json, api_key) = {
         let conn = state.conn.lock().unwrap();
         let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
         conn.query_row(
             "SELECT p.name, p.brand, p.category, p.main_category,
-                    COALESCE(s.draft_details, p.details), COALESCE(s.target_keyword,'')
+                    COALESCE(s.draft_details, p.details), COALESCE(s.target_keyword,''),
+                    s.research_json
              FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
              WHERE p.sku = ?1",
             [&sku],
@@ -423,6 +443,7 @@ pub async fn generate_details(
                     r.get::<_, Option<String>>(3)?,
                     r.get::<_, Option<String>>(4)?,
                     r.get::<_, String>(5)?,
+                    r.get::<_, Option<String>>(6)?,
                 ))
             },
         )
@@ -430,18 +451,21 @@ pub async fn generate_details(
             rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
             other => format!("Ürün okunamadı: {other}"),
         })
-        .map(|t| (t.0, t.1, t.2, t.3, t.4.unwrap_or_default(), t.5, key))?
+        .map(|t| (t.0, t.1, t.2, t.3, t.4.unwrap_or_default(), t.5, t.6, key))?
     };
 
     if details_html.trim().is_empty() {
         return Err("Bu ürünün feed'inde açıklama içeriği yok.".to_string());
     }
 
+    let insights = parse_insights(research_json.as_deref());
     let ctx = gemini::ProductContext {
         name: &name,
         brand: brand.as_deref(),
         category: category.as_deref(),
         main_category: main_category.as_deref(),
+        target_keyword: None, // details zaten `keyword` argümanını kullanır
+        insights: insights.as_ref().filter(|i| i.has_data()),
     };
     let new_html = gemini::generate_details(&api_key, &ctx, &details_html, &keyword).await?;
 
@@ -455,12 +479,192 @@ pub async fn generate_details(
     read_detail(&conn, &sku)
 }
 
+/// `research_json` metnini SeoInsights'e çözer; bozuk/boşsa None.
+fn parse_insights(json: Option<&str>) -> Option<SeoInsights> {
+    let s = json?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<SeoInsights>(s).ok()
+}
+
+/// Ürün adından tohum kelime türetir (ilk `n` anlamlı sözcük).
+fn first_words(name: &str, n: usize) -> String {
+    name.split_whitespace().take(n).collect::<Vec<_>>().join(" ")
+}
+
+/// URL'den alan adını (www'suz) çıkarır.
+fn host_of(url: &str) -> Option<String> {
+    reqwest::Url::parse(url)
+        .ok()?
+        .host_str()
+        .map(|h| h.trim_start_matches("www.").to_string())
+}
+
+/// Faz 4: Kontrollü SEO araştırması — Ahrefs (keyword ideas + difficulty).
+/// Tohum kelime: verilen `seed` → yoksa onaylı hedef kelime → kategori → ürün adının ilk 4 sözcüğü.
+/// Sonuç `seo_status.research_json`'a kaydedilir ve panele döner. GSC/Trends Faz 5/6'da eklenir.
+#[tauri::command]
+pub async fn research_seo(
+    state: State<'_, AppState>,
+    sku: String,
+    seed: Option<String>,
+) -> Result<SeoInsights, String> {
+    let (name, category, url, target_kw, capsolver_key, country, gsc_json, gsc_site) = {
+        let conn = state.conn.lock().unwrap();
+        let capsolver_key = db::get_setting(&conn, "capsolver_api_key")?.unwrap_or_default();
+        let country = db::get_setting(&conn, "seo_country")?.unwrap_or_else(|| "tr".to_string());
+        let gsc_json = db::get_setting(&conn, "gsc_service_account_json")?.unwrap_or_default();
+        let gsc_site = db::get_setting(&conn, "gsc_site_url")?.unwrap_or_default();
+        let (name, category, url, target_kw) = conn
+            .query_row(
+                "SELECT p.name, p.category, p.url, COALESCE(s.target_keyword,'')
+                 FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
+                 WHERE p.sku = ?1",
+                [&sku],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
+                other => format!("Ürün okunamadı: {other}"),
+            })?;
+        (name, category, url, target_kw, capsolver_key, country, gsc_json, gsc_site)
+    };
+
+    let has_capsolver = !capsolver_key.trim().is_empty();
+    let has_gsc = !gsc_json.trim().is_empty() && !gsc_site.trim().is_empty();
+    if !has_capsolver && !has_gsc {
+        return Err(
+            "Araştırma için Ayarlar'dan CapSolver anahtarı ve/veya GSC service-account + mülk ekleyin."
+                .to_string(),
+        );
+    }
+
+    // Tohum kelime seçimi (kontrollü: kullanıcı panelde düzenleyebilir)
+    let seed = seed
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            let t = target_kw.trim();
+            if t.is_empty() { None } else { Some(t.to_string()) }
+        })
+        .or_else(|| category.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(String::from))
+        .unwrap_or_else(|| first_words(&name, 4));
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .cookie_store(true) // Google Trends explore için NID çerezi gerekir
+        .build()
+        .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
+
+    let mut ins = SeoInsights {
+        seed: seed.clone(),
+        fetched_at: now_str(),
+        ..Default::default()
+    };
+
+    let domain = url.as_deref().and_then(host_of);
+
+    // Ahrefs (CapSolver varsa): keyword ideas + difficulty + domain overview — hepsi eşzamanlı.
+    if has_capsolver {
+        let overview_fut = async {
+            match &domain {
+                Some(d) => Some(seo_data::ahrefs::backlinks_overview(&client, &capsolver_key, d).await),
+                None => None,
+            }
+        };
+        let (ideas_res, kd_res, ov_res) = tokio::join!(
+            seo_data::ahrefs::keyword_ideas(&client, &capsolver_key, &seed, &country),
+            seo_data::ahrefs::keyword_difficulty(&client, &capsolver_key, &seed, &country),
+            overview_fut,
+        );
+        match ideas_res {
+            Ok(mut cands) => {
+                cands.sort_by(|a, b| b.volume.cmp(&a.volume));
+                ins.target_candidates = cands;
+            }
+            Err(e) => ins.notes.push(format!("Anahtar kelime fikirleri alınamadı: {e}")),
+        }
+        match kd_res {
+            Ok(d) => ins.seed_difficulty = Some(d),
+            Err(e) => ins.notes.push(format!("Zorluk verisi alınamadı: {e}")),
+        }
+        if let Some(ov) = ov_res {
+            match ov {
+                Ok(d) => ins.domain = Some(d),
+                Err(e) => ins.notes.push(format!("Alan (backlink) özeti alınamadı: {e}")),
+            }
+        }
+    }
+
+    // Google Trends — hedef kelimeye ilgili sorgular (explore→relatedsearches) DEVRE DIŞI:
+    // Google'ın anti-bot koruması API'yi HTTP 429 ile blokluyor (tarayıcı consent çerezi gerekiyor).
+    // Kod `seo_data::trends`'te korunuyor; keyword-relevant ihtiyaç Ahrefs fikirleri + GSC sorgularıyla
+    // zaten karşılanıyor. İleride güvenilir bir yol bulunursa yeniden etkinleştirilebilir.
+
+    // GSC gerçek sorgular (SA + mülk varsa ve üründe URL varsa).
+    if has_gsc {
+        match url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+            Some(page) => {
+                match seo_data::gsc::search_queries(&client, &gsc_json, gsc_site.trim(), page, 90, 25)
+                    .await
+                {
+                    Ok(q) => ins.gsc_queries = q,
+                    Err(e) => ins.notes.push(format!("GSC sorguları alınamadı: {e}")),
+                }
+            }
+            None => ins.notes.push("Bu üründe URL yok, GSC sorguları atlandı.".to_string()),
+        }
+    }
+
+    if !ins.has_data() {
+        let detail = ins.notes.join(" ");
+        return Err(if detail.is_empty() {
+            "Araştırma verisi alınamadı.".to_string()
+        } else {
+            detail
+        });
+    }
+
+    // Sonucu kaydet (üretim prompt'ları buradan okur)
+    let json = serde_json::to_string(&ins).map_err(|e| format!("Araştırma serialize edilemedi: {e}"))?;
+    {
+        let conn = state.conn.lock().unwrap();
+        ensure_seo_row(&conn, &sku)?;
+        conn.execute(
+            "UPDATE seo_status SET research_json = ?2, updated_at = ?3 WHERE sku = ?1",
+            params![sku, json, now_str()],
+        )
+        .map_err(|e| format!("Araştırma kaydedilemedi: {e}"))?;
+    }
+    Ok(ins)
+}
+
+#[tauri::command]
+pub async fn test_capsolver_key(key: String) -> Result<String, String> {
+    seo_data::ahrefs::test_key(&key).await
+}
+
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     let conn = state.conn.lock().unwrap();
     Ok(Settings {
         feed_url: db::feed_url(&conn)?,
         gemini_api_key: db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default(),
+        capsolver_api_key: db::get_setting(&conn, "capsolver_api_key")?.unwrap_or_default(),
+        seo_country: db::get_setting(&conn, "seo_country")?.unwrap_or_else(|| "tr".to_string()),
+        gsc_site_url: db::get_setting(&conn, "gsc_site_url")?.unwrap_or_default(),
+        gsc_client_email: db::get_setting(&conn, "gsc_service_account_json")?
+            .as_deref()
+            .and_then(seo_data::gsc::client_email_of)
+            .unwrap_or_default(),
         theme: db::get_setting(&conn, "theme")?,
         last_backup_at: db::get_setting(&conn, "last_backup_at")?,
     })
@@ -471,6 +675,9 @@ pub fn save_settings(
     state: State<'_, AppState>,
     feed_url: String,
     gemini_api_key: String,
+    capsolver_api_key: String,
+    seo_country: String,
+    gsc_site_url: String,
 ) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
     let url = feed_url.trim();
@@ -479,7 +686,46 @@ pub fn save_settings(
     }
     db::set_setting(&conn, "feed_url", url)?;
     db::set_setting(&conn, "gemini_api_key", gemini_api_key.trim())?;
+    db::set_setting(&conn, "capsolver_api_key", capsolver_api_key.trim())?;
+    let country = seo_country.trim().to_lowercase();
+    let country = if country.is_empty() { "tr".to_string() } else { country };
+    db::set_setting(&conn, "seo_country", &country)?;
+    db::set_setting(&conn, "gsc_site_url", gsc_site_url.trim())?;
     Ok(())
+}
+
+/// Faz 5: seçilen service-account JSON dosyasını okur, doğrular + saklar. UI'ya client_email döner.
+#[tauri::command]
+pub fn set_gsc_service_account(state: State<'_, AppState>, path: String) -> Result<String, String> {
+    let json = std::fs::read_to_string(&path).map_err(|e| format!("Dosya okunamadı: {e}"))?;
+    let email = seo_data::gsc::validate_json(&json)?;
+    let conn = state.conn.lock().unwrap();
+    db::set_setting(&conn, "gsc_service_account_json", json.trim())?;
+    Ok(email)
+}
+
+/// Faz 5: yüklü SA'yı kaldırır (GSC'yi devre dışı bırakır).
+#[tauri::command]
+pub fn clear_gsc_service_account(state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    db::set_setting(&conn, "gsc_service_account_json", "")?;
+    Ok(())
+}
+
+/// Faz 5: Ayarlarda "Bağlantıyı test et" — token al + mülk erişimini doğrula.
+#[tauri::command]
+pub async fn test_gsc_credentials(state: State<'_, AppState>) -> Result<String, String> {
+    let (json, site) = {
+        let conn = state.conn.lock().unwrap();
+        (
+            db::get_setting(&conn, "gsc_service_account_json")?.unwrap_or_default(),
+            db::get_setting(&conn, "gsc_site_url")?.unwrap_or_default(),
+        )
+    };
+    if json.trim().is_empty() {
+        return Err("Önce bir service-account JSON dosyası yükleyin.".to_string());
+    }
+    seo_data::gsc::test(&json, &site).await
 }
 
 #[tauri::command]

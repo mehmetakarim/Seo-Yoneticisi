@@ -6,6 +6,7 @@
 //!
 //! Faz 3: `generate_details` gerçek implementasyona kavuşacak (yapı korunur, img-src güvenliği).
 
+use crate::seo_data::SeoInsights;
 use crate::validation::{grapheme_len, MetaBadge, MetaInput};
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +29,11 @@ pub struct ProductContext<'a> {
     pub brand: Option<&'a str>,
     pub category: Option<&'a str>,
     pub main_category: Option<&'a str>,
+    /// Faz 4: kullanıcının araştırma panelinde onayladığı hedef kelime (meta üretiminde
+    /// "türet" adımını devre dışı bırakır). None → mevcut davranış (model türetir).
+    pub target_keyword: Option<&'a str>,
+    /// Faz 4: gerçek SEO verisi (Ahrefs/GSC/Trends). None → prompt'a hiçbir şey eklenmez.
+    pub insights: Option<&'a SeoInsights>,
 }
 
 fn system_prompt() -> &'static str {
@@ -49,6 +55,16 @@ fn build_prompt(ctx: &ProductContext, correction: Option<&str>) -> String {
         ctx.category.unwrap_or("-"),
         ctx.main_category.unwrap_or("-"),
     );
+    // Onaylı hedef kelime varsa: modele "türetme, bunu kullan" de.
+    if let Some(kw) = ctx.target_keyword.map(str::trim).filter(|s| !s.is_empty()) {
+        p.push_str(&format!(
+            "\nOnaylı HEDEF KELIME: {kw}\n(Bunu aynen target_keyword olarak kullan; yeniden türetme.)\n"
+        ));
+    }
+    // Gerçek arama verilerini enjekte et (varsa).
+    if let Some(ins) = ctx.insights {
+        p.push_str(&ins.prompt_block());
+    }
     if let Some(c) = correction {
         p.push_str("\nÖNEMLİ DÜZELTME: ");
         p.push_str(c);
@@ -458,12 +474,14 @@ pub async fn generate_details(
 
     let original_imgs = extract_img_srcs(details_html);
 
+    let insights_block = ctx.insights.map(|i| i.prompt_block()).unwrap_or_default();
     let prompt = format!(
-        "Ürün adı: {}\nMarka: {}\nKategori: {}\nHedef kelime: {}\n\nParçalar (sırayla): {}",
+        "Ürün adı: {}\nMarka: {}\nKategori: {}\nHedef kelime: {}{}\n\nParçalar (sırayla): {}",
         ctx.name,
         ctx.brand.unwrap_or("-"),
         ctx.category.unwrap_or("-"),
         target_keyword,
+        insights_block,
         serde_json::to_string(&items).unwrap_or_default(),
     );
 
@@ -565,6 +583,8 @@ mod tests {
             brand: Some("Lenovo"),
             category: Some("All In One Bilgisayar"),
             main_category: Some("Bilgisayar"),
+            target_keyword: None,
+            insights: None,
         };
         let meta = generate_meta(&key, &ctx).await.expect("üretim başarısız");
         println!("target_keyword: {}", meta.target_keyword);
@@ -583,6 +603,49 @@ mod tests {
         assert!(!meta.title.trim().is_empty());
         assert!(!meta.descriptions.trim().is_empty());
         assert!(!meta.target_keyword.trim().is_empty());
+    }
+
+    /// Faz 4: onaylı hedef kelime + insights enjeksiyonu → model kelimeyi AYNEN kullanmalı,
+    /// yeniden türetmemeli. GEMINI_API_KEY gerekir.
+    /// `GEMINI_API_KEY=... cargo test gen_meta_with_insights_real -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn gen_meta_with_insights_real() {
+        use crate::seo_data::{KeywordCand, KeywordDifficulty, SeoInsights};
+        let key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY ayarlı değil");
+        let insights = SeoInsights {
+            seed: "hepsi bir arada bilgisayar".into(),
+            target_candidates: vec![
+                KeywordCand { keyword: "all in one bilgisayar".into(), difficulty: 18, volume: 4400, kind: "idea".into() },
+                KeywordCand { keyword: "hepsi bir arada pc".into(), difficulty: 12, volume: 880, kind: "idea".into() },
+            ],
+            seed_difficulty: Some(KeywordDifficulty {
+                keyword: "hepsi bir arada bilgisayar".into(),
+                difficulty: 20,
+                shortage: 0,
+                last_update: "2026-07-01".into(),
+            }),
+            gsc_queries: vec![],
+            trends: vec![],
+            domain: None,
+            fetched_at: "2026-07-22T00:00:00".into(),
+            notes: vec![],
+        };
+        let ctx = ProductContext {
+            name: "Lenovo ThinkCentre Neo 50a Gen 5 i7-13620H 16G 512G DOS 27''",
+            brand: Some("Lenovo"),
+            category: Some("All In One Bilgisayar"),
+            main_category: Some("Bilgisayar"),
+            target_keyword: Some("all in one bilgisayar"),
+            insights: Some(&insights),
+        };
+        let meta = generate_meta(&key, &ctx).await.expect("üretim başarısız");
+        println!("target_keyword: {}", meta.target_keyword);
+        println!("title: {}", meta.title);
+        println!("descriptions: {}", meta.descriptions);
+        // Onaylı kelime aynen kullanılmalı
+        assert_eq!(meta.target_keyword.trim().to_lowercase(), "all in one bilgisayar");
+        assert!(meta.title.to_lowercase().contains("all in one bilgisayar"));
     }
 
     #[test]
@@ -675,6 +738,8 @@ mod tests {
             brand: Some("Lenovo"),
             category: Some("All In One Bilgisayar"),
             main_category: Some("Bilgisayar"),
+            target_keyword: None,
+            insights: None,
         };
         let out = generate_details(&key, &ctx, SAMPLE_DETAILS, "all in one bilgisayar")
             .await

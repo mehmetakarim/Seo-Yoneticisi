@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod feed;
 mod gemini;
+mod seo_data;
 mod sync;
 mod validation;
 
@@ -40,11 +41,16 @@ pub fn run() {
             commands::mark_details_done,
             commands::generate_meta,
             commands::generate_details,
+            commands::research_seo,
             commands::get_settings,
             commands::save_settings,
+            commands::set_gsc_service_account,
+            commands::clear_gsc_service_account,
             commands::set_theme,
             commands::test_feed_url,
             commands::test_gemini_key,
+            commands::test_capsolver_key,
+            commands::test_gsc_credentials,
             commands::export_db,
             commands::import_db,
         ])

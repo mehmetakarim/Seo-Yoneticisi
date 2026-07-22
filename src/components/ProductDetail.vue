@@ -6,9 +6,11 @@ import { computeBadge } from "../validation";
 import Icon from "./Icon.vue";
 import MetaSeoCard from "./MetaSeoCard.vue";
 import DetailsSeoCard from "./DetailsSeoCard.vue";
+import SeoResearchPanel from "./SeoResearchPanel.vue";
 
 const store = useStore();
 const detail = computed(() => store.detail);
+const showResearch = ref(false);
 
 // Düzenlenebilir yerel alanlar (taslak ?? feed değeri)
 const title = ref("");
@@ -61,6 +63,12 @@ function onKeyword(e: Event) {
   scheduleKeywordSave();
 }
 
+// Araştırma panelinden hedef kelime seçildi → alanı doldur + kaydet.
+function onPickKeyword(kw: string) {
+  keyword.value = kw;
+  scheduleKeywordSave();
+}
+
 async function openProduct() {
   if (detail.value?.url) {
     try {
@@ -106,6 +114,10 @@ async function openProduct() {
           @input="onKeyword"
           placeholder="ör. bluetooth kulaklık"
         />
+        <button class="research-btn" title="Gerçek SEO verisiyle araştır" @click="showResearch = true">
+          <Icon name="search" :size="13" :stroke-width="2" />
+          SEO Araştır
+        </button>
         <span class="kw-hint">iki kart da bu kelimeyi kullanır</span>
       </div>
 
@@ -140,6 +152,13 @@ async function openProduct() {
         tıklayın veya <b>↑ ↓</b> ile gezinin.
       </div>
     </div>
+
+    <SeoResearchPanel
+      :open="showResearch"
+      :keyword="keyword"
+      @close="showResearch = false"
+      @pick="onPickKeyword"
+    />
   </section>
 </template>
 
@@ -230,6 +249,26 @@ h1 {
   font-size: 13px;
   color: var(--c-text);
   outline: none;
+}
+.research-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-card);
+  color: var(--c-mid);
+  font-size: 12px;
+  font-weight: 560;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.research-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .kw-hint {
   font-size: 11px;

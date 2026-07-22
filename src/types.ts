@@ -56,8 +56,53 @@ export interface ProductDetail {
 export interface Settings {
   feed_url: string;
   gemini_api_key: string;
+  capsolver_api_key: string;
+  seo_country: string;
+  gsc_site_url: string;
+  gsc_client_email: string;
   theme: string | null;
   last_backup_at: string | null;
+}
+
+// Faz 4: gerçek SEO araştırma verisi (Rust SeoInsights ile birebir).
+export interface KeywordCand {
+  keyword: string;
+  difficulty: number;
+  volume: number;
+  kind: string; // "idea" | "question"
+}
+export interface KeywordDifficulty {
+  keyword: string;
+  difficulty: number;
+  shortage: number;
+  last_update: string;
+}
+export interface GscQuery {
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+}
+export interface TrendTerm {
+  term: string;
+  volume: number;
+}
+export interface DomainOverview {
+  domain: string;
+  domain_rating: number;
+  backlinks: number;
+  ref_domains: number;
+}
+export interface SeoInsights {
+  seed: string;
+  target_candidates: KeywordCand[];
+  seed_difficulty: KeywordDifficulty | null;
+  gsc_queries: GscQuery[];
+  trends: TrendTerm[];
+  domain: DomainOverview | null;
+  fetched_at: string;
+  notes: string[];
 }
 
 export type FilterKey =

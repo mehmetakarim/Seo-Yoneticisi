@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ProductDetail,
   ProductRow,
+  SeoInsights,
   Settings,
   SyncSummary,
 } from "./types";
@@ -31,12 +32,32 @@ export const api = {
   generateMeta: (sku: string) => invoke<ProductDetail>("generate_meta", { sku }),
   generateDetails: (sku: string) =>
     invoke<ProductDetail>("generate_details", { sku }),
+  researchSeo: (sku: string, seed?: string) =>
+    invoke<SeoInsights>("research_seo", { sku, seed: seed ?? null }),
   getSettings: () => invoke<Settings>("get_settings"),
-  saveSettings: (feedUrl: string, geminiApiKey: string) =>
-    invoke<void>("save_settings", { feedUrl, geminiApiKey }),
+  saveSettings: (
+    feedUrl: string,
+    geminiApiKey: string,
+    capsolverApiKey: string,
+    seoCountry: string,
+    gscSiteUrl: string,
+  ) =>
+    invoke<void>("save_settings", {
+      feedUrl,
+      geminiApiKey,
+      capsolverApiKey,
+      seoCountry,
+      gscSiteUrl,
+    }),
+  setGscServiceAccount: (path: string) =>
+    invoke<string>("set_gsc_service_account", { path }),
+  clearGscServiceAccount: () => invoke<void>("clear_gsc_service_account"),
+  testGscCredentials: () => invoke<string>("test_gsc_credentials"),
   setTheme: (theme: string) => invoke<void>("set_theme", { theme }),
   testFeedUrl: (url: string) => invoke<number>("test_feed_url", { url }),
   testGeminiKey: (key: string) => invoke<string>("test_gemini_key", { key }),
+  testCapsolverKey: (key: string) =>
+    invoke<string>("test_capsolver_key", { key }),
   exportDb: (path: string, format: "db" | "json") =>
     invoke<void>("export_db", { path, format }),
   importDb: (path: string) => invoke<void>("import_db", { path }),

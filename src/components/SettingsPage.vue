@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
@@ -9,25 +10,141 @@ const store = useStore();
 
 const feedUrl = ref("");
 const geminiKey = ref("");
+const capsolverKey = ref("");
+const seoCountry = ref("tr");
+const gscSiteUrl = ref("");
+const gscEmail = ref("");
 const showKey = ref(false);
+const showCapKey = ref(false);
 const xmlHint = ref("");
 const xmlOk = ref(false);
 const keyHint = ref("");
 const keyOk = ref(false);
+const capHint = ref("");
+const capOk = ref(false);
+const gscHint = ref("");
+const gscOk = ref(false);
+const showGuide = ref(false);
 const importHint = ref(".db veya .json dosyası seçin");
 
 onMounted(async () => {
   if (!store.settings) store.settings = await api.getSettings();
   feedUrl.value = store.settings.feed_url;
   geminiKey.value = store.settings.gemini_api_key;
+  capsolverKey.value = store.settings.capsolver_api_key;
+  seoCountry.value = store.settings.seo_country || "tr";
+  gscSiteUrl.value = store.settings.gsc_site_url;
+  gscEmail.value = store.settings.gsc_client_email;
 });
 
 async function persist() {
   try {
-    await api.saveSettings(feedUrl.value, geminiKey.value);
+    await api.saveSettings(
+      feedUrl.value,
+      geminiKey.value,
+      capsolverKey.value,
+      seoCountry.value,
+      gscSiteUrl.value,
+    );
     store.settings = await api.getSettings();
   } catch (e) {
     store.toast(String(e), "error");
+  }
+}
+
+async function uploadSa() {
+  try {
+    const path = await open({
+      title: "Service-account JSON seç",
+      multiple: false,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (!path || Array.isArray(path)) return;
+    gscEmail.value = await api.setGscServiceAccount(path);
+    store.settings = await api.getSettings();
+    gscOk.value = true;
+    gscHint.value = "Service-account yüklendi";
+    store.toast("GSC service-account yüklendi", "ok");
+  } catch (e) {
+    gscOk.value = false;
+    gscHint.value = String(e);
+  }
+}
+
+async function removeSa() {
+  try {
+    await api.clearGscServiceAccount();
+    gscEmail.value = "";
+    gscHint.value = "";
+    store.settings = await api.getSettings();
+  } catch (e) {
+    store.toast(String(e), "error");
+  }
+}
+
+async function testGsc() {
+  gscHint.value = "Test ediliyor…";
+  gscOk.value = false;
+  try {
+    const msg = await api.testGscCredentials();
+    gscOk.value = true;
+    gscHint.value = msg;
+  } catch (e) {
+    gscOk.value = false;
+    gscHint.value = String(e);
+  }
+}
+
+const guideSteps: { t: string; s: string; url?: string; urlLabel?: string }[] = [
+  {
+    t: "Google Cloud projesi oluştur",
+    s: "console.cloud.google.com → üstteki proje seçiciden yeni bir proje oluştur.",
+    url: "https://console.cloud.google.com/projectcreate",
+    urlLabel: "Proje oluştur",
+  },
+  {
+    t: "Search Console API'yi etkinleştir",
+    s: "API Library'de 'Google Search Console API'yi bul ve Etkinleştir'e bas.",
+    url: "https://console.cloud.google.com/apis/library/searchconsole.googleapis.com",
+    urlLabel: "API'yi aç",
+  },
+  {
+    t: "Service Account + JSON anahtar",
+    s: "IAM & Admin → Service Accounts → oluştur → Keys sekmesi → Add Key → JSON indir.",
+    url: "https://console.cloud.google.com/iam-admin/serviceaccounts",
+    urlLabel: "Service Accounts",
+  },
+  {
+    t: "GSC mülküne kullanıcı ekle",
+    s: "Search Console → Ayarlar → Kullanıcılar ve izinler → service-account e-postasını 'Tam' yetkiyle ekle.",
+    url: "https://search.google.com/search-console/users",
+    urlLabel: "GSC kullanıcıları",
+  },
+  {
+    t: "JSON'u buraya yükle",
+    s: "İndirdiğin JSON'u aşağıdaki 'JSON yükle' ile seç, mülk adresini gir (ör. sc-domain:siteniz.com), Bağlantıyı test et.",
+  },
+];
+
+async function openGuideLink(url?: string) {
+  if (url) {
+    try {
+      await openUrl(url);
+    } catch {
+      store.toast("Bağlantı açılamadı", "error");
+    }
+  }
+}
+
+async function testCapsolver() {
+  try {
+    const msg = await api.testCapsolverKey(capsolverKey.value);
+    capOk.value = true;
+    capHint.value = msg;
+    await persist();
+  } catch (e) {
+    capOk.value = false;
+    capHint.value = String(e);
   }
 }
 
@@ -153,6 +270,93 @@ async function doImport() {
               {{ keyHint }}
             </div>
           </div>
+
+          <!-- SEO Araştırma (Faz 4): CapSolver + ülke -->
+          <div>
+            <label class="lbl">CapSolver API Anahtarı</label>
+            <div class="input-row">
+              <div class="key-wrap">
+                <input
+                  class="fx inp"
+                  v-model="capsolverKey"
+                  @change="persist"
+                  :type="showCapKey ? 'text' : 'password'"
+                  placeholder="CAP-…"
+                />
+                <button class="eye" title="Göster / Gizle" @click="showCapKey = !showCapKey">
+                  <Icon name="eye" :size="15" />
+                </button>
+              </div>
+              <button class="ghost" @click="testCapsolver">Anahtarı test et</button>
+            </div>
+            <div class="fhint" :style="{ color: capHint ? (capOk ? 'var(--green)' : 'var(--red)') : 'var(--c-faint)' }">
+              {{ capHint || "“SEO Araştır” için gerekli · Ahrefs verilerine erişimi açar (capsolver.com)" }}
+            </div>
+          </div>
+
+          <div>
+            <label class="lbl">Araştırma Ülkesi</label>
+            <div class="input-row">
+              <input
+                class="fx inp country"
+                v-model="seoCountry"
+                @change="persist"
+                maxlength="2"
+                placeholder="tr"
+              />
+              <span class="country-hint">İki harfli ülke kodu (ör. tr, us, de) · Ahrefs/Trends için</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Google Search Console (Faz 5) -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ch-title">
+            <Icon name="search" :size="17" style="color:var(--accent)" />
+            Google Search Console
+          </div>
+          <div class="ch-sub">
+            Ürün sayfalarının Google'daki <b>gerçek arama sorgularını</b> üretime katar.
+            Service-account ile bağlanır (tarayıcı girişi gerekmez).
+            <a class="guide-link" @click="showGuide = true">Bu dosyayı nasıl alırım?</a>
+          </div>
+        </div>
+        <div class="card-body">
+          <div>
+            <label class="lbl">Mülk (Site) Adresi</label>
+            <div class="input-row">
+              <input
+                class="fx inp"
+                v-model="gscSiteUrl"
+                @change="persist"
+                placeholder="sc-domain:siteniz.com  veya  https://siteniz.com/"
+              />
+            </div>
+          </div>
+          <div>
+            <label class="lbl">Service-account (JSON)</label>
+            <div v-if="gscEmail" class="sa-loaded">
+              <div class="sa-info">
+                <Icon name="badgeCheck" :size="15" style="color:var(--green)" />
+                <span class="sa-email">{{ gscEmail }}</span>
+              </div>
+              <div class="sa-actions">
+                <button class="ghost" @click="testGsc">Bağlantıyı test et</button>
+                <button class="ghost danger" @click="removeSa">Kaldır</button>
+              </div>
+            </div>
+            <div v-else class="input-row">
+              <button class="ghost" @click="uploadSa">
+                <Icon name="upload" :size="14" /> JSON yükle
+              </button>
+              <span class="country-hint">İndirdiğin service-account anahtarını seç</span>
+            </div>
+            <div class="fhint" :style="{ color: gscHint ? (gscOk ? 'var(--green)' : 'var(--red)') : 'var(--c-faint)' }">
+              {{ gscHint }}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -198,6 +402,42 @@ async function doImport() {
         </div>
       </div>
     </div>
+
+    <!-- GSC kurulum rehberi (animasyonlu modal) -->
+    <Transition name="guide">
+      <div v-if="showGuide" class="guide-overlay" @click.self="showGuide = false">
+        <div class="guide-modal om-scroll" role="dialog" aria-label="GSC kurulum rehberi">
+          <header class="guide-head">
+            <div class="gh-title">
+              <div class="icon-badge"><Icon name="search" :size="15" /></div>
+              Search Console'a nasıl bağlanırım?
+            </div>
+            <button class="close" title="Kapat" @click="showGuide = false">
+              <Icon name="x" :size="16" :stroke-width="2.2" />
+            </button>
+          </header>
+          <div class="guide-body">
+            <p class="guide-intro">Tek seferlik kurulum. Zaten bir service-account'un varsa 5. adıma geç.</p>
+            <ol class="steps">
+              <li v-for="(step, i) in guideSteps" :key="i" class="step">
+                <div class="step-num">{{ i + 1 }}</div>
+                <div class="step-main">
+                  <div class="step-t">{{ step.t }}</div>
+                  <div class="step-s">{{ step.s }}</div>
+                  <button v-if="step.url" class="step-link" @click="openGuideLink(step.url)">
+                    <Icon name="external" :size="12" /> {{ step.urlLabel }}
+                  </button>
+                </div>
+              </li>
+            </ol>
+            <div class="warn guide-warn">
+              <Icon name="info" :size="13" />
+              JSON dosyası özel anahtar içerir; yalnızca yerel veritabanında saklanır, hiçbir yere gönderilmez.
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -266,6 +506,17 @@ async function doImport() {
   font-size: 13px;
   color: var(--c-text);
   outline: none;
+}
+.country {
+  flex: none;
+  width: 90px;
+  text-transform: lowercase;
+}
+.country-hint {
+  display: flex;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--c-faint);
 }
 .key-wrap {
   flex: 1;
@@ -379,5 +630,225 @@ async function doImport() {
   gap: 8px;
   font-size: 11.5px;
   color: var(--c-faint);
+}
+
+/* GSC bölümü */
+.guide-link {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 560;
+  margin-left: 4px;
+}
+.guide-link:hover {
+  text-decoration: underline;
+}
+.ghost.danger {
+  color: var(--red);
+}
+.ghost.danger:hover {
+  background: var(--badge-eksik-bg);
+}
+.sa-loaded {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-input);
+  flex-wrap: wrap;
+}
+.sa-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sa-email {
+  font-size: 12.5px;
+  color: var(--c-text);
+  font-weight: 520;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sa-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+.sa-actions .ghost {
+  height: 32px;
+  border-radius: 8px;
+}
+
+/* GSC rehber modalı */
+.guide-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--overlay-bg);
+  backdrop-filter: saturate(1.1) blur(3px);
+}
+.guide-modal {
+  width: 520px;
+  max-width: 100%;
+  max-height: 86vh;
+  overflow-y: auto;
+  background: var(--c-card);
+  border: 1px solid var(--c-border);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px var(--heavy-shadow);
+}
+.guide-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  background: var(--c-card);
+  border-bottom: 1px solid var(--c-border-soft);
+}
+.gh-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--c-text);
+  letter-spacing: -0.01em;
+}
+.icon-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.close {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-soft);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.close:hover {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+.guide-body {
+  padding: 18px;
+}
+.guide-intro {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  color: var(--c-soft);
+}
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.step {
+  display: flex;
+  gap: 12px;
+}
+.step-num {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 680;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.step-main {
+  min-width: 0;
+}
+.step-t {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+.step-s {
+  font-size: 12px;
+  color: var(--c-soft);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+.step-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 7px;
+  background: var(--c-input);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+.step-link:hover {
+  border-color: var(--accent);
+}
+.guide-warn {
+  margin-top: 18px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text);
+}
+
+/* modal animasyonu (Apple hissi: fade + hafif ölçek) */
+.guide-enter-active,
+.guide-leave-active {
+  transition: opacity 0.24s ease;
+}
+.guide-enter-from,
+.guide-leave-to {
+  opacity: 0;
+}
+.guide-enter-active .guide-modal,
+.guide-leave-active .guide-modal {
+  transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.guide-enter-from .guide-modal,
+.guide-leave-to .guide-modal {
+  transform: scale(0.96) translateY(8px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .guide-enter-active .guide-modal,
+  .guide-leave-active .guide-modal {
+    transition: none;
+  }
+  .guide-enter-from .guide-modal,
+  .guide-leave-to .guide-modal {
+    transform: none;
+  }
 }
 </style>

@@ -3,9 +3,22 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-07-21
-**Aktif faz:** Faz 3 ✅ tamamlandı (details üretimi) → 3 fazın tamamı BİTTİ 🎉
+**Son güncelleme:** 2026-07-22
+**Aktif faz:** Faz 6 ✅ tamamlandı (Trends + Ahrefs domain) → **SEO araştırma entegrasyonu (Faz 4-6) BİTTİ** 🎉
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main, ✅ push edildi)
+
+## 🌍 Vizyon (kullanıcı kararı — 2026-07-22)
+Uygulama **şahsileştirilmiyor**, global kullanım için geliştiriliyor: aynı IdeaSoft XML yapısını
+kuran farklı müşteriler de kendi feed URL'si + Gemini/CapSolver/GSC anahtarlarını Ayarlar'dan girip
+kullanabilir. Amaç exe/dmg release. → **Yeni özellikler kullanıcıya özel değer gömmeden, ayarlanabilir
+olmalı.** Anahtarlar her zaman SQLite `settings`'te; koda/git'e ASLA gömülmez.
+
+## 🔬 SEO araştırma entegrasyonu (Faz 4-6 planı)
+3 harici MCP (seo-research-mcp, gsc-mcp, google-news-trends) **paketlenmiyor**; altlarındaki HTTP
+çağrıları **native Rust'a yeniden yazılıyor** (Python/Chromium yok → tek binary). Amaç: Gemini'nin
+tahminle üretmesi yerine gerçek verilerle beslenmesi. Akış: ayrı **"SEO Araştır"** paneli → kullanıcı
+hedef kelimeyi onaylar → üretim onaylı veriyle çalışır. Plan dosyası:
+`~/.claude/plans/harika-npm-install-yaparak-atomic-river.md`.
 
 ## Faz 2 kararları (kullanıcı onayı)
 - **Model: kademeli fallback zinciri** — biri günlük limite/429'a takılınca sıradaki modele geç.
@@ -123,7 +136,114 @@ sonra "Tamamlandı" işaretler.
   hedef kelime <strong> ile vurgulandı, 131 kelime ✅
 - Frontend build temiz, tauri dev runtime hatasız (migration mevcut DB'de sorunsuz)
 
-## 🎯 Sonraki olası işler (opsiyonel — 3 faz bitti)
+## ✅ Faz 4 — Kontrollü SEO araştırma + keyword grounding (seo-mcp native) — TAMAMLANDI
+
+### Yapıldı
+- **`seo_data/` modülü** (yeni):
+  - `mod.rs` — `SeoInsights { seed, target_candidates, seed_difficulty, gsc_queries, trends, notes }`
+    + `prompt_block()` (üretim prompt'una enjekte edilen "GERÇEK ARAMA VERİLERİ" bloğu) + `has_data()`
+    + `unwrap_ok()` (Ahrefs `["Ok", {...}]` sarmalı).
+  - `ahrefs.rs` — **CapSolver Turnstile** (`AntiTurnstileTaskProxyLess`, siteKey `0x4AAAAAAAAzi9ITzSN9xKMi`,
+    createTask→getTaskResult poll 1s/60s) + Ahrefs free-tools `stGetFreeKeywordIdeas` (keyword_ideas) &
+    `stGetFreeSerpOverviewForKeywordDifficultyChecker` (keyword_difficulty). difficultyLabel/volumeLabel
+    → sayı map'leri seo-research-mcp'den portlandı. `test_key` = CapSolver getBalance.
+- **db.rs**: `seo_status.research_json` kolonu (idempotent migration).
+- **commands.rs**: `research_seo(sku, seed?)` — tohum seçimi (seed→onaylı kelime→kategori→ad ilk 4 söz),
+  ideas+difficulty **eşzamanlı** (`tokio::join!`), hacme göre sıralı, `research_json`'a yazar, panele döner.
+  `test_capsolver_key`. `generate_meta`/`generate_details` artık `research_json`+`target_keyword` okuyup
+  `ProductContext`'e geçirir. Settings'e `capsolver_api_key` + `seo_country` (varsayılan `tr`).
+- **gemini.rs**: `ProductContext`'e `target_keyword` + `insights` alanları. Meta prompt'unda onaylı kelime
+  varsa "türetme, bunu kullan" + `insights.prompt_block()`. Details prompt'una da insights bloğu. Geriye
+  dönük uyumlu (None → eski davranış).
+- **Cargo.toml**: `tokio = { features = ["time","macros"] }` (CapSolver polling + join).
+- **Frontend**: `SeoResearchPanel.vue` (sağdan kayan animasyonlu drawer, `cubic-bezier(.32,.72,0,1)`,
+  reduced-motion, skeleton/popIn, mevcut `--badge-*`/`--c-*` token'ları — yeni renk YOK). ProductDetail'e
+  "SEO Araştır" butonu + panel + `onPickKeyword`. store: `researching`/`research` + `runResearch`.
+  api/types: `researchSeo`, `testCapsolverKey`, genişletilmiş `saveSettings`, `SeoInsights` tipleri.
+  SettingsPage: CapSolver anahtarı (göster/gizle) + araştırma ülkesi + "Anahtarı test et".
+
+### Doğrulama
+- **29 cargo birim testi geçti** (9'u Faz 4 için yeni: difficulty/volume label map, parse_ideas×2,
+  parse_difficulty, tool_url, prompt_block×2, unwrap_ok; +5 ignored gerçek-API testi).
+  `cargo build` + `npm run build` (vue-tsc+vite) temiz.
+- **Gerçek Gemini testi** (`gen_meta_with_insights_real`, #[ignore]): onaylı hedef kelime + insights
+  enjekte edildiğinde model kelimeyi **aynen kullandı** (türetmedi), title/desc doğal işledi ✅.
+- **CapSolver/Ahrefs canlı yolu DOĞRULANDI** (2026-07-22, kullanıcının CapSolver anahtarıyla):
+  `keyword_ideas` "all in one bilgisayar" (tr) için 23 gerçek aday döndü (hacim+zorluk dolu),
+  `keyword_difficulty` yanıt verdi. CapSolver Turnstile çözümü çalışıyor.
+  ⚠️ **Ahrefs API şekli değişmişti — 2 düzeltme gerekti** (seo-mcp fork'u eski):
+  1) `stGetFreeKeywordIdeas` `keyword` alanı artık **düz string** (`["Some", kw]` sarmalı → InvalidInput).
+  2) `volumeLabel` artık **isimli kova enum'u** (`"MoreThanOneThousand"` = 1000, `MoreThanTenThousand`=10000,
+     `MoreThanOneHundred`=100, `MoreThanTen`=10, `Zero`=0) — eski aralık/sayı biçimi değil.
+  Ayrıca Ahrefs POST'una tarayıcı benzeri başlıklar (User-Agent/Origin/Referer) eklendi.
+
+### Notlar / dikkat
+- Ahrefs free-tools + CapSolver gayriresmi → biçim değişirse parse kırılabilir; graceful degrade (notes).
+  Her araştırma = 2 CapSolver çözümü (kredi + ~saniyeler). Orijinaldeki cwd `signature_cache.json` sorunu
+  yok (Rust'ta bellekte, henüz backlink Faz 6'da).
+- Faz 4 kapsamı: yalnızca Ahrefs (keyword ideas + difficulty). GSC gerçek sorgular Faz 5, Trends+backlink Faz 6.
+
+## ✅ Faz 5 — GSC gerçek arama sorguları (service-account) — TAMAMLANDI
+
+### Yapıldı
+- **`seo_data/gsc.rs`** (yeni): service-account JWT (RS256, `jsonwebtoken`) → Google token endpoint →
+  access token → `searchAnalytics.query` (`page` filtresi = `products.url`, son 90 gün, 25 satır).
+  `validate_json` (client_email + private_key + PEM yüklenebilirlik), `client_email_of` (UI'da göster,
+  private key sızmaz), `test` (token + `sites.list` → mülk erişimini doğrula). `pct()` siteUrl path encode.
+  **Mimari not:** plan `yup-oauth2` diyordu; daha hafif olduğu için `jsonwebtoken` + reqwest seçildi
+  (tüm HTTP tek yığında; scope `webmasters.readonly`).
+- **commands.rs**: `set_gsc_service_account(path)` (dosyayı Rust okur+doğrular+saklar, email döner),
+  `clear_gsc_service_account`, `test_gsc_credentials`. Settings'e `gsc_site_url` + türetilen
+  `gsc_client_email` (raw JSON asla frontend'e gitmez). `research_seo` artık GSC'yi de çeker
+  (CapSolver ve/veya GSC — biri yeterli; ikisi de yoksa hata). Ürün `url`'i GSC page filtresi.
+- **Frontend**: SettingsPage'e **Google Search Console kartı** — mülk adresi + "JSON yükle" (dialog),
+  yüklüyse client_email + "Bağlantıyı test et"/"Kaldır". **Animasyonlu "nasıl alırım?" rehber modalı**
+  (5 adım, her adımda `opener` ile Google linki; fade+scale `cubic-bezier`, reduced-motion). Panelde
+  **"Google'daki gerçek sorgular"** bölümü (en üstte, accent kenarlı; gösterim/sıra + "Hedef yap").
+  api/types: `setGscServiceAccount`/`clearGscServiceAccount`/`testGscCredentials`, genişletilmiş saveSettings.
+- **Cargo.toml**: `jsonwebtoken = "9"` (ring/rsa çeker; ilk derleme ~9dk).
+
+### Doğrulama
+- **34 cargo birim testi geçti** (5 yeni GSC: pct encode, client_email, validate_json, parse_rows×2).
+  `cargo build` + `npm run build` temiz.
+- **GSC canlı yolu DOĞRULANDI** (2026-07-22, kullanıcının taze SA'sı `kurumsalitgscsa@kitindexapi`):
+  JWT+token+API çalıştı; erişilen mülk **`https://www.kurumsalit.com/`** (URL-prefix, sc-domain değil).
+  Lenovo Neo 50a ürün sayfası için gerçek sorgu döndü: `"12sca078tr"` (28 gösterim, 1 tıklama, sıra 8.2).
+  → Kurulumda GSC mülkü olarak `https://www.kurumsalit.com/` girilmeli. gsc-mcp'deki sızmış SA hâlâ iptal edilmeli.
+
+## ✅ Faz 6 — Google Trends + Ahrefs domain özeti — TAMAMLANDI
+
+### Yapıldı
+- **`seo_data/trends.rs`** (yeni, keyless) — **ŞU AN DEVRE DIŞI** (kod korunuyor, `#[allow(dead_code)]`):
+  - v1 denemesi: trending RSS (`/trending/rss`) → geo-geneli **günlük** trendler; ama bunlar hedef
+    kelimeyle **alakasız** (kullanıcı geri bildirimi). ⚠️ Eski `dailytrends` JSON zaten 404.
+  - v2 denemesi: `explore`→`widgetdata/relatedsearches` ile hedef kelimeye **ilgili** sorgular
+    (doğru yaklaşım). Ama Google anti-bot **HTTP 429** veriyor (cookie warmup + `cookies` feature'a
+    rağmen; tarayıcı consent çerezi gerekiyor). → **research_seo'da çağrılmıyor.**
+  - **Karar:** keyword-relevant ihtiyaç zaten **Ahrefs fikirleri + GSC sorgularıyla** karşılanıyor;
+    güvenilmez Trends "fayda değil boşluk" olurdu. İleride güvenilir yol bulunursa yeniden açılır.
+    (`Cargo.toml`'a eklenen `reqwest` `cookies` feature'ı + client `cookie_store(true)` korunuyor.)
+- **`ahrefs.rs::backlinks_overview`**: `stGetFreeBacklinksOverview` → `data:{domainRating,backlinks,refdomains}`
+  → `DomainOverview`. (Traffic denendi ama `country:"None"` artık `InvalidInput`; backlink özeti tek
+  çözümde yeterli otorite verisi verdiği için traffic atlandı.)
+- **mod.rs**: `DomainOverview` tipi + `SeoInsights.domain`. `has_data()` domain'i de sayar.
+- **commands.rs `research_seo`**: `host_of(url)` ile alan çıkarılır; CapSolver bloğunda keyword ideas +
+  difficulty + **backlinks_overview eşzamanlı** (`tokio::join!` 3'lü). Trends her zaman denenir (keyless,
+  geo = ülke.upper()). Notlar'a hata düşer.
+- **Frontend**: panelde **"Güncel trendler"** chip'leri (tıkla→hedef yap) + **alan (domain) özet şeridi**
+  (DR / backlink / ref-domain, bilgi amaçlı). types: `DomainOverview` + `SeoInsights.domain`.
+
+### Doğrulama
+- **39 cargo birim testi geçti** (5 yeni: parse_overview, parse_rss×3, parse_traffic). build'ler temiz.
+- **Canlı DOĞRULANDI** (kullanıcının CapSolver anahtarı): Trends RSS TR için 10 gerçek trend döndü
+  (galatasaray 20B, hava durumu bursa…); backlinks_overview kurumsalit.com → **DR 30, 2332 backlink,
+  672 ref-domain**.
+
+### Notlar
+- Trends geo-geneli (ürüne özel değil) → mevsimsel bağlam; prompt'a `trends` olarak katılır. Domain özeti
+  prompt'a KATILMAZ (dashboard bilgisi). Her araştırma artık ≤3 CapSolver çözümü (eşzamanlı → ~aynı süre).
+
+## 🎯 Sonraki olası işler (opsiyonel — SEO araştırma entegrasyonu bitti)
 - Toplu üretim (seçili ürünler için sırayla meta/details) + ilerleme çubuğu
 - Gemini kota/kullanım göstergesi, model seçimi Ayarlar'da
 - IdeaSoft'a doğrudan yazma (şu an kullanıcı elle kopyalıyor) — API varsa
