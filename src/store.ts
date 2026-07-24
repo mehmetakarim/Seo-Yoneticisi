@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { api } from "./api";
 import type {
   FilterKey,
+  ImageCheck,
   ProductDetail,
   ProductRow,
   SeoInsights,
@@ -31,6 +32,8 @@ interface State {
   generatingDetails: boolean;
   researching: boolean;
   research: SeoInsights | null;
+  imageChecking: boolean;
+  imageCheck: ImageCheck[] | null;
   lastSync: SyncSummary | null;
   showSummary: boolean;
   settings: Settings | null;
@@ -54,6 +57,8 @@ export const useStore = defineStore("app", {
     generatingDetails: false,
     researching: false,
     research: null,
+    imageChecking: false,
+    imageCheck: null,
     lastSync: null,
     showSummary: false,
     settings: null,
@@ -169,10 +174,27 @@ export const useStore = defineStore("app", {
     async select(sku: string) {
       this.selectedSku = sku;
       this.research = null; // araştırma ürüne özel — seçim değişince sıfırla
+      this.imageCheck = null;
       try {
         this.detail = await api.getProduct(sku);
+        // Cache'lenmiş boyut sonucu varsa anında göster, sonra tazele
+        this.imageCheck = this.detail?.image_check ?? null;
+        void this.checkImages(sku);
       } catch (e) {
         this.toast(String(e), "error");
+      }
+    },
+
+    async checkImages(sku: string) {
+      if (this.imageChecking) return;
+      this.imageChecking = true;
+      try {
+        const res = await api.checkImages(sku);
+        if (this.selectedSku === sku) this.imageCheck = res;
+      } catch (e) {
+        /* görsel kontrolü kritik değil — sessizce geç */
+      } finally {
+        this.imageChecking = false;
       }
     },
 
@@ -269,6 +291,13 @@ export const useStore = defineStore("app", {
       if (!this.selectedSku || this.generatingDetails) return;
       if (this.detail?.details_status === "done") {
         this.toast("Bu ürünün açıklaması zaten tamamlandı işaretli.", "info");
+        return;
+      }
+      if ((this.detail?.image_count ?? 0) < 3) {
+        this.toast(
+          `En az 3 ürün görseli gerekli — şu an ${this.detail?.image_count ?? 0}/4.`,
+          "error",
+        );
         return;
       }
       this.generatingDetails = true;

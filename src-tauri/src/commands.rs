@@ -1,6 +1,7 @@
+use crate::images::{self, ImageCheck};
 use crate::seo_data::{self, SeoInsights};
 use crate::validation::{
-    details_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallStatus,
+    details_badge, image_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallStatus,
 };
 use crate::{db, feed, gemini, sync};
 use rusqlite::{params, Connection};
@@ -57,6 +58,11 @@ pub struct ProductDetail {
     pub badge: MetaBadge,
     pub details_badge: MetaBadge,
     pub overall: OverallStatus,
+    // Faz 7: galeri görselleri + skoru
+    pub gallery: Vec<String>,
+    pub image_count: usize,
+    pub image_badge: MetaBadge,
+    pub image_check: Option<Vec<ImageCheck>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -215,11 +221,23 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 p.img_url, p.title, p.descriptions, p.keywords, p.search_keywords, p.details,
                 COALESCE(s.meta_status,'pending'), COALESCE(s.details_status,'pending'),
                 s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_search_keywords,
-                s.draft_details
+                s.draft_details, p.picture2, p.picture3, p.picture4, s.image_check_json
          FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
          WHERE p.sku = ?1",
         [&sku],
         |row| {
+            let img_url: Option<String> = row.get(7)?;
+            let picture2: Option<String> = row.get(20)?;
+            let picture3: Option<String> = row.get(21)?;
+            let picture4: Option<String> = row.get(22)?;
+            let check_json: Option<String> = row.get(23)?;
+            let gallery: Vec<String> = [img_url.clone(), picture2, picture3, picture4]
+                .into_iter()
+                .filter_map(|u| u.filter(|s| !s.trim().is_empty()))
+                .collect();
+            let image_check: Option<Vec<ImageCheck>> = check_json
+                .as_deref()
+                .and_then(|j| serde_json::from_str(j).ok());
             Ok(ProductDetail {
                 sku: row.get(0)?,
                 name: row.get(1)?,
@@ -228,7 +246,7 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 category: row.get(4)?,
                 quantity: row.get(5)?,
                 url: row.get(6)?,
-                img_url: row.get(7)?,
+                img_url,
                 title: row.get(8)?,
                 descriptions: row.get(9)?,
                 keywords: row.get(10)?,
@@ -244,6 +262,10 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 badge: MetaBadge::Eksik,       // aşağıda hesaplanır
                 details_badge: MetaBadge::Eksik, // aşağıda hesaplanır
                 overall: OverallStatus::Eksik,   // aşağıda hesaplanır
+                image_count: gallery.len(),
+                image_badge: MetaBadge::Eksik, // aşağıda hesaplanır
+                gallery,
+                image_check,
             })
         },
     )
@@ -270,6 +292,9 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
             d.meta_status == "done",
             d.details_status == "done",
         );
+        // Görsel skoru: sayı + (varsa) cache'lenmiş boyut sonucu.
+        let all_dims_ok = d.image_check.as_ref().map(|c| !c.is_empty() && c.iter().all(|x| x.ok));
+        d.image_badge = image_badge(d.image_count, all_dims_ok);
         d
     })
 }
@@ -425,17 +450,26 @@ pub async fn generate_details(
     state: State<'_, AppState>,
     sku: String,
 ) -> Result<ProductDetail, String> {
-    let (name, brand, category, main_category, details_html, keyword, research_json, api_key) = {
+    let (name, brand, category, main_category, details_html, keyword, research_json, gallery, api_key) = {
         let conn = state.conn.lock().unwrap();
         let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
         conn.query_row(
             "SELECT p.name, p.brand, p.category, p.main_category,
                     COALESCE(s.draft_details, p.details), COALESCE(s.target_keyword,''),
-                    s.research_json
+                    s.research_json, p.img_url, p.picture2, p.picture3, p.picture4
              FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
              WHERE p.sku = ?1",
             [&sku],
             |r| {
+                let gallery: Vec<String> = [
+                    r.get::<_, Option<String>>(7)?,
+                    r.get::<_, Option<String>>(8)?,
+                    r.get::<_, Option<String>>(9)?,
+                    r.get::<_, Option<String>>(10)?,
+                ]
+                .into_iter()
+                .filter_map(|u| u.filter(|s| !s.trim().is_empty()))
+                .collect();
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, Option<String>>(1)?,
@@ -444,6 +478,7 @@ pub async fn generate_details(
                     r.get::<_, Option<String>>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, Option<String>>(6)?,
+                    gallery,
                 ))
             },
         )
@@ -451,11 +486,15 @@ pub async fn generate_details(
             rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
             other => format!("Ürün okunamadı: {other}"),
         })
-        .map(|t| (t.0, t.1, t.2, t.3, t.4.unwrap_or_default(), t.5, t.6, key))?
+        .map(|t| (t.0, t.1, t.2, t.3, t.4.unwrap_or_default(), t.5, t.6, t.7, key))?
     };
 
-    if details_html.trim().is_empty() {
-        return Err("Bu ürünün feed'inde açıklama içeriği yok.".to_string());
+    // Görsel kapısı: en az 3 galeri görseli (backend savunma; UI de engeller).
+    if gallery.len() < 3 {
+        return Err(format!(
+            "En az 3 ürün görseli gerekli — şu an {}/4. Ürüne görsel ekleyin.",
+            gallery.len()
+        ));
     }
 
     let insights = parse_insights(research_json.as_deref());
@@ -467,7 +506,19 @@ pub async fn generate_details(
         target_keyword: None, // details zaten `keyword` argümanını kullanır
         insights: insights.as_ref().filter(|i| i.has_data()),
     };
-    let new_html = gemini::generate_details(&api_key, &ctx, &details_html, &keyword).await?;
+    // Açıklama akışı:
+    //  1) İçerik yok / yeniden yazılabilir metin yok → sıfırdan semantik HTML (galeri görselleri).
+    //  2) Düzenli yapı → OPTIMIZE: metin iyileştirilir + yapı semantikleştirilir + anlamlı alt eklenir.
+    //  3) Düzensiz yapı → eski güvenli yol (yapıyı aynen koruyarak yalnızca metni yeniden yaz).
+    let new_html = if details_html.trim().is_empty() || !gemini::has_rewritable_content(&details_html)
+    {
+        gemini::generate_details_scratch(&api_key, &ctx, &gallery, &keyword).await?
+    } else {
+        match gemini::optimize_details(&api_key, &ctx, &details_html, &keyword).await? {
+            Some(html) => html,
+            None => gemini::generate_details(&api_key, &ctx, &details_html, &keyword).await?,
+        }
+    };
 
     let conn = state.conn.lock().unwrap();
     ensure_seo_row(&conn, &sku)?;
@@ -477,6 +528,65 @@ pub async fn generate_details(
     )
     .map_err(|e| format!("Üretilen açıklama kaydedilemedi: {e}"))?;
     read_detail(&conn, &sku)
+}
+
+/// Faz 7: galeri görsellerinin 1:1 + çözünürlük kontrolü (async, `?revision` parmak iziyle cache'li).
+#[tauri::command]
+pub async fn check_images(state: State<'_, AppState>, sku: String) -> Result<Vec<ImageCheck>, String> {
+    let (gallery, cached_json, cached_fp) = {
+        let conn = state.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT p.img_url, p.picture2, p.picture3, p.picture4, s.image_check_json, s.image_check_fp
+             FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
+             WHERE p.sku = ?1",
+            [&sku],
+            |r| {
+                let g: Vec<String> = [
+                    r.get::<_, Option<String>>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                ]
+                .into_iter()
+                .filter_map(|u| u.filter(|s| !s.trim().is_empty()))
+                .collect();
+                Ok((g, r.get::<_, Option<String>>(4)?, r.get::<_, Option<String>>(5)?))
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
+            other => format!("Ürün okunamadı: {other}"),
+        })?
+    };
+
+    if gallery.is_empty() {
+        return Ok(Vec::new());
+    }
+    let fp = gallery.join("|");
+    // Görsel URL'leri (revision dahil) değişmemişse cache'i döndür
+    if cached_fp.as_deref() == Some(fp.as_str()) {
+        if let Some(cached) = cached_json.as_deref().and_then(|j| serde_json::from_str::<Vec<ImageCheck>>(j).ok())
+        {
+            return Ok(cached);
+        }
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
+    let checks = images::check_dimensions(&client, &gallery).await;
+    let json = serde_json::to_string(&checks).unwrap_or_default();
+    {
+        let conn = state.conn.lock().unwrap();
+        ensure_seo_row(&conn, &sku)?;
+        conn.execute(
+            "UPDATE seo_status SET image_check_json = ?2, image_check_fp = ?3, updated_at = ?4 WHERE sku = ?1",
+            params![sku, json, fp, now_str()],
+        )
+        .map_err(|e| format!("Görsel kontrolü kaydedilemedi: {e}"))?;
+    }
+    Ok(checks)
 }
 
 /// `research_json` metnini SeoInsights'e çözer; bozuk/boşsa None.

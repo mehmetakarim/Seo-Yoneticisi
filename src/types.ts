@@ -51,6 +51,21 @@ export interface ProductDetail {
   badge: MetaBadge;
   details_badge: MetaBadge;
   overall: OverallStatus;
+  // Faz 7: galeri görselleri + skoru
+  gallery: string[];
+  image_count: number;
+  image_badge: MetaBadge;
+  image_check: ImageCheck[] | null;
+}
+
+export interface ImageCheck {
+  url: string;
+  width: number;
+  height: number;
+  is_square: boolean;
+  meets_min: boolean;
+  ok: boolean;
+  error: string | null;
 }
 
 export interface Settings {

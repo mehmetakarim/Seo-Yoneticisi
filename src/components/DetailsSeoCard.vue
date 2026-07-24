@@ -13,9 +13,13 @@ const props = defineProps<{
   keyword: string;
   detailsDone: boolean;
   badge: MetaBadge;
+  imageCount: number;
 }>();
 
 const store = useStore();
+
+// Faz 7: en az 3 galeri görseli yoksa üretim engellenir.
+const imageGateOk = computed(() => props.imageCount >= 3);
 
 const badgeStyle = computed(() => ({
   background: `var(--badge-${props.badge}-bg)`,
@@ -148,11 +152,19 @@ function genDetails() {
 
     <div class="card-actions">
       <div class="gen-wrap">
-        <button class="gen" :class="{ busy: store.generatingDetails }" :disabled="store.generatingDetails" @click="genDetails">
+        <button
+          class="gen"
+          :class="{ busy: store.generatingDetails }"
+          :disabled="store.generatingDetails || !imageGateOk"
+          :title="imageGateOk ? '' : `En az 3 görsel gerekli — şu an ${imageCount}/4`"
+          @click="genDetails"
+        >
           <Icon :name="store.generatingDetails ? 'loader' : 'sparkles'" :size="17" :stroke-width="store.generatingDetails ? 2.2 : 1.9" :class="{ spin: store.generatingDetails }" />
           {{ store.generatingDetails ? "Üretiliyor…" : "Açıklamayı Üret" }}
         </button>
-        <span class="gen-sub">uzun içerik · daha fazla kredi</span>
+        <span class="gen-sub" :style="imageGateOk ? {} : { color: 'var(--red)' }">
+          {{ imageGateOk ? "uzun içerik · daha fazla kredi" : `En az 3 görsel gerekli (${imageCount}/4)` }}
+        </span>
       </div>
       <div style="flex:1"></div>
       <button class="done" :class="{ active: detailsDone }" @click="store.toggleDetailsDone()">
@@ -395,6 +407,10 @@ function genDetails() {
 .gen.busy {
   opacity: 0.75;
   cursor: default;
+}
+.gen:disabled:not(.busy) {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .spin {
   animation: spin 0.8s linear infinite;

@@ -7,6 +7,7 @@ import Icon from "./Icon.vue";
 import MetaSeoCard from "./MetaSeoCard.vue";
 import DetailsSeoCard from "./DetailsSeoCard.vue";
 import SeoResearchPanel from "./SeoResearchPanel.vue";
+import ImageScoreCard from "./ImageScoreCard.vue";
 
 const store = useStore();
 const detail = computed(() => store.detail);
@@ -121,6 +122,8 @@ async function openProduct() {
         <span class="kw-hint">iki kart da bu kelimeyi kullanır</span>
       </div>
 
+      <ImageScoreCard :gallery="detail.gallery" :image-count="detail.image_count" />
+
       <MetaSeoCard
         :title="title"
         :desc="desc"
@@ -139,6 +142,7 @@ async function openProduct() {
         :keyword="keyword"
         :details-done="detail.details_status === 'done'"
         :badge="detail.details_badge"
+        :image-count="detail.image_count"
       />
     </div>
 

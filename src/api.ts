@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ImageCheck,
   ProductDetail,
   ProductRow,
   SeoInsights,
@@ -34,6 +35,7 @@ export const api = {
     invoke<ProductDetail>("generate_details", { sku }),
   researchSeo: (sku: string, seed?: string) =>
     invoke<SeoInsights>("research_seo", { sku, seed: seed ?? null }),
+  checkImages: (sku: string) => invoke<ImageCheck[]>("check_images", { sku }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (
     feedUrl: string,
