@@ -1,6 +1,6 @@
 [package]
 name = "seo-yoneticisi"
-version = "0.1.0"
+version = "0.2.0"
 description = "IdeaSoft feed tabanlı SEO yönetim aracı"
 authors = ["mehmetakarim"]
 edition = "2021"
@@ -29,6 +29,8 @@ regex = "1"
 tokio = { version = "1", features = ["time", "macros"] }
 # Faz 5: GSC service-account JWT (RS256) imzalama. Token exchange + API çağrıları reqwest ile.
 jsonwebtoken = "9"
+# Faz 7: görsel boyutunu decode etmeden başlıktan okur (1:1 + çözünürlük kontrolü).
+imagesize = "0.13"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

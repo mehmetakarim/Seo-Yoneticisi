@@ -3,9 +3,9 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-07-22
-**Aktif faz:** Faz 6 ✅ tamamlandı (Trends + Ahrefs domain) → **SEO araştırma entegrasyonu (Faz 4-6) BİTTİ** 🎉
-**Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main, ✅ push edildi)
+**Son güncelleme:** 2026-07-24
+**Aktif faz:** Faz 7+7b ✅ tamamlandı (görsel skoru + görsele bağlı üretim + semantik açıklama optimizasyonu)
+**Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main; v0.1.0 release yayında)
 
 ## 🌍 Vizyon (kullanıcı kararı — 2026-07-22)
 Uygulama **şahsileştirilmiyor**, global kullanım için geliştiriliyor: aynı IdeaSoft XML yapısını
@@ -243,7 +243,78 @@ sonra "Tamamlandı" işaretler.
 - Trends geo-geneli (ürüne özel değil) → mevsimsel bağlam; prompt'a `trends` olarak katılır. Domain özeti
   prompt'a KATILMAZ (dashboard bilgisi). Her araştırma artık ≤3 CapSolver çözümü (eşzamanlı → ~aynı süre).
 
-## 🎯 Sonraki olası işler (opsiyonel — SEO araştırma entegrasyonu bitti)
+## ✅ Faz 7 — Görsel skoru + görsele bağlı üretim + sıfırdan semantik açıklama — TAMAMLANDI
+
+### Bağlam
+Çoğu kullanıcı tek görsel bırakıyor. Standart: **min 3 galeri görseli** + **1:1 kare, ≥1000px**. Feed
+galeri görsellerini **1000×1000** servis ediyor (1080 değil) → kontrol "1:1 + ≥1000". Feed'de **4 galeri
+slotu** (imgUrl 264, picture2 187, picture3 169, picture4 111 dolu). Bu feed'de boş `<details>`=0 →
+sıfırdan üretim global özellik.
+
+### Yapıldı
+- **feed.rs**: `picture2/3/4` (`rename="picture[2-4]Path"`) + trimmed. **db.rs**: products `picture2/3/4`,
+  seo_status `image_check_json`+`image_check_fp` (idempotent migration). **sync.rs**: upsert'e eklendi.
+- **validation.rs**: `image_badge(count, dims)` (count<3→Eksik kapısı; ≥3 & tüm ok→Uygun; ≥3 & fail→Hatalı).
+- **`images.rs`** (yeni): `imagesize` ile decode'suz boyut; `evaluate` (1:1 ±%2, `MIN_DIM=1000`);
+  `check_dimensions`. **commands.rs::check_images(sku)** async + `?revision` parmak iziyle cache.
+- **commands.rs**: `read_detail` galeri + `image_count` + `image_badge` + cache'li `image_check` döner.
+  `generate_details` **kapı** (<3 → hata) + **3 yollu dallanma** (aşağıda 7b).
+- **gemini.rs::generate_details_scratch**: Gemini'den `[{h2,p}]` (görsel sayısı kadar), grounding korunur;
+  `assemble_scratch` **SEMANTİK** HTML montajlar — dış `<section class="yeni-aciklama {center|left|right}">`
+  (sınıf döngüsü), iç `<div>` container/row/col-md (iç içe section YOK), anlamlı `alt`, görsel sola/sağa
+  alternatif. Verilen CSS yalnızca dış section'ı hedeflediği için görünüm birebir korunur.
+- **Frontend**: `ImageScoreCard.vue` (X/4 + thumbnail'lerde 1:1/çözünürlük rozeti, spinner/popIn, mevcut
+  token'lar), ProductDetail'e eklendi. DetailsSeoCard "Açıklamayı Üret" **<3'te disabled** + tooltip.
+  store `imageChecking/imageCheck` + `checkImages` (seçimde async, cache seed). Üretim kapısı **3 katman**:
+  UI disabled + store guard + backend hata. api/types: `checkImages`, `ImageCheck`, ProductDetail görsel alanları.
+
+### Doğrulama
+- **42 birim testi geçti** (yeni: image_badge, evaluate×2, assemble_scratch_is_semantic). build'ler temiz, 0 uyarı.
+- **Canlı DOĞRULANDI** (2026-07-24): `check_one_real` gerçek galeri → **1000×1000 kare=true min=true ok=true**;
+  `gen_scratch_real` (gerçek Gemini) → 3 semantik section, iç div, görseller alternatif, anlamlı alt,
+  hedef kelime `<strong>`/`<em>` ile doğal, kelime≥50. HTML örneği kusursuz.
+
+## ✅ Faz 7b — MEVCUT açıklamanın optimizasyonu (yapı + metin + alt) — TAMAMLANDI
+
+**Kullanıcı geri bildirimi:** "Açıklama Üret"in asıl işi zaten mevcut içeriği optimize etmek; semantik
+HTML yalnızca sıfırdan üretimde değil, **mevcut içeriğin optimizasyonunda da** kullanılmalı (yapı + veri +
+anlamlı `alt`). Sınıf döngüsü: **center → left → right → left → right…**
+
+### Feed yapısı analizi (264 ürün)
+Düzenli (N section = N img = N h2 = N p): **257 (%97)** — dağılım 4'lü:94, 3'lü:90, 2'li:70, 1'li:3.
+Düzensiz 7: düz metin (3), `pre-order` banner + fazladan h2 (2), çoklu img (2).
+Kullanılan sınıflar: `left` 543, `center` 261, `pre-order` 2 (`right` hiç kullanılmamış).
+
+### Yapıldı — `gemini.rs`
+- `split_top_sections` (derinlik sayan üst-düzey `<section>` ayırıcı; bloklar arası boşluk dışı içerik
+  varsa None) + `extract_blocks` (blok başına özel sınıf / img'ler / 1 h2 / p'ler; **düzensizse None**).
+- `optimize_details(...) -> Result<Option<String>>`: mevcut metinleri Gemini'ye **"anlamı koruyarak SEO
+  için optimize et"** talimatıyla gönderir, `assemble_optimized` ile **semantik** HTML kurar
+  (dış `<section>` + iç `<div>`, iç içe section YOK), **anlamlı `alt`** (ürün adı — başlık) ekler,
+  `pre-order` gibi özel sınıfları KORUR, görselsiz bloğu `col-md-12` yapar.
+  **Görsel invariant**: çıktı src listesi orijinalle aynı değilse `None` → eski yola düşülür.
+- `class_for(i)`: 0→center, sonra left/right alternatif (kullanıcı isteği).
+- `has_rewritable_content` (h2/p var mı) — dallanma için.
+
+### `commands.rs` — 3 yollu dallanma
+1. İçerik yok / yeniden yazılabilir metin yok → **`generate_details_scratch`** (galeri görselleri).
+2. Düzenli yapı → **`optimize_details`** (metin + yapı + alt optimizasyonu). ← %97 ürün
+3. Düzensiz yapı → **eski `generate_details`** (yapıyı aynen koruyarak yalnızca metni yeniden yaz).
+
+### Doğrulama
+- **47 birim testi geçti** (yeni 5: class_cycle, extract_blocks×2, optimize_assembly, özel-sınıf/görselsiz).
+- **Canlı (gerçek Gemini)**: `optimize_real` → iç içe section'lar `<div>`'e döndü, `alt="image"` →
+  `alt="Lenovo ThinkCentre… — Kesintisiz Güç"`, metin zengin/optimize, görseller birebir korundu,
+  center→left döngüsü + görsel sola/sağa alternatif ✅
+
+### Notlar
+- Cargo: `imagesize = "0.13"`. Kapı SAYI bazlı (anında/güvenilir); 1:1/çözünürlük yalnızca uyarı.
+- ⚠️ export/import (yedek) picture2/3/4 + image_check kolonlarını içermiyor (sync feed'den geri getirir;
+  pre-existing gap: draft_details/research_json de yok). Kritik değil.
+- Artık mevcut ürünlerin hatalı iç içe `<section>` yapısı da üretimde **düzeltiliyor** (düzenli olanlarda);
+  düzensiz 7 üründe eski davranış korunur (güvenlik).
+
+## 🎯 Sonraki olası işler (opsiyonel)
 - Toplu üretim (seçili ürünler için sırayla meta/details) + ilerleme çubuğu
 - Gemini kota/kullanım göstergesi, model seçimi Ayarlar'da
 - IdeaSoft'a doğrudan yazma (şu an kullanıcı elle kopyalıyor) — API varsa
