@@ -77,6 +77,21 @@ pub fn details_badge(details_html: &str, target_keyword: &str, details_done: boo
     }
 }
 
+// ---- Faz 7: görsel skoru ----
+
+/// Görsel skoru rozeti (mevcut MetaBadge yeniden kullanılır).
+/// count<3 → Eksik (üretim kapısı bunu kullanır); count≥3 & boyut sonucu yok/pending → Uygun;
+/// count≥3 & tüm görsel 1:1+≥min → Uygun; count≥3 ama biri başarısız → Hatalı.
+pub fn image_badge(count: usize, all_dims_ok: Option<bool>) -> MetaBadge {
+    if count < 3 {
+        return MetaBadge::Eksik;
+    }
+    match all_dims_ok {
+        Some(false) => MetaBadge::Hatali,
+        _ => MetaBadge::Uygun,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OverallStatus {
@@ -214,6 +229,15 @@ mod tests {
         assert_eq!(html_strip(html), "Başlık Bir iki üç & dört");
         assert_eq!(word_count(html), 6);
         assert_eq!(word_count(""), 0);
+    }
+
+    #[test]
+    fn image_badge_rules() {
+        assert_eq!(image_badge(1, None), MetaBadge::Eksik);
+        assert_eq!(image_badge(2, Some(true)), MetaBadge::Eksik); // <3 her zaman Eksik
+        assert_eq!(image_badge(3, None), MetaBadge::Uygun); // boyut pending
+        assert_eq!(image_badge(4, Some(true)), MetaBadge::Uygun);
+        assert_eq!(image_badge(3, Some(false)), MetaBadge::Hatali);
     }
 
     #[test]

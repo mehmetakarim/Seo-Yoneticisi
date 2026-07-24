@@ -27,6 +27,12 @@ pub struct FeedProduct {
     pub quantity_status: Option<String>,
     #[serde(default, rename = "imgUrl")]
     pub img_url: Option<String>,
+    #[serde(default, rename = "picture2Path")]
+    pub picture2: Option<String>,
+    #[serde(default, rename = "picture3Path")]
+    pub picture3: Option<String>,
+    #[serde(default, rename = "picture4Path")]
+    pub picture4: Option<String>,
     #[serde(default)]
     pub details: Option<String>,
     #[serde(default)]
@@ -66,6 +72,9 @@ impl FeedProduct {
         t(&mut self.quantity);
         t(&mut self.quantity_status);
         t(&mut self.img_url);
+        t(&mut self.picture2);
+        t(&mut self.picture3);
+        t(&mut self.picture4);
         t(&mut self.details);
         t(&mut self.url);
         t(&mut self.title);

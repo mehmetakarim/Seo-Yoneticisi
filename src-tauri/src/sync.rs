@@ -45,7 +45,8 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
             tx.execute(
                 "UPDATE products SET id=?2, name=?3, brand=?4, main_category=?5, category=?6,
                    quantity=?7, url=?8, img_url=?9, title=?10, descriptions=?11, keywords=?12,
-                   search_keywords=?13, details=?14, last_synced_at=?15
+                   search_keywords=?13, details=?14, last_synced_at=?15,
+                   picture2=?16, picture3=?17, picture4=?18
                  WHERE sku=?1",
                 params![
                     sku,
@@ -63,6 +64,9 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
                     p.search_keywords,
                     p.details,
                     now,
+                    p.picture2,
+                    p.picture3,
+                    p.picture4,
                 ],
             )
             .map_err(|e| format!("Ürün güncellenemedi ({sku}): {e}"))?;
@@ -70,8 +74,9 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
         } else {
             tx.execute(
                 "INSERT INTO products (sku, id, name, brand, main_category, category, quantity,
-                   url, img_url, title, descriptions, keywords, search_keywords, details, last_synced_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                   url, img_url, title, descriptions, keywords, search_keywords, details, last_synced_at,
+                   picture2, picture3, picture4)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
                 params![
                     sku,
                     p.id,
@@ -88,6 +93,9 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
                     p.search_keywords,
                     p.details,
                     now,
+                    p.picture2,
+                    p.picture3,
+                    p.picture4,
                 ],
             )
             .map_err(|e| format!("Ürün eklenemedi ({sku}): {e}"))?;

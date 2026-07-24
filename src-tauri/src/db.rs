@@ -23,6 +23,9 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           quantity INTEGER,
           url TEXT,
           img_url TEXT,
+          picture2 TEXT,
+          picture3 TEXT,
+          picture4 TEXT,
           title TEXT,
           descriptions TEXT,
           keywords TEXT,
@@ -69,6 +72,12 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(conn, "seo_status", "draft_details", "TEXT")?;
     // Faz 4: SEO araştırma çıktısı (SeoInsights JSON) ürün başına saklanır.
     add_column_if_missing(conn, "seo_status", "research_json", "TEXT")?;
+    // Faz 7: galeri görsel slotları + boyut kontrolü cache'i.
+    add_column_if_missing(conn, "products", "picture2", "TEXT")?;
+    add_column_if_missing(conn, "products", "picture3", "TEXT")?;
+    add_column_if_missing(conn, "products", "picture4", "TEXT")?;
+    add_column_if_missing(conn, "seo_status", "image_check_json", "TEXT")?;
+    add_column_if_missing(conn, "seo_status", "image_check_fp", "TEXT")?;
     Ok(())
 }
 

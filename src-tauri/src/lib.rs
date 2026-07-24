@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod feed;
 mod gemini;
+mod images;
 mod seo_data;
 mod sync;
 mod validation;
@@ -41,6 +42,7 @@ pub fn run() {
             commands::mark_details_done,
             commands::generate_meta,
             commands::generate_details,
+            commands::check_images,
             commands::research_seo,
             commands::get_settings,
             commands::save_settings,
