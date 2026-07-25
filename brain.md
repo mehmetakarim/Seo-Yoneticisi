@@ -4,7 +4,7 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-07-24
-**Aktif faz:** Faz 7+7b ✅ tamamlandı (görsel skoru + görsele bağlı üretim + semantik açıklama optimizasyonu)
+**Aktif faz:** Faz 8 ✅ tamamlandı (teknik özellik tablosu — elle yapıştır, halüsinasyon-sıfır)
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main; v0.1.0 release yayında)
 
 ## 🌍 Vizyon (kullanıcı kararı — 2026-07-22)
@@ -334,6 +334,81 @@ Standart SEO yoğunluğu **öbek başınadır**.
 **Doğrulama:** 48 birim testi geçti (yeni `density_range_and_correction`), build'ler temiz. Canlı Gemini
 çıktıları ölçüldü → %2.5 / %2.69 (Uygun). ⚠️ Formül değişikliği tüm ürünlerin yoğunluk rozetini yeniden
 hesaplar (çok kelimeli hedef kelimeliler artık doğru/daha düşük görünür).
+
+## ✅ Faz 8 — Teknik Özellik Tablosu (elle-yapıştır, halüsinasyon-sıfır) — TAMAMLANDI
+
+### Bağlam
+IdeaSoft'ta teknik tablo **ayrı alanda** ve **feed'e girmiyor** → uygulama okuyamaz, sıfırdan üretmeli.
+Ama yanlış spec = iade + mevzuat riski. Kullanıcı: "halüsinasyon riskini göze alamam."
+
+### Icecat araştırması (ölçüldü, 2026-07-25)
+- Open Icecat sponsor markaları katalogun **%50'si** (Lenovo/HP/Dell/Logitech/TP-Link/Asus/SanDisk=131/264).
+  Creality 32, Aruba 26, Ergotron 10, Anycubic 6, Bambu Lab 5, HPE 5, Digitus 5, Snapmaker 4 kapsam dışı.
+- Sponsorlu markalarda bile **gerçek isabet %35** (20 ürünlük canlı örneklem, demo API).
+  Sebep: Dell `BTO107_PC14250_UB` (build-to-order) ve HP `AV3Z0AW` (ülkeye özel) SKU'lar global katalogda yok.
+  Standart perakende (monitör/mouse/çanta) ✅, konfigüre notebook ❌.
+- Net otomatik doldurulabilirlik **~%20-25** → **elle yapıştır ANA YOL**, Icecat kapsam dışı bırakıldı.
+
+### Yapıldı
+- **db.rs**: `seo_status`'a `tech_source_text`, `tech_specs_json`, `tech_status` (idempotent migration).
+- **gemini.rs**: `TechRow/TechGroup/TechSpecsResult`, `TECH_GROUPS` kanonik sırası,
+  `structure_tech_specs` (ham metin → gruplu JSON, responseSchema + MODEL_CHAIN, temp 0.2),
+  **`verify_traceable`** ← halüsinasyon kalkanı, `assemble_tech_html` (deterministik, modelsiz).
+- **`verify_traceable` kuralı:** üretilen değerdeki **her sayı kaynak metinde birebir geçmeli**;
+  geçmiyorsa satır **atılır** + kullanıcıya raporlanır. Ondalık ayırıcı toleransı (4.90 ↔ 4,90).
+  Sayısız değerler (IPS, FreeDOS) doğrulanamaz → prompt kısıtına güvenilir.
+- **HTML çıktısı semantik**: grup `<caption>`, satır `<th scope="row">`, genişlik `<colgroup>`.
+  **`<thead>`+boş `<th>` ve Bootstrap `col-4/col-8` KULLANILMAZ** (kullanıcının mevcut tablosundaki hata).
+  "Kutu İçeriği" tablo değil `<h3>`+`<ul>`.
+- **commands.rs**: `save_tech_source`, `structure_tech_specs`, `save_tech_specs`, `tech_table_html`,
+  `mark_tech_done`; `read_detail` → tech alanları + `tech_badge`.
+- **⚠️ Yedekleme düzeltildi**: export/import artık `draft_details`, `research_json`, `image_check_*`,
+  `tech_*` ve `products.picture2/3/4` kolonlarını içeriyor. (Teknik tablo feed'den geri gelemez!)
+- **Frontend**: `TechTableCard.vue` — yapıştır → "Yapılandır" → gruplu **düzenlenebilir** önizleme
+  (contenteditable hücreler, satır sil) → "HTML kopyala" → "Tamamlandı". Atılan satırlar `--warn-bg`
+  şeridinde raporlanır. Kart kabuğu + butonlar diğer 3 kartla birebir aynı.
+
+### Doğrulama
+- **53 birim testi geçti** (yeni 5: verify_traceable×3, assemble_tech_html×2). build'ler temiz, 0 uyarı.
+- **CANLI HALÜSİNASYON TESTİ** (`tech_specs_real`, gerçek Gemini): modelin iyi bildiği Lenovo AIO'ya
+  **kasıtlı eksik** metin verildi (parlaklık/ağırlık/renk gamı yok) → çıktıda **hiçbir uydurma sayı yok** ✅
+  Gruplar kanonik taksonomiye doğru atandı, kutu içeriği liste olarak geldi.
+
+### Tema CSS'i — **Ayarlar > Teknik Tablo CSS** kartında saklanıyor
+Siteye bir kez eklenmeli; tema dosyasından silinirse uygulamadan yeniden alınabilir (göster + kopyala).
+`caption-side: top` **Bootstrap'i ezmeli** (varsayılan `bottom`!). Legacy `thead-light` ile aynı
+görünmesi için ikisi birden stillenir. Mobil: yatay scroll YOK, sütun %35→%42, `overflow-wrap: anywhere`, ≥14px.
+
+## ✅ Faz 8b — Teknik tablo sürüm geçmişi
+
+**Kullanıcı sorusu:** "Tablo veritabanına kaydediliyor mu? Yeniden üretilirse önceki sürüme erişilebilsin."
+
+**Cevap 1 — kayıt ZATEN vardı:** `tech_specs_json`/`tech_source_text` yazılıyor (structure + elle kayıt),
+`read_detail` okuyor, yedeklemede var. Ürün tekrar seçilince tablo geliyor → tekrar üretim/kredi kaybı yok.
+
+**Cevap 2 — sürüm geçmişi eklendi:**
+- `seo_status.tech_history_json` (migration) — `Vec<TechVersion{at, groups, source}>`, **en yeni başta,
+  son 5 sürüm** (`TECH_HISTORY_MAX`).
+- **Yalnızca yeniden üretim** anlık görüntü alır (elle hücre düzenlemeleri geçmişi kirletmez).
+  `structure_tech_specs` yazmadan önce mevcut tabloyu geçmişe iter.
+- **`restore_tech_version(sku, index)` — TAKAS mantığı:** seçilen sürüm güncel olur, mevcut tablo
+  geçmişin başına konur → geri yükleme de kayıpsız, istenirse geri dönülebilir. Kaynak metin de
+  sürümle birlikte geri gelir (tutarlılık).
+- `read_detail` → `tech_history: Vec<TechVersionMeta{at, rows, groups}>` (hafif özet; tam sürümler
+  payload'ı şişirmesin). Yedeklemeye `tech_history_json` da eklendi.
+- **Frontend:** meta satırında "önceki sürümler (N)" → tarih · N satır · **Geri yükle**.
+
+**Doğrulama:** 56 birim testi (yeni 3: push_history cap/sıra, parse_history bozuk-JSON toleransı,
+roundtrip). build'ler temiz.
+
+### Saha testi düzeltmeleri (kullanıcı geri bildirimi)
+- Kart alt başlığı: "IdeaSoft teknik özellik alanı için" → **"Web site teknik özellik alanı için"**
+  (uygulama global; platform adı sabitlenmemeli)
+- "Yapılandır" altındaki "metinden tablo · uydurma yok" alt metni kaldırıldı (gereksiz)
+
+### Kapsam dışı (bilinçli)
+Icecat entegrasyonu (aynı `tech_specs_json` modelini sonradan doldurabilir), PSREF/üretici kazıma,
+Schema.org `additionalProperty` çıktısı (veri hazır, tek adımlık ek iş).
 
 ## 🎯 Sonraki olası işler (opsiyonel)
 - Toplu üretim (seçili ürünler için sırayla meta/details) + ilerleme çubuğu
