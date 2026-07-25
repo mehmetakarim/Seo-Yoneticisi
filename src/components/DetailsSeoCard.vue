@@ -159,7 +159,7 @@ function genDetails() {
           :title="imageGateOk ? '' : `En az 3 görsel gerekli — şu an ${imageCount}/4`"
           @click="genDetails"
         >
-          <Icon :name="store.generatingDetails ? 'loader' : 'sparkles'" :size="17" :stroke-width="store.generatingDetails ? 2.2 : 1.9" :class="{ spin: store.generatingDetails }" />
+          <Icon :name="store.generatingDetails ? 'loader' : 'sparkles'" :size="15" :stroke-width="store.generatingDetails ? 2.2 : 1.9" :class="{ spin: store.generatingDetails }" />
           {{ store.generatingDetails ? "Üretiliyor…" : "Açıklamayı Üret" }}
         </button>
         <span class="gen-sub" :style="imageGateOk ? {} : { color: 'var(--red)' }">
@@ -168,7 +168,7 @@ function genDetails() {
       </div>
       <div style="flex:1"></div>
       <button class="done" :class="{ active: detailsDone }" @click="store.toggleDetailsDone()">
-        <Icon name="badgeCheck" :size="16" :stroke-width="2.2" />
+        <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
         {{ detailsDone ? "Açıklama tamamlandı ✓" : "Açıklamayı Tamamlandı işaretle" }}
       </button>
     </div>
@@ -176,13 +176,13 @@ function genDetails() {
 </template>
 
 <style scoped>
+/* Kart görünümü MetaSeoCard + ImageScoreCard ile birebir aynı (gölgesiz, aynı kenar/yarıçap). */
 .card {
-  margin-top: 14px;
-  border: 1px solid var(--c-border);
-  border-radius: 15px;
+  margin-top: 16px;
+  border: 1px solid var(--c-border-soft);
+  border-radius: 13px;
   background: var(--c-card);
   overflow: hidden;
-  box-shadow: 0 4px 16px var(--heavy-shadow);
 }
 .card-head {
   display: flex;
@@ -386,20 +386,21 @@ function genDetails() {
   flex-direction: column;
   gap: 2px;
 }
+/* MetaSeoCard'daki birincil buton ile birebir aynı ölçüler. */
 .gen {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  height: 42px;
-  padding: 0 20px;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
   border: none;
-  border-radius: 11px;
+  border-radius: 9px;
   background: var(--accent);
   color: #fff;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 590;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 .gen:hover {
   filter: brightness(1.05);
@@ -442,13 +443,13 @@ function genDetails() {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 42px;
-  padding: 0 16px;
+  height: 38px;
+  padding: 0 14px;
   border: 1px solid var(--badge-uygun-bg);
-  border-radius: 11px;
+  border-radius: 9px;
   background: var(--badge-uygun-bg);
   color: var(--green);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 580;
   cursor: pointer;
 }
