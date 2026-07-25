@@ -6,6 +6,8 @@ import type {
   SeoInsights,
   Settings,
   SyncSummary,
+  TechGroup,
+  TechSpecsResult,
 } from "./types";
 
 export const api = {
@@ -36,6 +38,16 @@ export const api = {
   researchSeo: (sku: string, seed?: string) =>
     invoke<SeoInsights>("research_seo", { sku, seed: seed ?? null }),
   checkImages: (sku: string) => invoke<ImageCheck[]>("check_images", { sku }),
+  saveTechSource: (sku: string, text: string) =>
+    invoke<void>("save_tech_source", { sku, text }),
+  structureTechSpecs: (sku: string) =>
+    invoke<TechSpecsResult>("structure_tech_specs", { sku }),
+  saveTechSpecs: (sku: string, specs: TechGroup[]) =>
+    invoke<void>("save_tech_specs", { sku, specs }),
+  techTableHtml: (sku: string) => invoke<string>("tech_table_html", { sku }),
+  markTechDone: (sku: string) => invoke<string>("mark_tech_done", { sku }),
+  restoreTechVersion: (sku: string, index: number) =>
+    invoke<ProductDetail>("restore_tech_version", { sku, index }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (
     feedUrl: string,

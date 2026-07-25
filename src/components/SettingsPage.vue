@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "../api";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
@@ -125,6 +126,45 @@ const guideSteps: { t: string; s: string; url?: string; urlLabel?: string }[] = 
     s: "İndirdiğin JSON'u aşağıdaki 'JSON yükle' ile seç, mülk adresini gir (ör. sc-domain:siteniz.com), Bağlantıyı test et.",
   },
 ];
+
+// Teknik tablo için siteye bir kez eklenmesi gereken CSS — burada referans olarak saklanır,
+// tema dosyasından silinirse buradan yeniden alınabilir.
+const TECH_TABLE_CSS = `.teknik-tablo { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+
+/* Grup başlığı — mevcut thead-light görünümüyle aynı, eski tablolar da uyumlu kalsın */
+.teknik-tablo caption,
+.teknik-tablo .thead-light th:first-child {
+  caption-side: top;                /* Bootstrap'i ez */
+  text-align: left;
+  font-weight: 600; font-size: 15px; color: #1d1d1f;
+  background: #f5f5f7; padding: 10px 12px; border-radius: 8px 8px 0 0;
+}
+
+.teknik-tablo th, .teknik-tablo td {
+  padding: 12px; text-align: left; vertical-align: top;
+  border-bottom: 1px solid #ececef;
+  overflow-wrap: anywhere; line-height: 1.5;
+}
+.teknik-tablo th[scope="row"] { width: 35%; font-weight: 500; color: #5a5a5e; }
+.teknik-tablo td { color: #1d1d1f; font-variant-numeric: tabular-nums; }
+.teknik-tablo tr:last-child th, .teknik-tablo tr:last-child td { border-bottom: 0; }
+
+@media (max-width: 576px) {
+  .teknik-tablo th[scope="row"] { width: 42%; }
+  .teknik-tablo th, .teknik-tablo td { padding: 11px 8px; font-size: 14px; }
+}`;
+
+const cssOpen = ref(false);
+const cssCopied = ref(false);
+async function copyCss() {
+  try {
+    await writeText(TECH_TABLE_CSS);
+    cssCopied.value = true;
+    setTimeout(() => (cssCopied.value = false), 1600);
+  } catch {
+    store.toast("Panoya kopyalanamadı", "error");
+  }
+}
 
 async function openGuideLink(url?: string) {
   if (url) {
@@ -356,6 +396,39 @@ async function doImport() {
             <div class="fhint" :style="{ color: gscHint ? (gscOk ? 'var(--green)' : 'var(--red)') : 'var(--c-faint)' }">
               {{ gscHint }}
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Teknik Tablo CSS (referans) -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ch-title">
+            <Icon name="code" :size="17" style="color:var(--accent)" />
+            Teknik Tablo CSS
+          </div>
+          <div class="ch-sub">
+            Üretilen teknik tablonun sitenizde doğru görünmesi için temanıza <b>bir kez</b> eklenmesi
+            gereken stil. Silinirse veya kaybolursa buradan yeniden alabilirsiniz.
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="css-row">
+            <button class="ghost" @click="cssOpen = !cssOpen">
+              <Icon name="eye" :size="14" />
+              {{ cssOpen ? "Gizle" : "CSS'i göster" }}
+            </button>
+            <button class="solid" @click="copyCss">
+              <Icon :name="cssCopied ? 'check' : 'copy'" :size="14" />
+              {{ cssCopied ? "Kopyalandı" : "CSS'i kopyala" }}
+            </button>
+            <span class="country-hint">Tema → CSS dosyanıza yapıştırın</span>
+          </div>
+          <pre v-if="cssOpen" class="css-block om-scroll">{{ TECH_TABLE_CSS }}</pre>
+          <div class="warn">
+            <Icon name="info" :size="13" />
+            <b>caption-side: top</b> satırı kritik — Bootstrap başlığı varsayılan olarak tablonun
+            <b>altına</b> koyar. Mobilde yatay kaydırma yoktur, tablo 320px'e kadar okunaklıdır.
           </div>
         </div>
       </div>
@@ -630,6 +703,36 @@ async function doImport() {
   gap: 8px;
   font-size: 11.5px;
   color: var(--c-faint);
+}
+
+/* Teknik Tablo CSS bölümü */
+.css-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.css-row .ghost,
+.css-row .solid {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+}
+.css-block {
+  margin: 0;
+  max-height: 300px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-input);
+  color: var(--c-text);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre;
+  animation: popIn 0.22s ease both;
 }
 
 /* GSC bölümü */

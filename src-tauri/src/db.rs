@@ -78,6 +78,12 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(conn, "products", "picture4", "TEXT")?;
     add_column_if_missing(conn, "seo_status", "image_check_json", "TEXT")?;
     add_column_if_missing(conn, "seo_status", "image_check_fp", "TEXT")?;
+    // Faz 8: teknik özellik tablosu. Bu veri feed'de YOK → tek kaynağı uygulama, yedeklemede korunmalı.
+    add_column_if_missing(conn, "seo_status", "tech_source_text", "TEXT")?;
+    add_column_if_missing(conn, "seo_status", "tech_specs_json", "TEXT")?;
+    add_column_if_missing(conn, "seo_status", "tech_status", "TEXT DEFAULT 'pending'")?;
+    // Faz 8b: önceki teknik tablo sürümleri (yeniden üretim öncesi anlık görüntü).
+    add_column_if_missing(conn, "seo_status", "tech_history_json", "TEXT")?;
     Ok(())
 }
 

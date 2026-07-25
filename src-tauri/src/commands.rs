@@ -63,6 +63,13 @@ pub struct ProductDetail {
     pub image_count: usize,
     pub image_badge: MetaBadge,
     pub image_check: Option<Vec<ImageCheck>>,
+    // Faz 8: teknik özellik tablosu
+    pub tech_source_text: Option<String>,
+    pub tech_specs: Option<Vec<gemini::TechGroup>>,
+    pub tech_status: String,
+    pub tech_badge: MetaBadge,
+    /// Önceki sürümlerin hafif özeti (en yeni başta).
+    pub tech_history: Vec<TechVersionMeta>,
 }
 
 #[derive(Debug, Serialize)]
@@ -221,7 +228,9 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 p.img_url, p.title, p.descriptions, p.keywords, p.search_keywords, p.details,
                 COALESCE(s.meta_status,'pending'), COALESCE(s.details_status,'pending'),
                 s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_search_keywords,
-                s.draft_details, p.picture2, p.picture3, p.picture4, s.image_check_json
+                s.draft_details, p.picture2, p.picture3, p.picture4, s.image_check_json,
+                s.tech_source_text, s.tech_specs_json, COALESCE(s.tech_status,'pending'),
+                s.tech_history_json
          FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
          WHERE p.sku = ?1",
         [&sku],
@@ -231,6 +240,20 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
             let picture3: Option<String> = row.get(21)?;
             let picture4: Option<String> = row.get(22)?;
             let check_json: Option<String> = row.get(23)?;
+            let tech_source_text: Option<String> = row.get(24)?;
+            let tech_specs: Option<Vec<gemini::TechGroup>> = row
+                .get::<_, Option<String>>(25)?
+                .as_deref()
+                .and_then(|j| serde_json::from_str(j).ok());
+            let tech_status: String = row.get(26)?;
+            let tech_history: Vec<TechVersionMeta> = parse_history(row.get::<_, Option<String>>(27)?.as_deref())
+                .into_iter()
+                .map(|v| TechVersionMeta {
+                    at: v.at,
+                    rows: v.groups.iter().map(|g| g.rows.len()).sum(),
+                    groups: v.groups.len(),
+                })
+                .collect();
             let gallery: Vec<String> = [img_url.clone(), picture2, picture3, picture4]
                 .into_iter()
                 .filter_map(|u| u.filter(|s| !s.trim().is_empty()))
@@ -266,6 +289,17 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 image_badge: MetaBadge::Eksik, // aşağıda hesaplanır
                 gallery,
                 image_check,
+                tech_badge: if tech_status == "done" {
+                    MetaBadge::Tamamlandi
+                } else if tech_specs.as_ref().map_or(false, |g| !g.is_empty()) {
+                    MetaBadge::Uygun
+                } else {
+                    MetaBadge::Eksik
+                },
+                tech_source_text,
+                tech_specs,
+                tech_status,
+                tech_history,
             })
         },
     )
@@ -587,6 +621,246 @@ pub async fn check_images(state: State<'_, AppState>, sku: String) -> Result<Vec
         .map_err(|e| format!("Görsel kontrolü kaydedilemedi: {e}"))?;
     }
     Ok(checks)
+}
+
+// ---- Faz 8: teknik özellik tablosu ----
+
+/// En fazla saklanan önceki sürüm sayısı.
+const TECH_HISTORY_MAX: usize = 5;
+
+/// Saklanan bir teknik tablo sürümü (yeniden üretim öncesi anlık görüntü).
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct TechVersion {
+    pub at: String,
+    pub groups: Vec<gemini::TechGroup>,
+    #[serde(default)]
+    pub source: String,
+}
+
+/// UI listesi için hafif özet (tam sürümler payload'ı şişirmesin).
+#[derive(Debug, Serialize)]
+pub struct TechVersionMeta {
+    pub at: String,
+    pub rows: usize,
+    pub groups: usize,
+}
+
+fn parse_history(json: Option<&str>) -> Vec<TechVersion> {
+    json.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .and_then(|j| serde_json::from_str::<Vec<TechVersion>>(j).ok())
+        .unwrap_or_default()
+}
+
+/// Mevcut tabloyu geçmişe iter (en yeni başa), üst sınırı aşanı atar.
+fn push_history(mut hist: Vec<TechVersion>, current: TechVersion) -> Vec<TechVersion> {
+    hist.insert(0, current);
+    hist.truncate(TECH_HISTORY_MAX);
+    hist
+}
+
+/// Kullanıcının yapıştırdığı ham teknik metni saklar (debounce'lu kayıt).
+#[tauri::command]
+pub fn save_tech_source(state: State<'_, AppState>, sku: String, text: String) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    ensure_seo_row(&conn, &sku)?;
+    conn.execute(
+        "UPDATE seo_status SET tech_source_text = ?2, updated_at = ?3 WHERE sku = ?1",
+        params![sku, text, now_str()],
+    )
+    .map_err(|e| format!("Teknik metin kaydedilemedi: {e}"))?;
+    Ok(())
+}
+
+/// Ham metni gruplu spec'lere çevirir (kaynağa karşı doğrulanır) ve saklar.
+#[tauri::command]
+pub async fn structure_tech_specs(
+    state: State<'_, AppState>,
+    sku: String,
+) -> Result<gemini::TechSpecsResult, String> {
+    let (name, brand, category, main_category, source, prev_specs, prev_hist, api_key) = {
+        let conn = state.conn.lock().unwrap();
+        let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
+        conn.query_row(
+            "SELECT p.name, p.brand, p.category, p.main_category, COALESCE(s.tech_source_text,''),
+                    s.tech_specs_json, s.tech_history_json
+             FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
+             WHERE p.sku = ?1",
+            [&sku],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                    r.get::<_, Option<String>>(6)?,
+                ))
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
+            other => format!("Ürün okunamadı: {other}"),
+        })
+        .map(|t| (t.0, t.1, t.2, t.3, t.4, t.5, t.6, key))?
+    };
+
+    let ctx = gemini::ProductContext {
+        name: &name,
+        brand: brand.as_deref(),
+        category: category.as_deref(),
+        main_category: main_category.as_deref(),
+        target_keyword: None,
+        insights: None, // teknik tablo pazarlama verisi değil — SEO araştırması karıştırılmaz
+    };
+    let result = gemini::structure_tech_specs(&api_key, &ctx, &source).await?;
+
+    let json = serde_json::to_string(&result.groups)
+        .map_err(|e| format!("Teknik tablo serialize edilemedi: {e}"))?;
+
+    // Yeniden üretim: eski tabloyu kaybetmeden geçmişe al (son TECH_HISTORY_MAX sürüm).
+    let old_groups: Vec<gemini::TechGroup> = prev_specs
+        .as_deref()
+        .and_then(|j| serde_json::from_str(j).ok())
+        .unwrap_or_default();
+    let history_json = if old_groups.is_empty() {
+        None
+    } else {
+        let hist = push_history(
+            parse_history(prev_hist.as_deref()),
+            TechVersion { at: now_str(), groups: old_groups, source: source.clone() },
+        );
+        serde_json::to_string(&hist).ok()
+    };
+
+    {
+        let conn = state.conn.lock().unwrap();
+        ensure_seo_row(&conn, &sku)?;
+        match &history_json {
+            Some(h) => conn.execute(
+                "UPDATE seo_status SET tech_specs_json = ?2, tech_history_json = ?3, updated_at = ?4
+                 WHERE sku = ?1",
+                params![sku, json, h, now_str()],
+            ),
+            None => conn.execute(
+                "UPDATE seo_status SET tech_specs_json = ?2, updated_at = ?3 WHERE sku = ?1",
+                params![sku, json, now_str()],
+            ),
+        }
+        .map_err(|e| format!("Teknik tablo kaydedilemedi: {e}"))?;
+    }
+    Ok(result)
+}
+
+/// Kullanıcının elle düzenlediği tablo (doğruluk kaynağı kullanıcıdır).
+#[tauri::command]
+pub fn save_tech_specs(
+    state: State<'_, AppState>,
+    sku: String,
+    specs: Vec<gemini::TechGroup>,
+) -> Result<(), String> {
+    let json = serde_json::to_string(&specs).map_err(|e| format!("Serialize edilemedi: {e}"))?;
+    let conn = state.conn.lock().unwrap();
+    ensure_seo_row(&conn, &sku)?;
+    conn.execute(
+        "UPDATE seo_status SET tech_specs_json = ?2, updated_at = ?3 WHERE sku = ?1",
+        params![sku, json, now_str()],
+    )
+    .map_err(|e| format!("Teknik tablo kaydedilemedi: {e}"))?;
+    Ok(())
+}
+
+/// IdeaSoft'a yapıştırılacak semantik HTML (deterministik, model devrede değil).
+#[tauri::command]
+pub fn tech_table_html(state: State<'_, AppState>, sku: String) -> Result<String, String> {
+    let conn = state.conn.lock().unwrap();
+    let json: Option<String> = conn
+        .query_row("SELECT tech_specs_json FROM seo_status WHERE sku = ?1", [&sku], |r| r.get(0))
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
+            other => format!("Teknik tablo okunamadı: {other}"),
+        })?;
+    let groups: Vec<gemini::TechGroup> = json
+        .as_deref()
+        .and_then(|j| serde_json::from_str(j).ok())
+        .unwrap_or_default();
+    if groups.is_empty() {
+        return Err("Önce teknik tabloyu yapılandırın.".to_string());
+    }
+    Ok(gemini::assemble_tech_html(&groups))
+}
+
+/// Önceki bir sürümü geri yükler. **Takas mantığı**: mevcut tablo geçmişin başına konur, seçilen
+/// sürüm güncel olur → geri yükleme de kayıpsızdır (istenirse geri dönülebilir).
+#[tauri::command]
+pub fn restore_tech_version(
+    state: State<'_, AppState>,
+    sku: String,
+    index: usize,
+) -> Result<ProductDetail, String> {
+    let conn = state.conn.lock().unwrap();
+    let (cur_json, hist_json, cur_source): (Option<String>, Option<String>, String) = conn
+        .query_row(
+            "SELECT tech_specs_json, tech_history_json, COALESCE(tech_source_text,'')
+             FROM seo_status WHERE sku = ?1",
+            [&sku],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
+            other => format!("Teknik tablo okunamadı: {other}"),
+        })?;
+
+    let mut hist = parse_history(hist_json.as_deref());
+    if index >= hist.len() {
+        return Err("Bu sürüm artık mevcut değil.".to_string());
+    }
+    let restored = hist.remove(index);
+
+    // Mevcut tablo boş değilse geçmişe geri koy (takas)
+    let cur_groups: Vec<gemini::TechGroup> = cur_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str(j).ok())
+        .unwrap_or_default();
+    if !cur_groups.is_empty() {
+        hist = push_history(
+            hist,
+            TechVersion { at: now_str(), groups: cur_groups, source: cur_source },
+        );
+    }
+
+    let specs_json = serde_json::to_string(&restored.groups)
+        .map_err(|e| format!("Serialize edilemedi: {e}"))?;
+    let hist_out = serde_json::to_string(&hist).map_err(|e| format!("Serialize edilemedi: {e}"))?;
+    conn.execute(
+        "UPDATE seo_status SET tech_specs_json = ?2, tech_history_json = ?3,
+                tech_source_text = ?4, updated_at = ?5
+         WHERE sku = ?1",
+        params![sku, specs_json, hist_out, restored.source, now_str()],
+    )
+    .map_err(|e| format!("Sürüm geri yüklenemedi: {e}"))?;
+    read_detail(&conn, &sku)
+}
+
+#[tauri::command]
+pub fn mark_tech_done(state: State<'_, AppState>, sku: String) -> Result<String, String> {
+    let conn = state.conn.lock().unwrap();
+    ensure_seo_row(&conn, &sku)?;
+    let current: String = conn
+        .query_row(
+            "SELECT COALESCE(tech_status,'pending') FROM seo_status WHERE sku = ?1",
+            [&sku],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("Durum okunamadı: {e}"))?;
+    let next = if current == "done" { "pending" } else { "done" };
+    conn.execute(
+        "UPDATE seo_status SET tech_status = ?2, updated_at = ?3 WHERE sku = ?1",
+        params![sku, next, now_str()],
+    )
+    .map_err(|e| format!("Durum güncellenemedi: {e}"))?;
+    Ok(next.to_string())
 }
 
 /// `research_json` metnini SeoInsights'e çözer; bozuk/boşsa None.
@@ -913,15 +1187,19 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         &[
             "sku", "id", "name", "brand", "main_category", "category", "quantity", "url",
             "img_url", "title", "descriptions", "keywords", "search_keywords", "details",
-            "last_synced_at",
+            "last_synced_at", "picture2", "picture3", "picture4",
         ],
     )?;
+    // Not: draft_details/research_json/tech_* alanları da yedeklenir. Teknik tablo feed'de YOK,
+    // yani yedekte yoksa geri getirilemez (gerçek emek kaybı).
     let seo = dump(
         conn,
         "seo_status",
         &[
             "sku", "meta_status", "details_status", "target_keyword", "draft_title",
             "draft_descriptions", "draft_keywords", "draft_search_keywords", "updated_at",
+            "draft_details", "research_json", "image_check_json", "image_check_fp",
+            "tech_source_text", "tech_specs_json", "tech_status", "tech_history_json",
         ],
     )?;
     let log = dump(
@@ -995,13 +1273,15 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
     for p in arr("products") {
         tx.execute(
             "INSERT OR REPLACE INTO products (sku, id, name, brand, main_category, category,
-               quantity, url, img_url, title, descriptions, keywords, search_keywords, details, last_synced_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+               quantity, url, img_url, title, descriptions, keywords, search_keywords, details, last_synced_at,
+               picture2, picture3, picture4)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
             params![
                 s(&p, "sku"), s(&p, "id"), s(&p, "name").unwrap_or_default(), s(&p, "brand"),
                 s(&p, "main_category"), s(&p, "category"), i(&p, "quantity"), s(&p, "url"),
                 s(&p, "img_url"), s(&p, "title"), s(&p, "descriptions"), s(&p, "keywords"),
                 s(&p, "search_keywords"), s(&p, "details"), s(&p, "last_synced_at"),
+                s(&p, "picture2"), s(&p, "picture3"), s(&p, "picture4"),
             ],
         )
         .map_err(|e| format!("Ürün geri yüklenemedi: {e}"))?;
@@ -1009,14 +1289,20 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
     for r in arr("seo_status") {
         tx.execute(
             "INSERT OR REPLACE INTO seo_status (sku, meta_status, details_status, target_keyword,
-               draft_title, draft_descriptions, draft_keywords, draft_search_keywords, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+               draft_title, draft_descriptions, draft_keywords, draft_search_keywords, updated_at,
+               draft_details, research_json, image_check_json, image_check_fp,
+               tech_source_text, tech_specs_json, tech_status, tech_history_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
             params![
                 s(&r, "sku"),
                 s(&r, "meta_status").unwrap_or_else(|| "pending".into()),
                 s(&r, "details_status").unwrap_or_else(|| "pending".into()),
                 s(&r, "target_keyword"), s(&r, "draft_title"), s(&r, "draft_descriptions"),
                 s(&r, "draft_keywords"), s(&r, "draft_search_keywords"), s(&r, "updated_at"),
+                s(&r, "draft_details"), s(&r, "research_json"), s(&r, "image_check_json"),
+                s(&r, "image_check_fp"), s(&r, "tech_source_text"), s(&r, "tech_specs_json"),
+                s(&r, "tech_status").unwrap_or_else(|| "pending".into()),
+                s(&r, "tech_history_json"),
             ],
         )
         .map_err(|e| format!("SEO durumu geri yüklenemedi: {e}"))?;
@@ -1043,4 +1329,50 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
     }
     tx.commit().map_err(|e| format!("İşlem tamamlanamadı: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ver(at: &str) -> TechVersion {
+        TechVersion {
+            at: at.into(),
+            groups: vec![gemini::TechGroup {
+                group: "Performans".into(),
+                rows: vec![gemini::TechRow { label: "İşlemci".into(), value: "i7".into() }],
+            }],
+            source: format!("kaynak {at}"),
+        }
+    }
+
+    #[test]
+    fn push_history_keeps_newest_first_and_caps() {
+        let mut h: Vec<TechVersion> = Vec::new();
+        for i in 1..=7 {
+            h = push_history(h, ver(&format!("v{i}")));
+        }
+        // En yeni başta, üst sınır aşılmaz
+        assert_eq!(h.len(), TECH_HISTORY_MAX);
+        assert_eq!(h[0].at, "v7");
+        assert_eq!(h[TECH_HISTORY_MAX - 1].at, "v3"); // v1, v2 düştü
+    }
+
+    #[test]
+    fn parse_history_tolerates_missing_and_broken() {
+        assert!(parse_history(None).is_empty());
+        assert!(parse_history(Some("")).is_empty());
+        assert!(parse_history(Some("  ")).is_empty());
+        assert!(parse_history(Some("{bozuk json")).is_empty());
+        let json = serde_json::to_string(&vec![ver("v1")]).unwrap();
+        assert_eq!(parse_history(Some(&json)).len(), 1);
+    }
+
+    #[test]
+    fn history_roundtrip_preserves_source_and_rows() {
+        let json = serde_json::to_string(&vec![ver("2026-07-25T10:00:00")]).unwrap();
+        let back = parse_history(Some(&json));
+        assert_eq!(back[0].source, "kaynak 2026-07-25T10:00:00");
+        assert_eq!(back[0].groups[0].rows[0].value, "i7");
+    }
 }

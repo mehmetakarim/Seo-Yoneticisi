@@ -8,6 +8,7 @@ import MetaSeoCard from "./MetaSeoCard.vue";
 import DetailsSeoCard from "./DetailsSeoCard.vue";
 import SeoResearchPanel from "./SeoResearchPanel.vue";
 import ImageScoreCard from "./ImageScoreCard.vue";
+import TechTableCard from "./TechTableCard.vue";
 
 const store = useStore();
 const detail = computed(() => store.detail);
@@ -143,6 +144,14 @@ async function openProduct() {
         :details-done="detail.details_status === 'done'"
         :badge="detail.details_badge"
         :image-count="detail.image_count"
+      />
+
+      <TechTableCard
+        :source-text="detail.tech_source_text ?? ''"
+        :specs="detail.tech_specs"
+        :tech-done="detail.tech_status === 'done'"
+        :badge="detail.tech_badge"
+        :history="detail.tech_history"
       />
     </div>
 

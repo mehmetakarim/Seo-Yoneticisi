@@ -56,6 +56,33 @@ export interface ProductDetail {
   image_count: number;
   image_badge: MetaBadge;
   image_check: ImageCheck[] | null;
+  // Faz 8: teknik özellik tablosu
+  tech_source_text: string | null;
+  tech_specs: TechGroup[] | null;
+  tech_status: string;
+  tech_badge: MetaBadge;
+  tech_history: TechVersionMeta[];
+}
+
+/** Önceki teknik tablo sürümünün özeti (en yeni başta). */
+export interface TechVersionMeta {
+  at: string;
+  rows: number;
+  groups: number;
+}
+
+export interface TechRow {
+  label: string;
+  value: string;
+}
+export interface TechGroup {
+  group: string;
+  rows: TechRow[];
+}
+export interface TechSpecsResult {
+  groups: TechGroup[];
+  /** Kaynakta doğrulanamadığı için atılan satırların etiketleri. */
+  dropped: string[];
 }
 
 export interface ImageCheck {

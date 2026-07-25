@@ -8,6 +8,7 @@ import type {
   SeoInsights,
   Settings,
   SyncSummary,
+  TechGroup,
 } from "./types";
 
 type Page = "products" | "settings";
@@ -34,6 +35,8 @@ interface State {
   research: SeoInsights | null;
   imageChecking: boolean;
   imageCheck: ImageCheck[] | null;
+  techStructuring: boolean;
+  techDropped: string[];
   lastSync: SyncSummary | null;
   showSummary: boolean;
   settings: Settings | null;
@@ -59,6 +62,8 @@ export const useStore = defineStore("app", {
     research: null,
     imageChecking: false,
     imageCheck: null,
+    techStructuring: false,
+    techDropped: [],
     lastSync: null,
     showSummary: false,
     settings: null,
@@ -175,6 +180,7 @@ export const useStore = defineStore("app", {
       this.selectedSku = sku;
       this.research = null; // araştırma ürüne özel — seçim değişince sıfırla
       this.imageCheck = null;
+      this.techDropped = [];
       try {
         this.detail = await api.getProduct(sku);
         // Cache'lenmiş boyut sonucu varsa anında göster, sonra tazele
@@ -183,6 +189,59 @@ export const useStore = defineStore("app", {
       } catch (e) {
         this.toast(String(e), "error");
       }
+    },
+
+    // ---- Faz 8: teknik özellik tablosu ----
+    async saveTechSource(text: string) {
+      if (!this.selectedSku) return;
+      await api.saveTechSource(this.selectedSku, text);
+      if (this.detail) this.detail.tech_source_text = text;
+    },
+
+    async structureTech() {
+      if (!this.selectedSku || this.techStructuring) return;
+      this.techStructuring = true;
+      this.techDropped = [];
+      try {
+        const res = await api.structureTechSpecs(this.selectedSku);
+        this.techDropped = res.dropped;
+        if (this.detail) this.detail.tech_specs = res.groups;
+        const n = res.groups.reduce((a, g) => a + g.rows.length, 0);
+        this.toast(`Teknik tablo hazır · ${n} satır`, "ok");
+        await this.reload();
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.techStructuring = false;
+      }
+    },
+
+    async saveTechSpecs(specs: TechGroup[]) {
+      if (!this.selectedSku) return;
+      try {
+        await api.saveTechSpecs(this.selectedSku, specs);
+        if (this.detail) this.detail.tech_specs = specs;
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    async restoreTechVersion(index: number) {
+      if (!this.selectedSku) return;
+      try {
+        this.detail = await api.restoreTechVersion(this.selectedSku, index);
+        this.techDropped = [];
+        this.toast("Önceki sürüm geri yüklendi", "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    async toggleTechDone() {
+      if (!this.selectedSku || !this.detail) return;
+      const next = await api.markTechDone(this.selectedSku);
+      this.detail.tech_status = next;
+      await this.reload();
     },
 
     async checkImages(sku: string) {
