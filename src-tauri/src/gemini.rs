@@ -449,6 +449,45 @@ pub fn has_rewritable_content(html: &str) -> bool {
     !extract_segments(html).is_empty()
 }
 
+// ---- Hedef kelime yoğunluğu kontrolü (details_badge ile uyumlu 1.5–3.5) ----
+const DENS_LO: f64 = 1.5;
+const DENS_HI: f64 = 3.5;
+const DENS_TARGET: f64 = 2.5;
+
+/// Yoğunluk aralık dışıysa mevcut değeri (%) döner; içinde/anahtar boşsa None.
+fn density_out_of_range(html: &str, keyword: &str) -> Option<f64> {
+    if keyword.trim().is_empty() {
+        return None;
+    }
+    let d = crate::validation::keyword_density(html, keyword);
+    if !(DENS_LO..=DENS_HI).contains(&d) {
+        Some(d)
+    } else {
+        None
+    }
+}
+
+/// Retry için modele verilecek yoğunluk düzeltme talimatı.
+fn density_correction(current: f64, keyword: &str) -> String {
+    if current > DENS_HI {
+        format!(
+            "Hedef kelime yoğunluğu şu an %{current:.1} — ÇOK YÜKSEK. '{keyword}' ifadesini metinde \
+             daha AZ tekrar et (yerine eş anlamlı, zamir veya 'bu ürün/cihaz' gibi ifadeler kullan). \
+             Anlamı bozmadan yoğunluğu %2-3 aralığına indir."
+        )
+    } else {
+        format!(
+            "Hedef kelime yoğunluğu şu an %{current:.1} — ÇOK DÜŞÜK. '{keyword}' ifadesini metne birkaç \
+             kez daha DOĞAL biçimde ekle. Yoğunluğu %2-3 aralığına çıkar."
+        )
+    }
+}
+
+/// Hedefe (%2.5) uzaklık — iki denemenin daha iyisini seçmek için.
+fn density_dist(html: &str, keyword: &str) -> f64 {
+    (crate::validation::keyword_density(html, keyword) - DENS_TARGET).abs()
+}
+
 /// Details HTML'ini yapıyı koruyarak yeniden üretir.
 pub async fn generate_details(
     api_key: &str,
@@ -512,26 +551,43 @@ pub async fn generate_details(
                 }
                 // Best-effort: her parça için yeniden yazılanı (varsa) temizleyip kullan,
                 // yoksa orijinal iç metni koru.
-                let reps: Vec<String> = segs
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, (s, e))| {
-                        let original = &details_html[*s..*e];
-                        match arr.get(idx) {
-                            Some(t) if !t.trim().is_empty() => sanitize_inline(t),
-                            _ => original.to_string(),
-                        }
-                    })
-                    .collect();
+                let build = |arr: &[String]| -> String {
+                    let reps: Vec<String> = segs
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, (s, e))| {
+                            let original = &details_html[*s..*e];
+                            match arr.get(idx) {
+                                Some(t) if !t.trim().is_empty() => sanitize_inline(t),
+                                _ => original.to_string(),
+                            }
+                        })
+                        .collect();
+                    splice(details_html, &segs, &reps)
+                };
 
-                let result = splice(details_html, &segs, &reps);
+                let mut result = build(&arr);
 
                 // Img invariant: yeni HTML'deki src'ler orijinalle aynı olmalı.
-                // sanitize_inline <img>'leri zaten atar, iskelet dokunulmadı → eşit beklenir.
-                let new_imgs = extract_img_srcs(&result);
-                if new_imgs != original_imgs {
-                    // Teorik olarak ulaşılmaz; ulaşılırsa orijinal HTML'i koru (görsel güvenliği).
-                    return Ok(details_html.to_string());
+                if extract_img_srcs(&result) != original_imgs {
+                    return Ok(details_html.to_string()); // görsel güvenliği: orijinali koru
+                }
+
+                // Yoğunluk aralık dışıysa tek retry; daha iyi (hedefe yakın) olanı seç.
+                if let Some(d) = density_out_of_range(&result, target_keyword) {
+                    let corr =
+                        format!("{prompt}\n\nÖNEMLİ DÜZELTME: {}", density_correction(d, target_keyword));
+                    if let Ok(arr2) = call_details_model(&client, key, model, &corr, segs.len()).await {
+                        if arr2.len() == segs.len() {
+                            let result2 = build(&arr2);
+                            if extract_img_srcs(&result2) == original_imgs
+                                && density_dist(&result2, target_keyword)
+                                    < density_dist(&result, target_keyword)
+                            {
+                                result = result2;
+                            }
+                        }
+                    }
                 }
                 return Ok(result);
             }
@@ -727,7 +783,23 @@ pub async fn generate_details_scratch(
                 if sections.is_empty() {
                     return Err("Model boş içerik döndürdü.".to_string());
                 }
-                return Ok(assemble_scratch(ctx.name, &sections, images));
+                let mut result = assemble_scratch(ctx.name, &sections, images);
+                // Yoğunluk aralık dışıysa tek retry; hedefe yakın olanı seç.
+                if let Some(d) = density_out_of_range(&result, target_keyword) {
+                    let corr =
+                        format!("{prompt}\n\nÖNEMLİ DÜZELTME: {}", density_correction(d, target_keyword));
+                    if let Ok(s2) = call_scratch_model(&client, key, model, &corr).await {
+                        if !s2.is_empty() {
+                            let result2 = assemble_scratch(ctx.name, &s2, images);
+                            if density_dist(&result2, target_keyword)
+                                < density_dist(&result, target_keyword)
+                            {
+                                result = result2;
+                            }
+                        }
+                    }
+                }
+                return Ok(result);
             }
             Err((is_quota, msg)) => {
                 last_err = msg;
@@ -943,10 +1015,27 @@ pub async fn optimize_details(
                         }
                     }
                 }
-                let result = assemble_optimized(ctx.name, &blocks, &texts);
+                let orig_imgs = extract_img_srcs(details_html);
+                let mut result = assemble_optimized(ctx.name, &blocks, &texts);
                 // Görsel değişmezliği: yeni HTML orijinaldeki tüm src'leri aynı sırada içermeli.
-                if extract_img_srcs(&result) != extract_img_srcs(details_html) {
+                if extract_img_srcs(&result) != orig_imgs {
                     return Ok(None); // güvenli tarafta kal → eski yol
+                }
+                // Yoğunluk aralık dışıysa tek retry; hedefe yakın olanı seç.
+                if let Some(d) = density_out_of_range(&result, target_keyword) {
+                    let corr =
+                        format!("{prompt}\n\nÖNEMLİ DÜZELTME: {}", density_correction(d, target_keyword));
+                    if let Ok(t2) = call_scratch_model(&client, key, model, &corr).await {
+                        if t2.len() == blocks.len() {
+                            let result2 = assemble_optimized(ctx.name, &blocks, &t2);
+                            if extract_img_srcs(&result2) == orig_imgs
+                                && density_dist(&result2, target_keyword)
+                                    < density_dist(&result, target_keyword)
+                            {
+                                result = result2;
+                            }
+                        }
+                    }
                 }
                 return Ok(Some(result));
             }
@@ -1235,6 +1324,30 @@ mod tests {
         assert!(out.contains("yeni-aciklama pre-order")); // özel sınıf korundu
         assert!(out.contains(r#"<div class="col-md-12 text-center">"#)); // görselsiz blok
         assert!(!out.contains("<img"));
+    }
+
+    #[test]
+    fn density_range_and_correction() {
+        fn text(total: usize, kw: usize, k: &str) -> String {
+            let mut v: Vec<String> = vec!["dolgu".into(); total - kw];
+            for _ in 0..kw {
+                v.push(k.into());
+            }
+            format!("<p>{}</p>", v.join(" "))
+        }
+        // %2 → aralıkta (None)
+        assert!(density_out_of_range(&text(100, 2, "urun"), "urun").is_none());
+        // %10 → yüksek
+        let hi = density_out_of_range(&text(10, 1, "urun"), "urun").unwrap();
+        assert!(hi > 3.5);
+        // %1 → düşük
+        let lo = density_out_of_range(&text(100, 1, "urun"), "urun").unwrap();
+        assert!(lo < 1.5);
+        // anahtar boş → kontrol yok
+        assert!(density_out_of_range(&text(100, 5, "urun"), "").is_none());
+        // düzeltme yönü
+        assert!(density_correction(9.0, "urun").contains("YÜKSEK"));
+        assert!(density_correction(1.0, "urun").contains("DÜŞÜK"));
     }
 
     #[test]

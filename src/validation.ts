@@ -93,6 +93,6 @@ export function density(html: string, kw: string): number {
     occ++;
     i += k.length;
   }
-  const kwWords = k.split(/\s+/).length;
-  return ((occ * kwWords) / words) * 100;
+  // Öbek-bazlı: geçiş / toplam kelime (öbek kelime sayısıyla çarpılmaz — Rust ile birebir).
+  return (occ / words) * 100;
 }

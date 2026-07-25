@@ -160,7 +160,9 @@ pub fn word_count(html: &str) -> usize {
     }
 }
 
-/// Hedef kelime yoğunluğu (%). Kelime öbeği geçiş sayısı * öbek kelime sayısı / toplam kelime.
+/// Hedef kelime yoğunluğu (%). **Öbek-bazlı**: hedef kelime öbeğinin geçiş sayısı / toplam kelime.
+/// (Öbeğin kelime sayısıyla ÇARPILMAZ — aksi halde çok kelimeli hedef kelimeler yapay biçimde şişer;
+/// standart SEO yoğunluğu öbek başınadır ve %2-3 hedefi çok kelimeli öbekler için de gerçekçi olur.)
 pub fn keyword_density(html: &str, keyword: &str) -> f64 {
     let words = word_count(html);
     let kw = keyword.trim().to_lowercase();
@@ -169,8 +171,7 @@ pub fn keyword_density(html: &str, keyword: &str) -> f64 {
     }
     let text = html_strip(html).to_lowercase();
     let occurrences = text.matches(&kw).count();
-    let kw_words = kw.split_whitespace().count();
-    (occurrences * kw_words) as f64 / words as f64 * 100.0
+    occurrences as f64 / words as f64 * 100.0
 }
 
 #[cfg(test)]
@@ -243,9 +244,9 @@ mod tests {
     #[test]
     fn density_counts_phrase() {
         let html = "<p>kablosuz kulaklık iyidir. Bu kablosuz kulaklık rahattır ve şıktır ve uygundur.</p>";
-        // 11 kelime, 2 geçiş * 2 kelime = 4 → %36.36
+        // 11 kelime, 2 öbek geçişi → 2/11 → %18.18 (öbek-bazlı, kelime sayısıyla çarpılmaz)
         let d = keyword_density(html, "kablosuz kulaklık");
-        assert!((d - 36.36).abs() < 0.1, "beklenmedik yoğunluk: {d}");
+        assert!((d - 18.18).abs() < 0.1, "beklenmedik yoğunluk: {d}");
         assert_eq!(keyword_density(html, ""), 0.0);
     }
 }
