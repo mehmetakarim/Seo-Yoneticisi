@@ -314,6 +314,27 @@ Kullanılan sınıflar: `left` 543, `center` 261, `pre-order` 2 (`right` hiç ku
 - Artık mevcut ürünlerin hatalı iç içe `<section>` yapısı da üretimde **düzeltiliyor** (düzenli olanlarda);
   düzensiz 7 üründe eski davranış korunur (güvenlik).
 
+## ✅ Faz 7c — Hedef kelime yoğunluğu düzeltmesi (saha testi geri bildirimi) — TAMAMLANDI
+
+**Sorun (kullanıcı):** Üretilen açıklamada yoğunluk %2-3 hedefine rağmen bazen %9/%4 çıkıp "Hatalı"
+görünüyordu.
+
+**Kök neden:** Yoğunluk formülü **ağırlıklıydı** (`geçiş × öbek_kelime_sayısı / toplam`). Çok kelimeli
+hedef kelime ("all in one bilgisayar" = 4 kelime) her geçişte 4× sayılıyordu → 4 doğal geçiş = %10.
+Standart SEO yoğunluğu **öbek başınadır**.
+
+**Düzeltme:**
+- `validation.rs::keyword_density` + `validation.ts::density`: **öbek-bazlı** (`geçiş / toplam`), öbek
+  kelime sayısıyla çarpılmaz. Artık aynı içerik (Gemini'nin ürettiği 4-6 doğal geçiş) doğru ölçülüyor:
+  optimize %2.5, sıfırdan %2.69 → **Uygun**. (`density_counts_phrase` testi 18.18'e güncellendi.)
+- **Yoğunluk güvenlik ağı**: `gemini.rs`'e `density_out_of_range`/`density_correction`/`density_dist` +
+  her üç üretim yolunda (yeniden yaz / sıfırdan / optimize) aralık dışıysa **tek retry** (modele "azalt/
+  artır" talimatı), iki denemeden hedefe (%2.5) yakın olanı seçilir; görsel invariant korunur.
+
+**Doğrulama:** 48 birim testi geçti (yeni `density_range_and_correction`), build'ler temiz. Canlı Gemini
+çıktıları ölçüldü → %2.5 / %2.69 (Uygun). ⚠️ Formül değişikliği tüm ürünlerin yoğunluk rozetini yeniden
+hesaplar (çok kelimeli hedef kelimeliler artık doğru/daha düşük görünür).
+
 ## 🎯 Sonraki olası işler (opsiyonel)
 - Toplu üretim (seçili ürünler için sırayla meta/details) + ilerleme çubuğu
 - Gemini kota/kullanım göstergesi, model seçimi Ayarlar'da
