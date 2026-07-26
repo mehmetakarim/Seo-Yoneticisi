@@ -3,12 +3,26 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-07-24
-**Aktif faz:** Faz 9 ✅ tamamlandı (IdeaSoft gönderim modülü — opsiyonel, fark önizlemeli)
-**Sıradakiler (kullanıcı onaylı sıra):** otomatik güncelleme (olmazsa olmaz) → mimari toparlama
-(navigasyon kabuğu + modül bölme; gemini.rs 1858, commands.rs 1378 satır) → GSC fırsat analizi +
-meta/açıklama sürüm geçmişi → onboarding sihirbazı → (opsiyonel) toplu üretim, kod imzalama
-**Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main; v0.1.0 release yayında)
+**Son güncelleme:** 2026-07-26
+**Aktif faz:** Faz 10 ✅ otomatik güncelleme (Tauri updater)
+**Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main)
+**Yayınlanan sürümler:** v0.1.0 → v0.5.0 · **v0.5.1 = updater düzeltmesi (createUpdaterArtifacts)**
+
+## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
+1. **v0.5.1 release'i doğrulanmalı:** Release'de **`latest.json` ve `.sig`** dosyaları var mı?
+   (v0.5.0'da yoktu — `bundle.createUpdaterArtifacts` eksikti, v0.5.1'de eklendi.)
+   Kontrol: `gh release view v0.5.1 --json assets --jq '.assets[].name'`
+   Varsa otomatik güncelleme zinciri tamam demektir; ilk canlı test bir sonraki sürümde yapılır.
+2. **Sıradaki kuyruk (kullanıcı onaylı):** mimari toparlama (navigasyon kabuğu + gruplandırılmış menü;
+   `gemini.rs` ~2000, `commands.rs` ~1700 satır → modül bölme; store ayırma; derleme ~8-9 dk çok yavaş)
+   → GSC fırsat analizi (2. sayfadaki ürünler, gösterim var tıklama yok) + meta/açıklama sürüm geçmişi
+   → onboarding sihirbazı → (opsiyonel) toplu üretim, kod imzalama.
+
+## 🔑 Updater imza anahtarı (KRİTİK)
+- Konum: **`~/.tauri/seo-yoneticisi-updater.key`** (+ `.pub`). Depoda DEĞİL, olmamalı.
+- GitHub secret'ları ayarlı: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (boş).
+- ⚠️ **Kaybolursa** dağıtılmış tüm kurulumlar bir daha otomatik güncellenemez (yeni anahtar = yeni pubkey =
+  eski kurulumlar imzayı doğrulayamaz). Makine dışına da yedeklenmeli.
 
 ## 🌍 Vizyon (kullanıcı kararı — 2026-07-22)
 Uygulama **şahsileştirilmiyor**, global kullanım için geliştiriliyor: aynı IdeaSoft XML yapısını
