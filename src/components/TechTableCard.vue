@@ -6,6 +6,7 @@ import { useStore } from "../store";
 import type { MetaBadge, TechGroup, TechVersionMeta } from "../types";
 import { BADGE_LABEL } from "../validation";
 import Icon from "./Icon.vue";
+import SeoCard from "./SeoCard.vue";
 
 const props = defineProps<{
   sourceText: string;
@@ -93,22 +94,14 @@ function removeRow(gi: number, ri: number) {
 </script>
 
 <template>
-  <div class="card">
-    <div class="card-head">
-      <div class="head-left">
-        <div class="icon-badge"><Icon name="clipboardList" :size="15" /></div>
-        <div>
-          <div class="head-title">Teknik Tablo</div>
-          <div class="head-sub">Web site teknik özellik alanı için</div>
-        </div>
-      </div>
-      <span class="status" :style="badgeStyle">
-        <span class="sdot" :style="{ background: badgeStyle.color }"></span>
-        {{ BADGE_LABEL[badge] }}
-      </span>
-    </div>
-
-    <div class="card-body">
+  <SeoCard
+    icon="clipboardList"
+    title="Teknik Tablo"
+    sub="Web site teknik özellik alanı için"
+    :badge-label="BADGE_LABEL[badge]"
+    :badge-style="badgeStyle"
+    stack
+  >
       <!-- Üst bilgi şeridi (DetailsSeoCard ile aynı düzen) -->
       <div class="info-row">
         <span class="info">
@@ -194,9 +187,8 @@ function removeRow(gi: number, ri: number) {
           <button class="hist-btn" @click="restore(i)">Geri yükle</button>
         </div>
       </div>
-    </div>
 
-    <div class="card-actions">
+    <template #actions>
       <button
         class="gen"
         :class="{ busy: store.techStructuring }"
@@ -226,71 +218,12 @@ function removeRow(gi: number, ri: number) {
         <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
         {{ techDone ? "Tablo tamamlandı ✓" : "Tabloyu Tamamlandı işaretle" }}
       </button>
-    </div>
-  </div>
+    </template>
+  </SeoCard>
 </template>
 
 <style scoped>
 /* Kart kabuğu diğer üç kartla birebir aynı */
-.card {
-  margin-top: 16px;
-  border: 1px solid var(--c-border-soft);
-  border-radius: 13px;
-  background: var(--c-card);
-  overflow: hidden;
-}
-.card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--c-border-soft);
-}
-.head-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.icon-badge {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: var(--accent-tint);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.head-title {
-  font-size: 13.5px;
-  font-weight: 640;
-  color: var(--c-text);
-}
-.head-sub {
-  font-size: 11px;
-  color: var(--c-soft);
-  margin-top: 1px;
-}
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 999px;
-}
-.sdot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-.card-body {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
 .lbl {
   display: flex;
   align-items: center;
@@ -507,14 +440,6 @@ function removeRow(gi: number, ri: number) {
 .hist-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
-}
-.card-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 16px;
-  border-top: 1px solid var(--c-border-soft);
-  flex-wrap: wrap;
 }
 /* MetaSeoCard/DetailsSeoCard ile birebir aynı birincil buton */
 .gen {

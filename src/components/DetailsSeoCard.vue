@@ -4,6 +4,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { density, wordCount } from "../validation";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
+import SeoCard from "./SeoCard.vue";
 
 import { BADGE_LABEL } from "../validation";
 import type { MetaBadge } from "../types";
@@ -81,83 +82,72 @@ function genDetails() {
 </script>
 
 <template>
-  <div class="card">
-    <div class="card-head">
-      <div class="head-left">
-        <div class="icon-badge">
-          <Icon name="fileText" :size="17" />
-        </div>
-        <div>
-          <div class="head-title">Açıklama SEO</div>
-          <div class="head-sub">Ürün detay sayfası uzun içeriği</div>
-        </div>
-      </div>
-      <span class="status" :style="badgeStyle">
-        <span class="sdot" :style="{ background: badgeStyle.color }"></span>{{ BADGE_LABEL[badge] }}
+  <SeoCard
+    icon="fileText"
+    title="Açıklama SEO"
+    sub="Ürün detay sayfası uzun içeriği"
+    :badge-label="BADGE_LABEL[badge]"
+    :badge-style="badgeStyle"
+  >
+    <div class="info-row">
+      <span class="info">
+        <Icon name="code" :size="13" />
+        HTML yapısı korunur, yalnızca metin içeriği yenilenir.
       </span>
+      <button class="copy" :class="{ ok: copied }" @click="copyHtml">
+        <Icon name="copy" :size="12" />
+        {{ copied ? "Kopyalandı" : "HTML kopyala" }}
+      </button>
     </div>
 
-    <div class="card-body">
-      <div class="info-row">
-        <span class="info">
-          <Icon name="code" :size="13" />
-          HTML yapısı korunur, yalnızca metin içeriği yenilenir.
-        </span>
-        <button class="copy" :class="{ ok: copied }" @click="copyHtml">
-          <Icon name="copy" :size="12" />
-          {{ copied ? "Kopyalandı" : "HTML kopyala" }}
-        </button>
+    <div class="preview om-scroll">
+      <div v-if="hasContent" class="seo-html-preview" v-html="safeHtml"></div>
+      <div v-else class="preview-empty">
+        <Icon name="clipboardList" :size="26" :stroke-width="1.6" />
+        <span>Henüz açıklama içeriği yok — <b>Açıklamayı Üret</b> ile oluşturun.</span>
       </div>
-
-      <div class="preview om-scroll">
-        <div v-if="hasContent" class="seo-html-preview" v-html="safeHtml"></div>
-        <div v-else class="preview-empty">
-          <Icon name="clipboardList" :size="26" :stroke-width="1.6" />
-          <span>Henüz açıklama içeriği yok — <b>Açıklamayı Üret</b> ile oluşturun.</span>
-        </div>
-        <div v-if="store.generatingDetails" class="gen-overlay">
-          <Icon name="loader" :size="22" :stroke-width="2.4" class="spin" style="color:var(--accent)" />
-          <span>Uzun içerik üretiliyor…</span>
-        </div>
-      </div>
-
-      <div class="metrics">
-        <div class="metric">
-          <div class="metric-head">
-            <span>Kelime sayısı</span>
-            <span class="metric-min">min 50</span>
-          </div>
-          <div class="metric-val">
-            <span class="big" :style="{ color: wordColor }">{{ words }}</span>
-            <span class="unit">kelime</span>
-          </div>
-          <div class="track">
-            <div class="fill" :style="{ width: wordBar, background: wordColor }"></div>
-          </div>
-        </div>
-        <div class="metric">
-          <div class="metric-head">
-            <span>Hedef kelime yoğunluğu</span>
-            <span class="metric-min">hedef %2–3</span>
-          </div>
-          <div class="metric-val">
-            <span class="big" :style="{ color: densColor }">{{ densText }}</span>
-            <span class="unit">{{ densNote }}</span>
-          </div>
-          <div class="dens-track">
-            <div class="dens-zone"></div>
-            <div class="dens-mark" :style="{ background: densColor, left: densMark }"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="empty-check" :style="{ color: hasContent ? 'var(--c-mid)' : 'var(--red)' }">
-        <Icon :name="hasContent ? 'check' : 'x'" :size="13" :stroke-width="2.6" :style="{ color: hasContent ? 'var(--green)' : 'var(--red)' }" />
-        İçerik boş değil
+      <div v-if="store.generatingDetails" class="gen-overlay">
+        <Icon name="loader" :size="22" :stroke-width="2.4" class="spin" style="color:var(--accent)" />
+        <span>Uzun içerik üretiliyor…</span>
       </div>
     </div>
 
-    <div class="card-actions">
+    <div class="metrics">
+      <div class="metric">
+        <div class="metric-head">
+          <span>Kelime sayısı</span>
+          <span class="metric-min">min 50</span>
+        </div>
+        <div class="metric-val">
+          <span class="big" :style="{ color: wordColor }">{{ words }}</span>
+          <span class="unit">kelime</span>
+        </div>
+        <div class="track">
+          <div class="fill" :style="{ width: wordBar, background: wordColor }"></div>
+        </div>
+      </div>
+      <div class="metric">
+        <div class="metric-head">
+          <span>Hedef kelime yoğunluğu</span>
+          <span class="metric-min">hedef %2–3</span>
+        </div>
+        <div class="metric-val">
+          <span class="big" :style="{ color: densColor }">{{ densText }}</span>
+          <span class="unit">{{ densNote }}</span>
+        </div>
+        <div class="dens-track">
+          <div class="dens-zone"></div>
+          <div class="dens-mark" :style="{ background: densColor, left: densMark }"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="empty-check" :style="{ color: hasContent ? 'var(--c-mid)' : 'var(--red)' }">
+      <Icon :name="hasContent ? 'check' : 'x'" :size="13" :stroke-width="2.6" :style="{ color: hasContent ? 'var(--green)' : 'var(--red)' }" />
+      İçerik boş değil
+    </div>
+
+    <template #actions>
       <!-- data-tip butonun kendisinde değil sarmalayıcıda: disabled buton fare olayı üretmez -->
       <div class="gen-wrap" :data-tip="genTip">
         <button
@@ -185,74 +175,11 @@ function genDetails() {
         <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
         {{ detailsDone ? "Açıklama tamamlandı ✓" : "Açıklamayı Tamamlandı işaretle" }}
       </button>
-    </div>
-  </div>
+    </template>
+  </SeoCard>
 </template>
 
 <style scoped>
-/* Kart görünümü MetaSeoCard + ImageScoreCard ile birebir aynı (gölgesiz, aynı kenar/yarıçap). */
-.card {
-  margin-top: 16px;
-  border: 1px solid var(--c-border-soft);
-  border-radius: 13px;
-  background: var(--c-card);
-  overflow: hidden;
-}
-.card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 15px 18px;
-  border-bottom: 1px solid var(--c-border-soft);
-}
-.head-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.icon-badge {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--accent-tint);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-}
-.head-title {
-  font-size: 15px;
-  font-weight: 680;
-  color: var(--c-text);
-  letter-spacing: -0.01em;
-}
-.head-sub {
-  font-size: 11.5px;
-  color: var(--c-soft);
-  margin-top: 1px;
-}
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 20px;
-  font-size: 11.5px;
-  font-weight: 600;
-}
-.status.pending {
-  background: var(--soft-neutral-bg);
-  color: var(--c-soft);
-}
-.sdot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--c-soft);
-}
-.card-body {
-  padding: 18px;
-}
 .info-row {
   display: flex;
   align-items: center;
@@ -385,15 +312,6 @@ function genDetails() {
   gap: 7px;
   margin-top: 11px;
   font-size: 11.5px;
-}
-.card-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  padding: 15px 18px;
-  border-top: 1px solid var(--c-border-soft);
-  background: var(--c-input);
 }
 /* Yalnızca tooltip çıpası (data-tip) — konumlandırma [data-tip]'ten gelir. */
 .gen-wrap {

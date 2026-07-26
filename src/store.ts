@@ -11,8 +11,8 @@ import type {
   SyncSummary,
   TechGroup,
 } from "./types";
+import type { Page } from "./navigation";
 
-type Page = "products" | "settings";
 type Theme = "light" | "dark";
 
 interface Toast {

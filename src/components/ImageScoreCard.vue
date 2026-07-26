@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useStore } from "../store";
 import type { ImageCheck } from "../types";
 import Icon from "./Icon.vue";
+import SeoCard from "./SeoCard.vue";
 
 const props = defineProps<{ gallery: string[]; imageCount: number }>();
 const store = useStore();
@@ -50,21 +51,14 @@ function thumbState(url: string): { icon: string; color: string; text: string; s
 </script>
 
 <template>
-  <div class="img-card">
-    <div class="head">
-      <div class="head-left">
-        <div class="icon-badge"><Icon name="image" :size="15" /></div>
-        <div>
-          <div class="h-title">Ürün Görselleri</div>
-          <div class="h-sub">{{ imageCount }}/4 görsel · minimum {{ MIN }} · 1:1 kare, ≥1000px</div>
-        </div>
-      </div>
-      <span class="status" :style="badgeStyle">
-        <span class="sdot" :style="{ background: badgeStyle.color }"></span>
-        {{ STATUS_LABEL[status] }}
-      </span>
-    </div>
-
+  <SeoCard
+    icon="image"
+    title="Ürün Görselleri"
+    :sub="`${imageCount}/4 görsel · minimum ${MIN} · 1:1 kare, ≥1000px`"
+    :badge-label="STATUS_LABEL[status]"
+    :badge-style="badgeStyle"
+    bare
+  >
     <div v-if="imageCount < MIN" class="warn">
       <Icon name="alert" :size="13" />
       En az {{ MIN }} görsel gerekli — açıklama üretimi için şart. Şu an {{ imageCount }} görsel var.
@@ -89,63 +83,10 @@ function thumbState(url: string): { icon: string; color: string; text: string; s
         <div class="thumb-dim">eksik</div>
       </div>
     </div>
-  </div>
+  </SeoCard>
 </template>
 
 <style scoped>
-.img-card {
-  margin-top: 16px;
-  border: 1px solid var(--c-border-soft);
-  border-radius: 13px;
-  background: var(--c-card);
-  overflow: hidden;
-}
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--c-border-soft);
-}
-.head-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.icon-badge {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: var(--accent-tint);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.h-title {
-  font-size: 13.5px;
-  font-weight: 640;
-  color: var(--c-text);
-}
-.h-sub {
-  font-size: 11px;
-  color: var(--c-soft);
-  margin-top: 1px;
-}
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 999px;
-}
-.sdot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
 .warn {
   display: flex;
   align-items: center;

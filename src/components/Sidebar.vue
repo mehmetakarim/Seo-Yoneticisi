@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import { useStore } from "../store";
+import { NAV } from "../navigation";
 import Icon from "./Icon.vue";
 
 const store = useStore();
-const isProducts = computed(() => store.page === "products");
 
 function fmtSync(): string {
   if (!store.lastSync) return "henüz senkron yok";
@@ -26,20 +25,14 @@ function fmtSync(): string {
 
     <nav class="nav">
       <div
+        v-for="item in NAV"
+        :key="item.key"
         class="nav-item"
-        :class="{ active: isProducts }"
-        @click="store.page = 'products'"
+        :class="{ active: store.page === item.key }"
+        @click="store.page = item.key"
       >
-        <Icon name="box" :size="17" :stroke-width="1.9" />
-        <span>Ürünler</span>
-      </div>
-      <div
-        class="nav-item"
-        :class="{ active: !isProducts }"
-        @click="store.page = 'settings'"
-      >
-        <Icon name="settings" :size="17" :stroke-width="1.9" />
-        <span>Ayarlar</span>
+        <Icon :name="item.icon" :size="17" :stroke-width="1.9" />
+        <span>{{ item.label }}</span>
       </div>
     </nav>
 

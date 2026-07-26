@@ -153,16 +153,6 @@ const changedCount = computed(() => rows.value.filter(changed).length);
   align-items: center;
   gap: 11px;
 }
-.icon-badge {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: var(--accent-tint);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 .h-title {
   font-size: 14.5px;
   font-weight: 650;

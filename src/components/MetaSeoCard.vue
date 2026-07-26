@@ -5,6 +5,7 @@ import type { MetaBadge } from "../types";
 import { BADGE_LABEL, descChecks, glen, titleChecks } from "../validation";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
+import SeoCard from "./SeoCard.vue";
 
 const props = defineProps<{
   title: string;
@@ -64,21 +65,7 @@ function genMeta() {
 </script>
 
 <template>
-  <div class="card">
-    <div class="card-head">
-      <div class="head-left">
-        <div class="icon-badge">
-          <Icon name="type" :size="15" />
-        </div>
-        <div class="head-title">Meta SEO</div>
-      </div>
-      <span class="status" :style="badgeStyle">
-        <span class="sdot" :style="{ background: badgeStyle.color }"></span>
-        {{ BADGE_LABEL[badge] }}
-      </span>
-    </div>
-
-    <div class="card-body">
+  <SeoCard icon="type" title="Meta SEO" :badge-label="BADGE_LABEL[badge]" :badge-style="badgeStyle">
       <!-- Sayfa Başlığı -->
       <div class="field-head">
         <div class="field-label">Sayfa Başlığı</div>
@@ -158,9 +145,8 @@ function genMeta() {
         </span>
         <span class="hint">{{ searchWords }} kelime · karakter sınırı yok</span>
       </div>
-    </div>
 
-    <div class="card-actions">
+    <template #actions>
       <button class="gen" :class="{ busy: store.generating }" :disabled="store.generating" @click="genMeta">
         <Icon :name="store.generating ? 'loader' : 'sparkles'" :size="15" :stroke-width="store.generating ? 2.2 : 1.9" :class="{ spin: store.generating }" />
         {{ store.generating ? "Üretiliyor…" : "Gemini ile Üret" }}
@@ -180,62 +166,11 @@ function genMeta() {
         <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
         {{ metaDone ? "Meta tamamlandı ✓" : "Meta'yı Tamamlandı işaretle" }}
       </button>
-    </div>
-  </div>
+    </template>
+  </SeoCard>
 </template>
 
 <style scoped>
-.card {
-  margin-top: 16px;
-  border: 1px solid var(--c-border-soft);
-  border-radius: 13px;
-  background: var(--c-card);
-  overflow: hidden;
-}
-.card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--c-border-soft);
-}
-.head-left {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.icon-badge {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--accent-tint);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-}
-.head-title {
-  font-size: 14px;
-  font-weight: 660;
-  color: var(--c-text);
-}
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 11px;
-  border-radius: 20px;
-  font-size: 11.5px;
-  font-weight: 600;
-}
-.sdot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-.card-body {
-  padding: 16px;
-}
 .field-head {
   display: flex;
   align-items: center;
@@ -344,15 +279,6 @@ function genMeta() {
 .hint {
   font-size: 11px;
   color: var(--c-faint);
-}
-.card-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 12px;
-  padding: 13px 16px;
-  border-top: 1px solid var(--c-border-soft);
-  background: var(--c-input);
 }
 .gen {
   display: inline-flex;

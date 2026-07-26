@@ -105,6 +105,24 @@ textarea, input, button { font-family: inherit; }
 /* input focus ortak */
 .fx:focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px var(--accent-tint); }
 
+/* ── İkon rozeti ───────────────────────────────────────────────────────────
+   Başlıklardaki yuvarlak köşeli ikon kutusu. Panel ve modal başlıklarında
+   (SeoResearchPanel, IdeasoftPushModal, UpdateModal) birebir aynı üç kopya
+   vardı — taban kural buraya alındı. Farklı ölçü isteyenler (SeoCard 26px,
+   SettingsPage 28px) kendi scoped kurallarıyla ezer: scoped seçiciler
+   [data-v-*] eklediği için özgüllükleri daha yüksektir. */
+.icon-badge {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
 /* ── Tooltip ──────────────────────────────────────────────────────────────
    Kullanım: herhangi bir öğeye `data-tip="metin"` ekle.
    Neden: buton ALTINA açıklama satırı koymak, eylem satırı flex+center

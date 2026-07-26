@@ -1,19 +1,29 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, type Component } from "vue";
 import { useStore } from "./store";
+import { titleOf, type Page } from "./navigation";
 import Sidebar from "./components/Sidebar.vue";
-import ProductList from "./components/ProductList.vue";
-import ProductDetail from "./components/ProductDetail.vue";
-import SyncSummaryBar from "./components/SyncSummaryBar.vue";
+import ProductsPage from "./components/ProductsPage.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 import UpdateModal from "./components/UpdateModal.vue";
 import Icon from "./components/Icon.vue";
 
 const store = useStore();
-const listRef = ref<InstanceType<typeof ProductList> | null>(null);
+/**
+ * O an gösterilen sayfanın örneği. Kabuk sayfanın ne olduğunu bilmez; yalnızca
+ * `focusSearch` gibi bir yeteneği varsa kullanır (ör. ⌘F). Yeni sayfalar da
+ * isterlerse aynı adı dışa açarak kısayoldan yararlanabilir.
+ */
+const pageRef = ref<{ focusSearch?: () => void } | null>(null);
+
+/** navigation.ts'teki kayda karşılık gelen bileşenler. Yeni sayfa → buraya bir satır. */
+const PAGES: Record<Page, Component> = {
+  products: ProductsPage,
+  settings: SettingsPage,
+};
 
 const isProducts = computed(() => store.page === "products");
-const pageTitle = computed(() => (isProducts.value ? "Ürünler" : "Ayarlar"));
+const pageTitle = computed(() => titleOf(store.page));
 const pageSub = computed(() => {
   if (!isProducts.value) return "Kaynaklar ve yedekleme";
   const done = store.counts.tamamlandi;
@@ -40,7 +50,7 @@ function onKey(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
     if (store.page === "products") {
       e.preventDefault();
-      listRef.value?.focusSearch();
+      pageRef.value?.focusSearch?.();
     }
     return;
   }
@@ -100,16 +110,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
 
       <UpdateModal />
 
-      <template v-if="isProducts">
-        <div class="products">
-          <SyncSummaryBar />
-          <div class="split">
-            <ProductList ref="listRef" />
-            <ProductDetail />
-          </div>
-        </div>
-      </template>
-      <SettingsPage v-else />
+      <component :is="PAGES[store.page]" ref="pageRef" />
     </main>
 
     <div class="toasts">
@@ -222,17 +223,6 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
 }
 .spin {
   animation: spin 0.8s linear infinite;
-}
-.products {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.split {
-  flex: 1;
-  display: flex;
-  min-height: 0;
 }
 .toasts {
   position: fixed;
