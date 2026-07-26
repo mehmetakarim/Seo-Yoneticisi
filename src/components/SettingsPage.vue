@@ -448,7 +448,7 @@ async function doImport() {
             <div class="input-row">
               <div class="key-wrap">
                 <input class="fx inp" v-model="ideasoftToken" @change="persist"
-                       :type="showIsToken ? 'text' : 'password'" placeholder="OTZjYWJh…" />
+                       :type="showIsToken ? 'text' : 'password'" placeholder="IdeaSoft panelinden aldığınız access token" />
                 <button class="eye" title="Göster / Gizle" @click="showIsToken = !showIsToken">
                   <Icon name="eye" :size="15" />
                 </button>
