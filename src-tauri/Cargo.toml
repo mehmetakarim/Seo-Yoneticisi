@@ -1,6 +1,6 @@
 [package]
 name = "seo-yoneticisi"
-version = "0.5.0"
+version = "0.5.1"
 description = "IdeaSoft feed tabanlı SEO yönetim aracı"
 authors = ["mehmetakarim"]
 edition = "2021"

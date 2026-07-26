@@ -506,9 +506,14 @@ sertifikalarından bağımsızdır. Yani kod imzalama ertelenmişken bile otomat
   `appVersion`. Açılışta **sessiz** kontrol (ağ yoksa kullanıcıyı rahatsız etmez) +
   Ayarlar'da "Uygulama Sürümü" kartı → "Şimdi denetle".
 
-### ⚠️ Devreye girme koşulu
-Otomatik güncelleme **v0.5.0'dan itibaren** çalışır: v0.4.0 release'inde `latest.json` yok.
-v0.4.0 kullanıcılarının bir kez elle güncellemesi gerekir; sonrası otomatik.
+### ⚠️ v0.5.0'da atlanan zorunlu ayar → v0.5.1'de düzeltildi
+v0.5.0 derlendi ama Release'e **`latest.json` eklenmedi**; log: *"Signature not found for the updater
+JSON. Skipping upload"*. Sebep: **Tauri v2'de `bundle.createUpdaterArtifacts: true` ZORUNLU** — bu bayrak
+olmadan `.app.tar.gz` / `.nsis.zip` updater paketleri ve manifest üretilmez. (İki platform da `.sig`
+üretiyordu, bu yanıltıcıydı.) v0.5.1'de eklendi.
+
+**Devreye girme:** otomatik güncelleme **v0.5.1'den itibaren** çalışır (ilk `latest.json` orada).
+v0.5.1 kurulduktan sonraki sürümde modal kendiliğinden çıkar; öncesi elle kurulum.
 
 ## 🎯 Sonraki olası işler (opsiyonel)
 - Toplu üretim (seçili ürünler için sırayla meta/details) + ilerleme çubuğu
