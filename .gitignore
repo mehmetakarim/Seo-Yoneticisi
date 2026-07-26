@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Kimlik bilgileri — depo public, asla commit edilmemeli
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*-service-account*.json
+*.db
+feed.xml
