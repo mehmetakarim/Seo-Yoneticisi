@@ -4,7 +4,10 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-07-24
-**Aktif faz:** Faz 8 ✅ tamamlandı (teknik özellik tablosu — elle yapıştır, halüsinasyon-sıfır)
+**Aktif faz:** Faz 9 ✅ tamamlandı (IdeaSoft gönderim modülü — opsiyonel, fark önizlemeli)
+**Sıradakiler (kullanıcı onaylı sıra):** otomatik güncelleme (olmazsa olmaz) → mimari toparlama
+(navigasyon kabuğu + modül bölme; gemini.rs 1858, commands.rs 1378 satır) → GSC fırsat analizi +
+meta/açıklama sürüm geçmişi → onboarding sihirbazı → (opsiyonel) toplu üretim, kod imzalama
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main; v0.1.0 release yayında)
 
 ## 🌍 Vizyon (kullanıcı kararı — 2026-07-22)
@@ -409,6 +412,73 @@ roundtrip). build'ler temiz.
 ### Kapsam dışı (bilinçli)
 Icecat entegrasyonu (aynı `tech_specs_json` modelini sonradan doldurabilir), PSREF/üretici kazıma,
 Schema.org `additionalProperty` çıktısı (veri hazır, tek adımlık ek iş).
+
+## ✅ Faz 9 — IdeaSoft Gönderim Modülü (opsiyonel) — TAMAMLANDI
+
+### Bağlam
+Üretilen içerik elle kopyalanıp panele yapıştırılıyordu. IdeaSoft API'siyle tek tık mümkün — ama uygulama
+**global**: token'ı olmayan kullanıcı için **kopyala-yapıştır ANA YOL kalmalı** (kullanıcı kararı).
+Bu yüzden **modül**: Ayarlar'da domain+token dolunca kartlarda "IdeaSoft'a Gönder" belirir, boşsa hiçbir şey değişmez.
+
+### Canlı doğrulanmış API bulguları (2026-07-25, gerçek mağaza)
+- **MCP'ye GEREK YOK.** `mcp.myideasoft.com` "keşif + genel çağırıcı" sarmalayıcı (LLM ajanları için);
+  altındaki gerçek yüzey `https://{domain}/admin-api/...` → **doğrudan reqwest** (Node/npx/mcp-remote yok).
+- Kimlik: `Authorization: Bearer {token}` ✅ · sku→id: **`GET /admin-api/products?s={sku}`** ✅
+  (⚠️ `?sku=` ve `?name=` **yok sayılıyor**; `q` dizi bekliyor) · `GET|PUT /admin-api/products/{id}` ✅
+- **Alan eşlemesi (ürün #119894 Anycubic üzerinde doğrulandı):**
+  `pageTitle` · `metaDescription` · `metaKeywords` · `searchKeywords` · **`targetKeyword`** (IdeaSoft'un
+  kendi hedef kelime alanı) · açıklama → **`detail.details`** · **teknik tablo → `detail.extraDetails`** ✅
+  Bonus okunabilir: `seoTotalRuleCount` (IdeaSoft'un kendi SEO skoru).
+- Hız sınırı ~40 istek/dk. Mağaza admin domaini `3ekurumsal.myideasoft.com` = kurumsalit.com.
+
+### Yapıldı
+- **`ideasoft.rs`** (yeni): `resolve_id` (**sku birebir eşleşme** — `ABC-123` ≠ `ABC-123-XL`),
+  `fetch_product`, `build_payload`, `push_product`, `test_connection`, `base_url` normalize,
+  401/404/429 → anlaşılır Türkçe mesaj.
+- **commands.rs**: `test_ideasoft`, `ideasoft_preview` (fark), `ideasoft_push`; `ideasoft_local`
+  (yerel içerik derleme, teknik tablo `gemini::assemble_tech_html` ile), `ideasoft_id_for` (id cache).
+  Settings'e `ideasoft_domain`/`ideasoft_token`/**`ideasoft_active`**; `read_detail` → `ideasoft_pushed_at`.
+- **db.rs**: `seo_status.ideasoft_product_id`, `ideasoft_pushed_at` (migration + yedeklemeye eklendi).
+- **Frontend**: `IdeasoftPushModal.vue` (alan alan fark: "IdeaSoft'ta şu an" ↔ "Gönderilecek",
+  değişmeyenler soluk, canlı-mağaza uyarısı), 3 kartta `is-push` butonu (`ideasoft_active` ise),
+  Ayarlar'da "IdeaSoft Bağlantısı" kartı (opsiyonel etiketi + test), ürün başlığında yeşil
+  "IdeaSoft'a gönderildi · …".
+
+### Güvenlik kuralları (payload)
+- Yalnızca seçilen `parts` (`meta`|`details`|`tech`) gönderilir; **boş alan gönderilmez** (uzaktakini silmesin).
+- `details`+`tech` birlikte → **tek `detail` nesnesi** (biri diğerini ezmez).
+- Gönderim öncesi **fark önizlemesi zorunlu**; toplu gönderim YOK (operatör kontrolü).
+
+### Doğrulama
+- **64 birim testi geçti** (8 yeni: payload×4, sku eşleşme, base_url, hata mesajları, nested detail parse).
+  frontend 65 modül temiz, 0 uyarı.
+- Canlı test **yalnızca OKUMA** (`ideasoft_read_real`, env-gated) — otomatik test canlı mağazaya yazmaz.
+  İlk gerçek `PUT` kullanıcı tarafından UI'dan onaylanarak yapılır.
+
+## ✅ Faz 9b — Saha testi düzeltmeleri + 4 boyutlu durum + ilerleme çubuğu
+
+Kullanıcının IdeaSoft modülünü sahada denemesiyle çıkan 6 madde:
+
+1. **Hedef kelime senkronu** — `ideasoft_pull_keyword` komutu (IdeaSoft'tan çek) + `parts=["keyword"]`
+   ile yalnızca `targetKeyword` gönderimi. Hedef kelime satırında **Getir / Gönder** butonları
+   (modül aktifken). IdeaSoft'un SEO kural skoru bu alana bağlı.
+2. **`seoTotalRuleCount` gösterimi** — ⚠️ **yalnızca LİSTE ucunda dolu** (`/products/{id}` → null).
+   `resolve()` artık `Resolved{id, seo_rule_count}` döndürüyor → ekstra istek yok, `ideasoft_seo_rule`
+   kolonunda cache'lenip ürün başlığında "IdeaSoft SEO: 13" olarak gösteriliyor.
+3. **BUG: metaKeywords yazılmıyordu** — kök neden: `ProductDetail`'de **`draft_keywords` alanı hiç yoktu**;
+   feed'in (boş) `keywords` alanı gönderiliyordu. Artık `draft_keywords ?? keywords ?? draft_search_keywords`.
+4. **BUG: teknik tablo gönderiminde HTTP 400** — `{"detail":{"details":"This value should not be null."}}`.
+   IdeaSoft `detail` nesnesinde `details`'in null olmasına izin vermiyor. `fill_detail_from_remote`:
+   gönderim öncesi uzaktaki ürün okunup **eksik alt alan mevcut değeriyle doldurulur** (dokunulmayan taraf korunur).
+5. **Kart 3 buton taşması** — "HTML kopyala" DetailsSeoCard'daki gibi **üst bilgi şeridine** taşındı;
+   alt sıra üç kartta da aynı düzende.
+6. **İlerleme çubuğu + 4 boyutlu durum** (kullanıcı kararı):
+   - `overall_status` artık `OverallInput{meta, details, tech_done, has_tech, image_count}` alıyor.
+   - **Tamamlandı = meta_done && details_done && tech_done**; `image_count<3` → Eksik (üretim zaten engelli);
+     hiç teknik tablo yoksa → Eksik. Aksi halde bazıları işaretliyse Bekliyor, hepsi hazırsa Uygun.
+   - `list_products` teknik tablo + galeri sayısını da okuyor; `ProductRow`'a `tech_done`, `image_count`.
+   - Üst şeritte "Son güncelleme" altında **tek ilerleme çubuğu**: "164/264 tamamlandı".
+   - ⚠️ Beklenen etki: teknik tablosu olmayan ürünler artık "Tamamlandı" görünmez (dürüst ölçüm).
 
 ## 🎯 Sonraki olası işler (opsiyonel)
 - Toplu üretim (seçili ürünler için sırayla meta/details) + ilerleme çubuğu
