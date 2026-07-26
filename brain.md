@@ -5,14 +5,25 @@
 
 **Son güncelleme:** 2026-07-26
 **Aktif faz:** Faz 10 ✅ otomatik güncelleme (Tauri updater)
-**Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main)
+**Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.0 · **v0.5.1 = updater düzeltmesi (createUpdaterArtifacts)**
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
-1. ✅ **v0.5.1 updater zinciri DOĞRULANDI (2026-07-26):** Release'de `latest.json` + 3 `.sig` var;
-   manifest 7 platform girdisi içeriyor (darwin-aarch64/x86_64[-app], windows-x86_64[-msi/-nsis]),
-   hepsinde geçerli imza ve URL. **Otomatik güncelleme altyapısı çalışır durumda.**
-   → Kalan tek doğrulama saha testi: v0.5.1'i kurup **bir sonraki sürüm** yayınlandığında
+1. ✅ **Updater zinciri UÇTAN UCA ÇALIŞIYOR (2026-07-26).** İki ayrı sorun vardı, ikisi de kapandı:
+   - **(a) `latest.json` üretilmiyordu** → `bundle.createUpdaterArtifacts: true` eksikti (v0.5.1'de eklendi).
+   - **(b) Üretildi ama indirilemiyordu** → *depo private'dı.* GitHub, özel depoların release dosyalarını
+     kimlik doğrulaması olmadan sunmaz; uygulama kimliksiz istek attığı için 404 → *"Could not fetch a
+     valid release JSON from the remote"*. **Çözüm: depo public yapıldı.**
+     ⚠️ **Ders:** GitHub Releases'i dağıtım kanalı olarak kullanan her şey (updater + son kullanıcı
+     indirmesi) deponun public olmasını gerektirir. Private kalması istenirse ayrı bir public
+     "releases" deposu ya da kendi sunucusunda barındırma gerekir.
+   - Kimliksiz doğrulama (2026-07-26): `latest.json` → HTTP 200, 7 platform girdisi, hepsinde geçerli
+     imza · `.app.tar.gz` → 200 · `.dmg` → 200 · `.exe` → 200.
+   - Public'e almadan önce tam kimlik bilgisi taraması yapıldı: çalışma ağacında ve **tüm git
+     geçmişinde** gerçek anahtar YOK (Gemini/CapSolver/GSC/minisign hepsi depo dışında). Tek bulgu bir
+     input placeholder'ındaki token parçasıydı → temizlendi (`061cec9`). `.gitignore`'a
+     `.env`/`*.key`/`*.pem`/`*-service-account*.json`/`*.db` koruması eklendi.
+   → Kalan tek doğrulama saha testi: v0.5.1 kuruluyken **bir sonraki sürüm** yayınlandığında
    güncelleme modalının kendiliğinden çıkması. (v0.5.0 ve öncesi elle kurulmalı.)
 2. **Sıradaki kuyruk (kullanıcı onaylı):** mimari toparlama (navigasyon kabuğu + gruplandırılmış menü;
    `gemini.rs` ~2000, `commands.rs` ~1700 satır → modül bölme; store ayırma; derleme ~8-9 dk çok yavaş)
