@@ -462,6 +462,28 @@ async function doImport() {
         </div>
       </div>
 
+      <!-- Uygulama / Güncelleme -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ch-title">
+            <Icon name="refresh" :size="17" style="color:var(--accent)" />
+            Uygulama Sürümü
+          </div>
+          <div class="ch-sub">
+            Uygulama açılışta yeni sürümü kendisi denetler. Buradan elle de kontrol edebilirsiniz.
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="css-row">
+            <span class="ver">Yüklü sürüm: <b>v{{ store.appVersion || "—" }}</b></span>
+            <button class="ghost" :disabled="store.updateChecking || store.updating" @click="store.checkUpdate(false)">
+              <Icon name="refresh" :size="14" :class="{ spin: store.updateChecking }" />
+              {{ store.updateChecking ? "Denetleniyor…" : "Şimdi denetle" }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Teknik Tablo CSS (referans) -->
       <div class="card">
         <div class="card-head">
@@ -806,6 +828,13 @@ async function doImport() {
 }
 .guide-link:hover {
   text-decoration: underline;
+}
+.ver {
+  font-size: 12.5px;
+  color: var(--c-mid);
+}
+.spin {
+  animation: spin 0.8s linear infinite;
 }
 .opt-tag {
   font-size: 10px;

@@ -19,6 +19,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            // Faz 10: güncelleme eklentileri yalnızca masaüstünde
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())
+                    .expect("updater eklentisi yüklenemedi");
+                app.handle()
+                    .plugin(tauri_plugin_process::init())
+                    .expect("process eklentisi yüklenemedi");
+            }
+
             let dir = app
                 .path()
                 .app_data_dir()

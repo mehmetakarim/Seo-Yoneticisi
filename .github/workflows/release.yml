@@ -54,10 +54,15 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Faz 10: otomatik güncelleme imzası (kod imzalamadan bağımsız, ücretsiz minisign)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'SEO Yöneticisi ${{ github.ref_name }}'
           releaseBody: 'Otomatik derleme. macOS için .dmg, Windows için .exe kurulum dosyası ektedir. (İmzasız — ilk açılışta işletim sistemi uyarısını onaylayın.)'
           releaseDraft: false
           prerelease: false
+          # latest.json üretilip Release'e eklenir → uygulama buradan güncelleme kontrolü yapar
+          includeUpdaterJson: true
           args: ${{ matrix.args }}

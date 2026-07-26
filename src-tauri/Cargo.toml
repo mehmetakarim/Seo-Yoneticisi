@@ -1,6 +1,6 @@
 [package]
 name = "seo-yoneticisi"
-version = "0.4.0"
+version = "0.5.0"
 description = "IdeaSoft feed tabanlı SEO yönetim aracı"
 authors = ["mehmetakarim"]
 edition = "2021"
@@ -34,3 +34,8 @@ imagesize = "0.13"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# Faz 10: otomatik güncelleme (yalnızca masaüstü). İmza anahtarı kod imzalamadan bağımsızdır.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

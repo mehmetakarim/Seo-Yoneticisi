@@ -41,6 +41,12 @@ interface State {
   ideasoftBusy: boolean;
   ideasoftPreview: IdeasoftPreview | null;
   ideasoftParts: string[];
+  appVersion: string;
+  updateInfo: { version: string; notes: string } | null;
+  updating: boolean;
+  updateDownloaded: number;
+  updateTotal: number;
+  updateChecking: boolean;
   lastSync: SyncSummary | null;
   showSummary: boolean;
   settings: Settings | null;
@@ -71,6 +77,12 @@ export const useStore = defineStore("app", {
     ideasoftBusy: false,
     ideasoftPreview: null,
     ideasoftParts: [],
+    appVersion: "",
+    updateInfo: null,
+    updating: false,
+    updateDownloaded: 0,
+    updateTotal: 0,
+    updateChecking: false,
     lastSync: null,
     showSummary: false,
     settings: null,
@@ -147,6 +159,59 @@ export const useStore = defineStore("app", {
       }
     },
 
+    // ---- Faz 10: otomatik güncelleme ----
+    /** Yeni sürüm var mı? `silent` ise bulunamayınca kullanıcıyı rahatsız etmez. */
+    async checkUpdate(silent = true) {
+      if (this.updateChecking || this.updating) return;
+      this.updateChecking = true;
+      try {
+        const { check } = await import("@tauri-apps/plugin-updater");
+        const up = await check();
+        if (up) {
+          this.updateInfo = { version: up.version, notes: up.body ?? "" };
+        } else if (!silent) {
+          this.toast("Uygulama güncel ✓", "ok");
+        }
+      } catch (e) {
+        // Ağ yoksa veya endpoint erişilemezse açılışta sessiz kal
+        if (!silent) this.toast(String(e), "error");
+      } finally {
+        this.updateChecking = false;
+      }
+    },
+
+    dismissUpdate() {
+      if (this.updating) return;
+      this.updateInfo = null;
+    },
+
+    /** İndir + kur + yeniden başlat. */
+    async runUpdate() {
+      if (!this.updateInfo || this.updating) return;
+      this.updating = true;
+      this.updateDownloaded = 0;
+      this.updateTotal = 0;
+      try {
+        const { check } = await import("@tauri-apps/plugin-updater");
+        const up = await check();
+        if (!up) {
+          this.toast("Güncelleme bulunamadı.", "error");
+          this.updateInfo = null;
+          return;
+        }
+        await up.downloadAndInstall((ev: any) => {
+          if (ev.event === "Started") this.updateTotal = ev.data?.contentLength ?? 0;
+          else if (ev.event === "Progress") this.updateDownloaded += ev.data?.chunkLength ?? 0;
+        });
+        const { relaunch } = await import("@tauri-apps/plugin-process");
+        await relaunch();
+      } catch (e) {
+        this.toast(`Güncelleme başarısız: ${e}`, "error");
+      } finally {
+        this.updating = false;
+      }
+    },
+
     async init() {
       // Tema: kayıtlı tercih yoksa sistem tercihine düş
       this.loading = true;
@@ -159,6 +224,14 @@ export const useStore = defineStore("app", {
         }
         this.applyTheme();
         this.lastSync = await api.getLastSync();
+        // Sürüm bilgisi + sessiz güncelleme kontrolü (açılışta)
+        try {
+          const { getVersion } = await import("@tauri-apps/api/app");
+          this.appVersion = await getVersion();
+        } catch {
+          /* sürüm okunamazsa önemli değil */
+        }
+        void this.checkUpdate(true);
         await this.reload();
         if (this.rows.length && !this.selectedSku) {
           await this.select(this.rows[0].sku);

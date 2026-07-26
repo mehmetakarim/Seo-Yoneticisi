@@ -6,6 +6,7 @@ import ProductList from "./components/ProductList.vue";
 import ProductDetail from "./components/ProductDetail.vue";
 import SyncSummaryBar from "./components/SyncSummaryBar.vue";
 import SettingsPage from "./components/SettingsPage.vue";
+import UpdateModal from "./components/UpdateModal.vue";
 import Icon from "./components/Icon.vue";
 
 const store = useStore();
@@ -96,6 +97,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
           </button>
         </div>
       </header>
+
+      <UpdateModal />
 
       <template v-if="isProducts">
         <div class="products">
