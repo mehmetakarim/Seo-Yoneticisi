@@ -5,6 +5,7 @@ import type {
   ProductRow,
   SeoInsights,
   Settings,
+  IdeasoftPreview,
   SyncSummary,
   TechGroup,
   TechSpecsResult,
@@ -48,6 +49,13 @@ export const api = {
   markTechDone: (sku: string) => invoke<string>("mark_tech_done", { sku }),
   restoreTechVersion: (sku: string, index: number) =>
     invoke<ProductDetail>("restore_tech_version", { sku, index }),
+  testIdeasoft: () => invoke<string>("test_ideasoft"),
+  ideasoftPreview: (sku: string, parts: string[]) =>
+    invoke<IdeasoftPreview>("ideasoft_preview", { sku, parts }),
+  ideasoftPush: (sku: string, parts: string[]) =>
+    invoke<ProductDetail>("ideasoft_push", { sku, parts }),
+  ideasoftPullKeyword: (sku: string) =>
+    invoke<ProductDetail>("ideasoft_pull_keyword", { sku }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (
     feedUrl: string,
@@ -55,6 +63,8 @@ export const api = {
     capsolverApiKey: string,
     seoCountry: string,
     gscSiteUrl: string,
+    ideasoftDomain: string,
+    ideasoftToken: string,
   ) =>
     invoke<void>("save_settings", {
       feedUrl,
@@ -62,6 +72,8 @@ export const api = {
       capsolverApiKey,
       seoCountry,
       gscSiteUrl,
+      ideasoftDomain,
+      ideasoftToken,
     }),
   setGscServiceAccount: (path: string) =>
     invoke<string>("set_gsc_service_account", { path }),

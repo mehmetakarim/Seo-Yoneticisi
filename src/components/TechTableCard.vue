@@ -109,6 +109,18 @@ function removeRow(gi: number, ri: number) {
     </div>
 
     <div class="card-body">
+      <!-- Üst bilgi şeridi (DetailsSeoCard ile aynı düzen) -->
+      <div class="info-row">
+        <span class="info">
+          <Icon name="info" :size="13" />
+          Yalnızca yapıştırılan metindeki değerler kullanılır — özellik uydurulmaz.
+        </span>
+        <button v-if="hasSpecs" class="copy" :class="{ ok: copied }" @click="copyHtml">
+          <Icon name="copy" :size="12" />
+          {{ copied ? "Kopyalandı" : "HTML kopyala" }}
+        </button>
+      </div>
+
       <!-- Kaynak metin -->
       <div class="src-block" v-if="!hasSpecs || editing">
         <label class="lbl">
@@ -122,10 +134,6 @@ function removeRow(gi: number, ri: number) {
           rows="7"
           placeholder="Örn. üreticinin ürün sayfasındaki teknik özellik bölümünü kopyalayıp buraya yapıştırın…"
         ></textarea>
-        <div class="src-hint">
-          <Icon name="info" :size="12" />
-          Yalnızca bu metinde geçen değerler kullanılır — hiçbir özellik uydurulmaz.
-        </div>
       </div>
 
       <!-- Doğrulanamayan satır uyarısı -->
@@ -203,10 +211,16 @@ function removeRow(gi: number, ri: number) {
         />
         {{ store.techStructuring ? "Yapılandırılıyor…" : hasSpecs ? "Yeniden Yapılandır" : "Yapılandır" }}
       </button>
-      <button v-if="hasSpecs" class="ghost" @click="copyHtml">
-        <Icon :name="copied ? 'check' : 'copy'" :size="14" />
-        {{ copied ? "Kopyalandı" : "HTML kopyala" }}
-      </button>
+        <button
+          v-if="store.settings?.ideasoft_active"
+          class="is-push"
+          :disabled="store.ideasoftBusy"
+          title="Bu kartın içeriğini IdeaSoft'a gönder"
+          @click="store.openIdeasoftPreview(['tech'])"
+        >
+          <Icon name="upload" :size="14" />
+          IdeaSoft'a Gönder
+        </button>
       <div style="flex:1"></div>
       <button class="done" :class="{ active: techDone }" @click="store.toggleTechDone()">
         <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
@@ -299,13 +313,40 @@ function removeRow(gi: number, ri: number) {
   resize: vertical;
   font-family: inherit;
 }
-.src-hint {
+.info-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.info {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--c-soft);
+}
+.copy {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  font-size: 11px;
-  color: var(--c-faint);
-  margin-top: 6px;
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 7px;
+  background: var(--c-input);
+  color: var(--c-mid);
+  font-size: 11.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+.copy:hover {
+  background: var(--c-hover);
+}
+.copy.ok {
+  color: var(--green);
+  border-color: var(--green);
 }
 .warn {
   display: flex;
@@ -535,6 +576,28 @@ function removeRow(gi: number, ri: number) {
 }
 .done.active {
   border-color: var(--green);
+}
+.is-push {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-input);
+  color: var(--c-mid);
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+.is-push:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.is-push:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .spin {
   animation: spin 0.8s linear infinite;

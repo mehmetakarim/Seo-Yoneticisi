@@ -14,6 +14,11 @@ const geminiKey = ref("");
 const capsolverKey = ref("");
 const seoCountry = ref("tr");
 const gscSiteUrl = ref("");
+const ideasoftDomain = ref("");
+const ideasoftToken = ref("");
+const showIsToken = ref(false);
+const isHint = ref("");
+const isOk = ref(false);
 const gscEmail = ref("");
 const showKey = ref(false);
 const showCapKey = ref(false);
@@ -35,6 +40,8 @@ onMounted(async () => {
   capsolverKey.value = store.settings.capsolver_api_key;
   seoCountry.value = store.settings.seo_country || "tr";
   gscSiteUrl.value = store.settings.gsc_site_url;
+  ideasoftDomain.value = store.settings.ideasoft_domain;
+  ideasoftToken.value = store.settings.ideasoft_token;
   gscEmail.value = store.settings.gsc_client_email;
 });
 
@@ -46,6 +53,8 @@ async function persist() {
       capsolverKey.value,
       seoCountry.value,
       gscSiteUrl.value,
+      ideasoftDomain.value,
+      ideasoftToken.value,
     );
     store.settings = await api.getSettings();
   } catch (e) {
@@ -173,6 +182,19 @@ async function openGuideLink(url?: string) {
     } catch {
       store.toast("Bağlantı açılamadı", "error");
     }
+  }
+}
+
+async function testIdeasoft() {
+  isHint.value = "Test ediliyor…";
+  isOk.value = false;
+  try {
+    await persist();
+    isOk.value = true;
+    isHint.value = await api.testIdeasoft();
+  } catch (e) {
+    isOk.value = false;
+    isHint.value = String(e);
   }
 }
 
@@ -395,6 +417,46 @@ async function doImport() {
             </div>
             <div class="fhint" :style="{ color: gscHint ? (gscOk ? 'var(--green)' : 'var(--red)') : 'var(--c-faint)' }">
               {{ gscHint }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- IdeaSoft (opsiyonel modül) -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ch-title">
+            <Icon name="upload" :size="17" style="color:var(--accent)" />
+            IdeaSoft Bağlantısı
+            <span class="opt-tag">opsiyonel</span>
+          </div>
+          <div class="ch-sub">
+            Doldurulursa kartlarda <b>“IdeaSoft'a Gönder”</b> butonu çıkar ve üretilen içerik tek tıkla
+            ürüne yazılır. Boş bırakırsanız uygulama kopyala-yapıştır akışıyla çalışmaya devam eder.
+          </div>
+        </div>
+        <div class="card-body">
+          <div>
+            <label class="lbl">Mağaza Adresi (admin)</label>
+            <div class="input-row">
+              <input class="fx inp" v-model="ideasoftDomain" @change="persist"
+                     placeholder="https://magazaniz.myideasoft.com" />
+            </div>
+          </div>
+          <div>
+            <label class="lbl">Access Token</label>
+            <div class="input-row">
+              <div class="key-wrap">
+                <input class="fx inp" v-model="ideasoftToken" @change="persist"
+                       :type="showIsToken ? 'text' : 'password'" placeholder="OTZjYWJh…" />
+                <button class="eye" title="Göster / Gizle" @click="showIsToken = !showIsToken">
+                  <Icon name="eye" :size="15" />
+                </button>
+              </div>
+              <button class="ghost" @click="testIdeasoft">Bağlantıyı test et</button>
+            </div>
+            <div class="fhint" :style="{ color: isHint ? (isOk ? 'var(--green)' : 'var(--red)') : 'var(--c-faint)' }">
+              {{ isHint || "Token günlük yenilenir; gönderim yetki hatası verirse buradan güncelleyin." }}
             </div>
           </div>
         </div>
@@ -744,6 +806,16 @@ async function doImport() {
 }
 .guide-link:hover {
   text-decoration: underline;
+}
+.opt-tag {
+  font-size: 10px;
+  font-weight: 640;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--c-soft);
+  background: var(--c-chip);
+  border-radius: 999px;
+  padding: 2px 8px;
 }
 .ghost.danger {
   color: var(--red);

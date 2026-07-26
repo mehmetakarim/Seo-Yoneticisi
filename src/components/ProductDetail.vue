@@ -9,6 +9,7 @@ import DetailsSeoCard from "./DetailsSeoCard.vue";
 import SeoResearchPanel from "./SeoResearchPanel.vue";
 import ImageScoreCard from "./ImageScoreCard.vue";
 import TechTableCard from "./TechTableCard.vue";
+import IdeasoftPushModal from "./IdeasoftPushModal.vue";
 
 const store = useStore();
 const detail = computed(() => store.detail);
@@ -100,6 +101,16 @@ async function openProduct() {
             <span>{{ detail.category || detail.main_category || "Kategori yok" }}</span>
             <span class="sep">·</span>
             <span>Stok: {{ detail.quantity ?? "—" }}</span>
+            <template v-if="detail.ideasoft_seo_rule !== null">
+              <span class="sep">·</span>
+              <span class="seo-rule" title="IdeaSoft'un kendi SEO kural skoru">
+                IdeaSoft SEO: <b>{{ detail.ideasoft_seo_rule }}</b>
+              </span>
+            </template>
+            <template v-if="detail.ideasoft_pushed_at">
+              <span class="sep">·</span>
+              <span class="pushed">IdeaSoft'a gönderildi · {{ detail.ideasoft_pushed_at.replace("T"," ").slice(5,16) }}</span>
+            </template>
           </div>
         </div>
       </div>
@@ -120,6 +131,26 @@ async function openProduct() {
           <Icon name="search" :size="13" :stroke-width="2" />
           SEO Araştır
         </button>
+        <template v-if="store.settings?.ideasoft_active">
+          <button
+            class="research-btn"
+            :disabled="store.ideasoftBusy"
+            title="Hedef kelimeyi IdeaSoft'tan getir"
+            @click="store.pullIdeasoftKeyword()"
+          >
+            <Icon name="download" :size="13" :stroke-width="2" />
+            Getir
+          </button>
+          <button
+            class="research-btn"
+            :disabled="store.ideasoftBusy || !keyword.trim()"
+            title="Hedef kelimeyi IdeaSoft'a gönder (SEO kural skorunu etkiler)"
+            @click="store.openIdeasoftPreview(['keyword'])"
+          >
+            <Icon name="upload" :size="13" :stroke-width="2" />
+            Gönder
+          </button>
+        </template>
         <span class="kw-hint">iki kart da bu kelimeyi kullanır</span>
       </div>
 
@@ -165,6 +196,8 @@ async function openProduct() {
         tıklayın veya <b>↑ ↓</b> ile gezinin.
       </div>
     </div>
+
+    <IdeasoftPushModal />
 
     <SeoResearchPanel
       :open="showResearch"
@@ -236,6 +269,18 @@ h1 {
 }
 .sep {
   color: var(--c-faint);
+}
+.pushed {
+  color: var(--green);
+  font-weight: 560;
+}
+.seo-rule {
+  color: var(--accent);
+  font-weight: 560;
+}
+.research-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .keyword-row {
   margin-top: 16px;

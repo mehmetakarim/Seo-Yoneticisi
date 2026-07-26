@@ -25,6 +25,8 @@ export interface ProductRow {
   overall: OverallStatus;
   meta_done: boolean;
   details_done: boolean;
+  tech_done: boolean;
+  image_count: number;
 }
 
 export interface ProductDetail {
@@ -46,6 +48,7 @@ export interface ProductDetail {
   target_keyword: string | null;
   draft_title: string | null;
   draft_descriptions: string | null;
+  draft_keywords: string | null;
   draft_search_keywords: string | null;
   draft_details: string | null;
   badge: MetaBadge;
@@ -62,6 +65,28 @@ export interface ProductDetail {
   tech_status: string;
   tech_badge: MetaBadge;
   tech_history: TechVersionMeta[];
+  ideasoft_pushed_at: string | null;
+  ideasoft_seo_rule: number | null;
+}
+
+/** IdeaSoft gönderim öncesi fark önizlemesi. */
+export interface IdeasoftRemote {
+  id: number;
+  sku: string;
+  name: string;
+  page_title: string;
+  meta_description: string;
+  meta_keywords: string;
+  search_keywords: string;
+  target_keyword: string;
+  details: string;
+  extra_details: string;
+  seo_rule_count: number | null;
+}
+export interface IdeasoftPreview {
+  id: number;
+  remote: IdeasoftRemote;
+  local: Record<string, unknown>;
 }
 
 /** Önceki teknik tablo sürümünün özeti (en yeni başta). */
@@ -102,6 +127,9 @@ export interface Settings {
   seo_country: string;
   gsc_site_url: string;
   gsc_client_email: string;
+  ideasoft_domain: string;
+  ideasoft_token: string;
+  ideasoft_active: boolean;
   theme: string | null;
   last_backup_at: string | null;
 }

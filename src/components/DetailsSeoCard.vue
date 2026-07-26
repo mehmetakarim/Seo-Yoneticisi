@@ -166,6 +166,16 @@ function genDetails() {
           {{ imageGateOk ? "uzun içerik · daha fazla kredi" : `En az 3 görsel gerekli (${imageCount}/4)` }}
         </span>
       </div>
+        <button
+          v-if="store.settings?.ideasoft_active"
+          class="is-push"
+          :disabled="store.ideasoftBusy"
+          title="Bu kartın içeriğini IdeaSoft'a gönder"
+          @click="store.openIdeasoftPreview(['details'])"
+        >
+          <Icon name="upload" :size="14" />
+          IdeaSoft'a Gönder
+        </button>
       <div style="flex:1"></div>
       <button class="done" :class="{ active: detailsDone }" @click="store.toggleDetailsDone()">
         <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
@@ -412,6 +422,28 @@ function genDetails() {
 .gen:disabled:not(.busy) {
   opacity: 0.45;
   cursor: not-allowed;
+}
+.is-push {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-input);
+  color: var(--c-mid);
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+.is-push:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.is-push:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .spin {
   animation: spin 0.8s linear infinite;

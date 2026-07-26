@@ -84,6 +84,10 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(conn, "seo_status", "tech_status", "TEXT DEFAULT 'pending'")?;
     // Faz 8b: önceki teknik tablo sürümleri (yeniden üretim öncesi anlık görüntü).
     add_column_if_missing(conn, "seo_status", "tech_history_json", "TEXT")?;
+    // Faz 9: IdeaSoft gönderim modülü (id cache + son gönderim zamanı).
+    add_column_if_missing(conn, "seo_status", "ideasoft_product_id", "INTEGER")?;
+    add_column_if_missing(conn, "seo_status", "ideasoft_pushed_at", "TEXT")?;
+    add_column_if_missing(conn, "seo_status", "ideasoft_seo_rule", "INTEGER")?;
     Ok(())
 }
 

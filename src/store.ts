@@ -7,6 +7,7 @@ import type {
   ProductRow,
   SeoInsights,
   Settings,
+  IdeasoftPreview,
   SyncSummary,
   TechGroup,
 } from "./types";
@@ -37,6 +38,9 @@ interface State {
   imageCheck: ImageCheck[] | null;
   techStructuring: boolean;
   techDropped: string[];
+  ideasoftBusy: boolean;
+  ideasoftPreview: IdeasoftPreview | null;
+  ideasoftParts: string[];
   lastSync: SyncSummary | null;
   showSummary: boolean;
   settings: Settings | null;
@@ -64,6 +68,9 @@ export const useStore = defineStore("app", {
     imageCheck: null,
     techStructuring: false,
     techDropped: [],
+    ideasoftBusy: false,
+    ideasoftPreview: null,
+    ideasoftParts: [],
     lastSync: null,
     showSummary: false,
     settings: null,
@@ -223,6 +230,56 @@ export const useStore = defineStore("app", {
         if (this.detail) this.detail.tech_specs = specs;
       } catch (e) {
         this.toast(String(e), "error");
+      }
+    },
+
+    // ---- Faz 9: IdeaSoft gönderimi ----
+    /** Fark önizlemesini açar (gönderim öncesi zorunlu adım). */
+    async openIdeasoftPreview(parts: string[]) {
+      if (!this.selectedSku || this.ideasoftBusy) return;
+      this.ideasoftBusy = true;
+      this.ideasoftParts = parts;
+      try {
+        this.ideasoftPreview = await api.ideasoftPreview(this.selectedSku, parts);
+      } catch (e) {
+        this.toast(String(e), "error");
+        this.ideasoftParts = [];
+      } finally {
+        this.ideasoftBusy = false;
+      }
+    },
+
+    /** Hedef kelimeyi IdeaSoft'tan çeker (yerel alan boşken faydalı). */
+    async pullIdeasoftKeyword() {
+      if (!this.selectedSku || this.ideasoftBusy) return;
+      this.ideasoftBusy = true;
+      try {
+        this.detail = await api.ideasoftPullKeyword(this.selectedSku);
+        this.toast(`Hedef kelime getirildi: "${this.detail.target_keyword ?? ""}"`, "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.ideasoftBusy = false;
+      }
+    },
+
+    closeIdeasoftPreview() {
+      this.ideasoftPreview = null;
+      this.ideasoftParts = [];
+    },
+
+    /** Onaylanan parçaları IdeaSoft'a yazar. */
+    async confirmIdeasoftPush() {
+      if (!this.selectedSku || this.ideasoftBusy || !this.ideasoftParts.length) return;
+      this.ideasoftBusy = true;
+      try {
+        this.detail = await api.ideasoftPush(this.selectedSku, this.ideasoftParts);
+        this.toast("IdeaSoft'a gönderildi ✓", "ok");
+        this.closeIdeasoftPreview();
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.ideasoftBusy = false;
       }
     },
 

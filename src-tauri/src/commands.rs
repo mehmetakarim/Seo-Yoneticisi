@@ -1,7 +1,9 @@
+use crate::ideasoft;
 use crate::images::{self, ImageCheck};
 use crate::seo_data::{self, SeoInsights};
 use crate::validation::{
-    details_badge, image_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallStatus,
+    details_badge, image_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallInput,
+    OverallStatus,
 };
 use crate::{db, feed, gemini, sync};
 use rusqlite::{params, Connection};
@@ -31,6 +33,8 @@ pub struct ProductRow {
     pub overall: OverallStatus,
     pub meta_done: bool,
     pub details_done: bool,
+    pub tech_done: bool,
+    pub image_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,6 +57,7 @@ pub struct ProductDetail {
     pub target_keyword: Option<String>,
     pub draft_title: Option<String>,
     pub draft_descriptions: Option<String>,
+    pub draft_keywords: Option<String>,
     pub draft_search_keywords: Option<String>,
     pub draft_details: Option<String>,
     pub badge: MetaBadge,
@@ -70,6 +75,10 @@ pub struct ProductDetail {
     pub tech_badge: MetaBadge,
     /// Önceki sürümlerin hafif özeti (en yeni başta).
     pub tech_history: Vec<TechVersionMeta>,
+    // Faz 9: IdeaSoft
+    pub ideasoft_pushed_at: Option<String>,
+    /// IdeaSoft'un kendi SEO kural skoru (yalnızca liste ucunda dolu gelir, cache'lenir).
+    pub ideasoft_seo_rule: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,6 +94,10 @@ pub struct Settings {
     /// Faz 5: yüklü service-account'un e-postası (yalnızca gösterim; private key sızmaz).
     /// Boş → GSC yapılandırılmamış.
     pub gsc_client_email: String,
+    /// Faz 9: IdeaSoft modülü (boşsa modül kapalı, kopyala-yapıştır akışı sürer).
+    pub ideasoft_domain: String,
+    pub ideasoft_token: String,
+    pub ideasoft_active: bool,
     pub theme: Option<String>,
     pub last_backup_at: Option<String>,
 }
@@ -103,6 +116,9 @@ struct RowData {
     draft_title: Option<String>,
     draft_descriptions: Option<String>,
     draft_details: Option<String>,
+    tech_status: String,
+    tech_specs_json: Option<String>,
+    image_count: usize,
 }
 
 /// Meta rozeti — taslak varsa taslak (NULL değilse) yoksa feed değeri üzerinden.
@@ -154,7 +170,9 @@ pub fn list_products(
         .prepare(
             "SELECT p.sku, p.name, p.brand, p.img_url, p.title, p.descriptions, p.details,
                     COALESCE(s.meta_status,'pending'), COALESCE(s.details_status,'pending'),
-                    s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_details
+                    s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_details,
+                    COALESCE(s.tech_status,'pending'), s.tech_specs_json,
+                    p.picture2, p.picture3, p.picture4
              FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
              ORDER BY p.name COLLATE NOCASE",
         )
@@ -175,6 +193,17 @@ pub fn list_products(
                 draft_title: row.get(10)?,
                 draft_descriptions: row.get(11)?,
                 draft_details: row.get(12)?,
+                tech_status: row.get(13)?,
+                tech_specs_json: row.get(14)?,
+                image_count: [
+                    row.get::<_, Option<String>>(3)?,   // img_url
+                    row.get::<_, Option<String>>(15)?,  // picture2
+                    row.get::<_, Option<String>>(16)?,  // picture3
+                    row.get::<_, Option<String>>(17)?,  // picture4
+                ]
+                .into_iter()
+                .filter(|u| u.as_deref().map_or(false, |x| !x.trim().is_empty()))
+                .count(),
             })
         })
         .map_err(|e| format!("Ürün listesi okunamadı: {e}"))?
@@ -194,7 +223,20 @@ pub fn list_products(
         let details = details_badge_of(&r);
         let meta_done = r.meta_status == "done";
         let details_done = r.details_status == "done";
-        let overall = overall_status(meta, details, meta_done, details_done);
+        let has_tech = r
+            .tech_specs_json
+            .as_deref()
+            .map(str::trim)
+            .map_or(false, |j| !j.is_empty() && j != "[]");
+        let overall = overall_status(&OverallInput {
+            meta,
+            details,
+            meta_done,
+            details_done,
+            tech_done: r.tech_status == "done",
+            has_tech,
+            image_count: r.image_count,
+        });
         let keep = match f.as_str() {
             "" | "hepsi" => true, // filtre yok: tamamlananlar dahil her şey
             "tumu" => overall != OverallStatus::Tamamlandi,
@@ -216,6 +258,8 @@ pub fn list_products(
                 overall,
                 meta_done,
                 details_done,
+                tech_done: r.tech_status == "done",
+                image_count: r.image_count,
             });
         }
     }
@@ -228,25 +272,26 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 p.img_url, p.title, p.descriptions, p.keywords, p.search_keywords, p.details,
                 COALESCE(s.meta_status,'pending'), COALESCE(s.details_status,'pending'),
                 s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_search_keywords,
-                s.draft_details, p.picture2, p.picture3, p.picture4, s.image_check_json,
+                s.draft_details, s.draft_keywords, p.picture2, p.picture3, p.picture4, s.image_check_json,
                 s.tech_source_text, s.tech_specs_json, COALESCE(s.tech_status,'pending'),
-                s.tech_history_json
+                s.tech_history_json, s.ideasoft_pushed_at, s.ideasoft_seo_rule
          FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
          WHERE p.sku = ?1",
         [&sku],
         |row| {
             let img_url: Option<String> = row.get(7)?;
-            let picture2: Option<String> = row.get(20)?;
-            let picture3: Option<String> = row.get(21)?;
-            let picture4: Option<String> = row.get(22)?;
-            let check_json: Option<String> = row.get(23)?;
-            let tech_source_text: Option<String> = row.get(24)?;
+            let draft_keywords: Option<String> = row.get(20)?;
+            let picture2: Option<String> = row.get(21)?;
+            let picture3: Option<String> = row.get(22)?;
+            let picture4: Option<String> = row.get(23)?;
+            let check_json: Option<String> = row.get(24)?;
+            let tech_source_text: Option<String> = row.get(25)?;
             let tech_specs: Option<Vec<gemini::TechGroup>> = row
-                .get::<_, Option<String>>(25)?
+                .get::<_, Option<String>>(26)?
                 .as_deref()
                 .and_then(|j| serde_json::from_str(j).ok());
-            let tech_status: String = row.get(26)?;
-            let tech_history: Vec<TechVersionMeta> = parse_history(row.get::<_, Option<String>>(27)?.as_deref())
+            let tech_status: String = row.get(27)?;
+            let tech_history: Vec<TechVersionMeta> = parse_history(row.get::<_, Option<String>>(28)?.as_deref())
                 .into_iter()
                 .map(|v| TechVersionMeta {
                     at: v.at,
@@ -282,6 +327,7 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 draft_descriptions: row.get(17)?,
                 draft_search_keywords: row.get(18)?,
                 draft_details: row.get(19)?,
+                draft_keywords,
                 badge: MetaBadge::Eksik,       // aşağıda hesaplanır
                 details_badge: MetaBadge::Eksik, // aşağıda hesaplanır
                 overall: OverallStatus::Eksik,   // aşağıda hesaplanır
@@ -300,6 +346,8 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 tech_specs,
                 tech_status,
                 tech_history,
+                ideasoft_pushed_at: row.get(29)?,
+                ideasoft_seo_rule: row.get(30)?,
             })
         },
     )
@@ -320,12 +368,15 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
         });
         let details_html = d.draft_details.as_deref().unwrap_or(d.details.as_deref().unwrap_or(""));
         d.details_badge = details_badge(details_html, kw, d.details_status == "done");
-        d.overall = overall_status(
-            d.badge,
-            d.details_badge,
-            d.meta_status == "done",
-            d.details_status == "done",
-        );
+        d.overall = overall_status(&OverallInput {
+            meta: d.badge,
+            details: d.details_badge,
+            meta_done: d.meta_status == "done",
+            details_done: d.details_status == "done",
+            tech_done: d.tech_status == "done",
+            has_tech: d.tech_specs.as_ref().map_or(false, |g| !g.is_empty()),
+            image_count: d.image_count,
+        });
         // Görsel skoru: sayı + (varsa) cache'lenmiş boyut sonucu.
         let all_dims_ok = d.image_check.as_ref().map(|c| !c.is_empty() && c.iter().all(|x| x.ok));
         d.image_badge = image_badge(d.image_count, all_dims_ok);
@@ -621,6 +672,181 @@ pub async fn check_images(state: State<'_, AppState>, sku: String) -> Result<Vec
         .map_err(|e| format!("Görsel kontrolü kaydedilemedi: {e}"))?;
     }
     Ok(checks)
+}
+
+// ---- Faz 9: IdeaSoft gönderim modülü (opsiyonel) ----
+
+#[derive(Debug, Serialize)]
+pub struct IdeasoftPreview {
+    pub id: i64,
+    pub remote: ideasoft::RemoteProduct,
+    /// Gönderilecek değerler (yalnızca seçilen parçalar).
+    pub local: serde_json::Value,
+}
+
+/// Ayar + yerel içerikleri toplar; `parts` için gönderilecek `LocalContent` üretir.
+fn ideasoft_local(conn: &Connection, sku: &str) -> Result<(String, String, ideasoft::LocalContent), String> {
+    let domain = db::get_setting(conn, "ideasoft_domain")?.unwrap_or_default();
+    let token = db::get_setting(conn, "ideasoft_token")?.unwrap_or_default();
+    if domain.trim().is_empty() || token.trim().is_empty() {
+        return Err("IdeaSoft bağlantısı ayarlı değil. Ayarlar'dan domain ve token girin.".to_string());
+    }
+    let d = read_detail(conn, sku)?;
+    let tech_html = d
+        .tech_specs
+        .as_ref()
+        .filter(|g| !g.is_empty())
+        .map(|g| gemini::assemble_tech_html(g))
+        .unwrap_or_default();
+    let local = ideasoft::LocalContent {
+        page_title: d.draft_title.clone().or(d.title.clone()).unwrap_or_default(),
+        meta_description: d.draft_descriptions.clone().or(d.descriptions.clone()).unwrap_or_default(),
+        // Üretilen anahtar kelimeler (draft) önceliklidir; yoksa feed'deki, o da yoksa arama kelimeleri
+        // — böylece metaKeywords boş kalmaz (saha testi bulgusu).
+        meta_keywords: d
+            .draft_keywords
+            .clone()
+            .or(d.keywords.clone())
+            .or(d.draft_search_keywords.clone())
+            .unwrap_or_default(),
+        search_keywords: d
+            .draft_search_keywords
+            .clone()
+            .or(d.search_keywords.clone())
+            .unwrap_or_default(),
+        target_keyword: d.target_keyword.clone().unwrap_or_default(),
+        details_html: d.draft_details.clone().or(d.details.clone()).unwrap_or_default(),
+        tech_html,
+    };
+    Ok((domain, token, local))
+}
+
+/// sku → IdeaSoft id (önce cache, yoksa arama; bulununca cache'lenir).
+async fn ideasoft_id_for(
+    state: &State<'_, AppState>,
+    sku: &str,
+    domain: &str,
+    token: &str,
+) -> Result<i64, String> {
+    let cached: Option<i64> = {
+        let conn = state.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT ideasoft_product_id FROM seo_status WHERE sku = ?1",
+            [sku],
+            |r| r.get(0),
+        )
+        .unwrap_or(None)
+    };
+    if let Some(id) = cached.filter(|v| *v > 0) {
+        return Ok(id);
+    }
+    let r = ideasoft::resolve(domain, token, sku)
+        .await?
+        .ok_or_else(|| format!("Bu sku IdeaSoft'ta bulunamadı: {sku}"))?;
+    {
+        let conn = state.conn.lock().unwrap();
+        ensure_seo_row(&conn, sku)?;
+        conn.execute(
+            "UPDATE seo_status SET ideasoft_product_id = ?2, ideasoft_seo_rule = ?3 WHERE sku = ?1",
+            params![sku, r.id, r.seo_rule_count],
+        )
+        .map_err(|e| format!("IdeaSoft id kaydedilemedi: {e}"))?;
+    }
+    Ok(r.id)
+}
+
+#[tauri::command]
+pub async fn test_ideasoft(state: State<'_, AppState>) -> Result<String, String> {
+    let (domain, token) = {
+        let conn = state.conn.lock().unwrap();
+        (
+            db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default(),
+            db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default(),
+        )
+    };
+    ideasoft::test_connection(&domain, &token).await
+}
+
+/// Gönderim öncesi fark önizlemesi — uzaktaki mevcut değerler + gönderilecek gövde.
+#[tauri::command]
+pub async fn ideasoft_preview(
+    state: State<'_, AppState>,
+    sku: String,
+    parts: Vec<String>,
+) -> Result<IdeasoftPreview, String> {
+    let (domain, token, local) = {
+        let conn = state.conn.lock().unwrap();
+        ideasoft_local(&conn, &sku)?
+    };
+    let id = ideasoft_id_for(&state, &sku, &domain, &token).await?;
+    let remote = ideasoft::fetch_product(&domain, &token, id).await?;
+    Ok(IdeasoftPreview { id, remote, local: ideasoft::build_payload(&parts, &local) })
+}
+
+/// IdeaSoft'taki hedef kelimeyi çeker ve yerel alana yazar (boş başlangıç sorununu çözer).
+#[tauri::command]
+pub async fn ideasoft_pull_keyword(
+    state: State<'_, AppState>,
+    sku: String,
+) -> Result<ProductDetail, String> {
+    let (domain, token) = {
+        let conn = state.conn.lock().unwrap();
+        let d = db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default();
+        let t = db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default();
+        if d.trim().is_empty() || t.trim().is_empty() {
+            return Err("IdeaSoft bağlantısı ayarlı değil.".to_string());
+        }
+        (d, t)
+    };
+    let id = ideasoft_id_for(&state, &sku, &domain, &token).await?;
+    let remote = ideasoft::fetch_product(&domain, &token, id).await?;
+    let kw = remote.target_keyword.trim().to_string();
+    if kw.is_empty() {
+        return Err("IdeaSoft'ta bu ürün için hedef kelime tanımlı değil.".to_string());
+    }
+    let conn = state.conn.lock().unwrap();
+    ensure_seo_row(&conn, &sku)?;
+    conn.execute(
+        "UPDATE seo_status SET target_keyword = ?2, updated_at = ?3 WHERE sku = ?1",
+        params![sku, kw, now_str()],
+    )
+    .map_err(|e| format!("Hedef kelime kaydedilemedi: {e}"))?;
+    read_detail(&conn, &sku)
+}
+
+/// Seçilen parçaları IdeaSoft'a yazar. `parts` ∈ meta | keyword | details | tech.
+#[tauri::command]
+pub async fn ideasoft_push(
+    state: State<'_, AppState>,
+    sku: String,
+    parts: Vec<String>,
+) -> Result<ProductDetail, String> {
+    let (domain, token, local) = {
+        let conn = state.conn.lock().unwrap();
+        ideasoft_local(&conn, &sku)?
+    };
+    let payload = ideasoft::build_payload(&parts, &local);
+    if payload.as_object().map_or(true, |o| o.is_empty()) {
+        return Err("Gönderilecek içerik yok — önce üretim yapın.".to_string());
+    }
+    let id = ideasoft_id_for(&state, &sku, &domain, &token).await?;
+    // IdeaSoft `detail.details`'in null olmasına izin vermiyor → eksik alt alanları uzaktakiyle doldur
+    // (dokunulmayan taraf aynen korunur).
+    let mut payload = payload;
+    if payload.get("detail").is_some() {
+        let remote = ideasoft::fetch_product(&domain, &token, id).await?;
+        ideasoft::fill_detail_from_remote(&mut payload, &remote);
+    }
+    ideasoft::push_product(&domain, &token, id, &payload).await?;
+
+    let conn = state.conn.lock().unwrap();
+    ensure_seo_row(&conn, &sku)?;
+    conn.execute(
+        "UPDATE seo_status SET ideasoft_pushed_at = ?2, updated_at = ?2 WHERE sku = ?1",
+        params![sku, now_str()],
+    )
+    .map_err(|e| format!("Gönderim zamanı kaydedilemedi: {e}"))?;
+    read_detail(&conn, &sku)
 }
 
 // ---- Faz 8: teknik özellik tablosu ----
@@ -1049,6 +1275,10 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
             .as_deref()
             .and_then(seo_data::gsc::client_email_of)
             .unwrap_or_default(),
+        ideasoft_domain: db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default(),
+        ideasoft_token: db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default(),
+        ideasoft_active: !db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default().trim().is_empty()
+            && !db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default().trim().is_empty(),
         theme: db::get_setting(&conn, "theme")?,
         last_backup_at: db::get_setting(&conn, "last_backup_at")?,
     })
@@ -1062,6 +1292,8 @@ pub fn save_settings(
     capsolver_api_key: String,
     seo_country: String,
     gsc_site_url: String,
+    ideasoft_domain: String,
+    ideasoft_token: String,
 ) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
     let url = feed_url.trim();
@@ -1075,6 +1307,8 @@ pub fn save_settings(
     let country = if country.is_empty() { "tr".to_string() } else { country };
     db::set_setting(&conn, "seo_country", &country)?;
     db::set_setting(&conn, "gsc_site_url", gsc_site_url.trim())?;
+    db::set_setting(&conn, "ideasoft_domain", ideasoft_domain.trim())?;
+    db::set_setting(&conn, "ideasoft_token", ideasoft_token.trim())?;
     Ok(())
 }
 
@@ -1200,6 +1434,7 @@ fn export_json(conn: &Connection) -> Result<String, String> {
             "draft_descriptions", "draft_keywords", "draft_search_keywords", "updated_at",
             "draft_details", "research_json", "image_check_json", "image_check_fp",
             "tech_source_text", "tech_specs_json", "tech_status", "tech_history_json",
+            "ideasoft_product_id", "ideasoft_pushed_at", "ideasoft_seo_rule",
         ],
     )?;
     let log = dump(
@@ -1291,8 +1526,9 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
             "INSERT OR REPLACE INTO seo_status (sku, meta_status, details_status, target_keyword,
                draft_title, draft_descriptions, draft_keywords, draft_search_keywords, updated_at,
                draft_details, research_json, image_check_json, image_check_fp,
-               tech_source_text, tech_specs_json, tech_status, tech_history_json)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+               tech_source_text, tech_specs_json, tech_status, tech_history_json,
+               ideasoft_product_id, ideasoft_pushed_at, ideasoft_seo_rule)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
             params![
                 s(&r, "sku"),
                 s(&r, "meta_status").unwrap_or_else(|| "pending".into()),
@@ -1302,7 +1538,8 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
                 s(&r, "draft_details"), s(&r, "research_json"), s(&r, "image_check_json"),
                 s(&r, "image_check_fp"), s(&r, "tech_source_text"), s(&r, "tech_specs_json"),
                 s(&r, "tech_status").unwrap_or_else(|| "pending".into()),
-                s(&r, "tech_history_json"),
+                s(&r, "tech_history_json"), i(&r, "ideasoft_product_id"),
+                s(&r, "ideasoft_pushed_at"), i(&r, "ideasoft_seo_rule"),
             ],
         )
         .map_err(|e| format!("SEO durumu geri yüklenemedi: {e}"))?;

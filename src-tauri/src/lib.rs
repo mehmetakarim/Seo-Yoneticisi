@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod feed;
 mod gemini;
+mod ideasoft;
 mod images;
 mod seo_data;
 mod sync;
@@ -49,6 +50,10 @@ pub fn run() {
             commands::tech_table_html,
             commands::mark_tech_done,
             commands::restore_tech_version,
+            commands::test_ideasoft,
+            commands::ideasoft_preview,
+            commands::ideasoft_push,
+            commands::ideasoft_pull_keyword,
             commands::research_seo,
             commands::get_settings,
             commands::save_settings,

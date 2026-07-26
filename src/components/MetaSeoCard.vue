@@ -165,6 +165,16 @@ function genMeta() {
         <Icon :name="store.generating ? 'loader' : 'sparkles'" :size="15" :stroke-width="store.generating ? 2.2 : 1.9" :class="{ spin: store.generating }" />
         {{ store.generating ? "Üretiliyor…" : "Gemini ile Üret" }}
       </button>
+        <button
+          v-if="store.settings?.ideasoft_active"
+          class="is-push"
+          :disabled="store.ideasoftBusy"
+          title="Bu kartın içeriğini IdeaSoft'a gönder"
+          @click="store.openIdeasoftPreview(['meta'])"
+        >
+          <Icon name="upload" :size="14" />
+          IdeaSoft'a Gönder
+        </button>
       <div style="flex:1"></div>
       <button class="done" :class="{ active: metaDone }" @click="emit('toggleDone')">
         <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
@@ -364,6 +374,28 @@ function genMeta() {
 }
 .gen.busy {
   opacity: 0.75;
+  cursor: default;
+}
+.is-push {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-input);
+  color: var(--c-mid);
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+.is-push:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.is-push:disabled {
+  opacity: 0.5;
   cursor: default;
 }
 .spin {
