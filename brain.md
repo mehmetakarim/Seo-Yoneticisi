@@ -9,10 +9,11 @@
 **Yayınlanan sürümler:** v0.1.0 → v0.5.0 · **v0.5.1 = updater düzeltmesi (createUpdaterArtifacts)**
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
-1. **v0.5.1 release'i doğrulanmalı:** Release'de **`latest.json` ve `.sig`** dosyaları var mı?
-   (v0.5.0'da yoktu — `bundle.createUpdaterArtifacts` eksikti, v0.5.1'de eklendi.)
-   Kontrol: `gh release view v0.5.1 --json assets --jq '.assets[].name'`
-   Varsa otomatik güncelleme zinciri tamam demektir; ilk canlı test bir sonraki sürümde yapılır.
+1. ✅ **v0.5.1 updater zinciri DOĞRULANDI (2026-07-26):** Release'de `latest.json` + 3 `.sig` var;
+   manifest 7 platform girdisi içeriyor (darwin-aarch64/x86_64[-app], windows-x86_64[-msi/-nsis]),
+   hepsinde geçerli imza ve URL. **Otomatik güncelleme altyapısı çalışır durumda.**
+   → Kalan tek doğrulama saha testi: v0.5.1'i kurup **bir sonraki sürüm** yayınlandığında
+   güncelleme modalının kendiliğinden çıkması. (v0.5.0 ve öncesi elle kurulmalı.)
 2. **Sıradaki kuyruk (kullanıcı onaylı):** mimari toparlama (navigasyon kabuğu + gruplandırılmış menü;
    `gemini.rs` ~2000, `commands.rs` ~1700 satır → modül bölme; store ayırma; derleme ~8-9 dk çok yavaş)
    → GSC fırsat analizi (2. sayfadaki ürünler, gösterim var tıklama yok) + meta/açıklama sürüm geçmişi
