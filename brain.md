@@ -23,8 +23,12 @@
      geçmişinde** gerçek anahtar YOK (Gemini/CapSolver/GSC/minisign hepsi depo dışında). Tek bulgu bir
      input placeholder'ındaki token parçasıydı → temizlendi (`061cec9`). `.gitignore`'a
      `.env`/`*.key`/`*.pem`/`*-service-account*.json`/`*.db` koruması eklendi.
-   → **v0.5.2 bu saha testinin ta kendisi:** v0.5.1 kurulu makinede güncelleme modalı kendiliğinden
-   çıkmalı. Çıkarsa updater zinciri uçtan uca kanıtlanmış olur. (v0.5.0 ve öncesi elle kurulmalı.)
+   - ✅ **SAHA TESTİ GEÇTİ (v0.5.1 → v0.5.2, 2026-07-26).** Kullanıcının kurulu v0.5.1'inde güncelleme
+     modalı kendiliğinden çıktı, indirme + yeniden başlatma sorunsuz. **Faz 10 KAPANDI** —
+     otomatik güncelleme artık varsayım değil, kanıtlanmış. (v0.5.0 ve öncesi elle kurulmalı.)
+   - Her release'de doğrulanacak son halka: imzaların key ID'si `tauri.conf.json`'daki pubkey ile
+     eşleşmeli (`6cbd59ca8b792915`). Eşleşmezse güncelleme *iner* ama doğrulamada reddedilir —
+     bu sessiz hatayı yalnızca son kullanıcı görür, o yüzden yayından sonra kontrol et.
 
 ### 🎨 Tooltip deseni (v0.5.2)
 Butonların ALTINA açıklama satırı koymak eylem satırının hizasını bozuyor (flex + `align-items:center`).
