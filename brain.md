@@ -480,6 +480,36 @@ Kullanıcının IdeaSoft modülünü sahada denemesiyle çıkan 6 madde:
    - Üst şeritte "Son güncelleme" altında **tek ilerleme çubuğu**: "164/264 tamamlandı".
    - ⚠️ Beklenen etki: teknik tablosu olmayan ürünler artık "Tamamlandı" görünmez (dürüst ölçüm).
 
+## ✅ Faz 10 — Otomatik güncelleme (Tauri updater)
+
+Kullanıcı: "olmazsa olmazlarımızdan biri" — açılışta kontrol, bildirim, tek tıkla kendi kendine güncelleme.
+
+### Önemli: imza anahtarı ≠ kod imzalama
+Tauri updater kendi **minisign** anahtar çiftini kullanır; **ücretsiz** ve Apple/Microsoft kod imzalama
+sertifikalarından bağımsızdır. Yani kod imzalama ertelenmişken bile otomatik güncelleme çalışır
+(Gatekeeper/SmartScreen uyarısı devam eder).
+
+### Yapıldı
+- Anahtar çifti üretildi; **GitHub secret'ları ayarlandı**: `TAURI_SIGNING_PRIVATE_KEY`,
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (boş).
+  ⚠️ **Gizli anahtar yedeklenmeli** — kaybolursa mevcut kurulumlar bir daha otomatik güncellenemez.
+  (Anahtar depoya KONULMADI; kullanıcıya kalıcı yere kopyalaması söylendi.)
+- `Cargo.toml`: `tauri-plugin-updater` + `tauri-plugin-process`, **yalnızca masaüstü hedefinde**
+  (`[target.'cfg(not(any(target_os="android",target_os="ios")))'.dependencies]`, dosya SONUNDA —
+  `[dependencies]` ortasına konursa kalan bağımlılıklar bozulur).
+- `lib.rs`: eklentiler **tek `setup()` içinde** kaydedildi (ikinci bir `.setup()` birincisini ezer).
+- `tauri.conf.json`: `plugins.updater` → endpoint `.../releases/latest/download/latest.json` + public key.
+- `capabilities/default.json`: `updater:default`, `process:allow-restart`.
+- CI: imzalama env değişkenleri + **`includeUpdaterJson: true`** → her release'e `latest.json` eklenir.
+- **Frontend**: `UpdateModal.vue` (sürüm notu, indirme yüzdesi/boyutu, "Şimdi güncelle"/"Sonra",
+  diğer modallarla aynı animasyon dili). store: `checkUpdate(silent)`, `runUpdate`, `dismissUpdate`,
+  `appVersion`. Açılışta **sessiz** kontrol (ağ yoksa kullanıcıyı rahatsız etmez) +
+  Ayarlar'da "Uygulama Sürümü" kartı → "Şimdi denetle".
+
+### ⚠️ Devreye girme koşulu
+Otomatik güncelleme **v0.5.0'dan itibaren** çalışır: v0.4.0 release'inde `latest.json` yok.
+v0.4.0 kullanıcılarının bir kez elle güncellemesi gerekir; sonrası otomatik.
+
 ## 🎯 Sonraki olası işler (opsiyonel)
 - Toplu üretim (seçili ürünler için sırayla meta/details) + ilerleme çubuğu
 - Gemini kota/kullanım göstergesi, model seçimi Ayarlar'da
