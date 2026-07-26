@@ -102,24 +102,38 @@ pub enum OverallStatus {
     Tamamlandi,
 }
 
-/// İki boyutlu (Meta + Açıklama) liste durumu — prototipteki `overall()` mantığı.
-pub fn overall_status(
-    meta: MetaBadge,
-    details: MetaBadge,
-    meta_done: bool,
-    details_done: bool,
-) -> OverallStatus {
-    if meta_done && details_done {
+/// Bir ürünün tüm iş boyutları (liste durumu bunlardan hesaplanır).
+pub struct OverallInput {
+    pub meta: MetaBadge,
+    pub details: MetaBadge,
+    pub meta_done: bool,
+    pub details_done: bool,
+    /// Faz 8: teknik tablo tamamlandı mı? (Faz 9b: tamamlanma ölçütüne dahil)
+    pub tech_done: bool,
+    pub has_tech: bool,
+    /// Faz 7: galeri görseli sayısı — 3'ten azsa üretim zaten engelli, durum "Eksik".
+    pub image_count: usize,
+}
+
+/// **Dört boyutlu** liste durumu: Meta + Açıklama + Teknik tablo + Görsel.
+/// Tamamlandı = üçü de "Tamamlandı" işaretli. 3'ten az görsel → Eksik (üretim engelli).
+pub fn overall_status(i: &OverallInput) -> OverallStatus {
+    if i.meta_done && i.details_done && i.tech_done {
         return OverallStatus::Tamamlandi;
     }
-    if meta_done && !details_done {
-        return OverallStatus::Bekliyor;
-    }
-    if meta == MetaBadge::Eksik || details == MetaBadge::Eksik {
+    // Görsel yetersizse hiçbir şey üretilemez → önce bu giderilmeli
+    if i.image_count < 3 {
         return OverallStatus::Eksik;
     }
-    if meta == MetaBadge::Hatali || details == MetaBadge::Hatali {
+    if i.meta == MetaBadge::Eksik || i.details == MetaBadge::Eksik || !i.has_tech {
+        return OverallStatus::Eksik;
+    }
+    if i.meta == MetaBadge::Hatali || i.details == MetaBadge::Hatali {
         return OverallStatus::Hatali;
+    }
+    // İçerik hazır ama tamamlandı işaretlenmemiş
+    if i.meta_done || i.details_done || i.tech_done {
+        return OverallStatus::Bekliyor;
     }
     OverallStatus::Uygun
 }
@@ -230,6 +244,46 @@ mod tests {
         assert_eq!(html_strip(html), "Başlık Bir iki üç & dört");
         assert_eq!(word_count(html), 6);
         assert_eq!(word_count(""), 0);
+    }
+
+    fn ov(meta_done: bool, details_done: bool, tech_done: bool, has_tech: bool, imgs: usize) -> OverallStatus {
+        overall_status(&OverallInput {
+            meta: MetaBadge::Uygun,
+            details: MetaBadge::Uygun,
+            meta_done,
+            details_done,
+            tech_done,
+            has_tech,
+            image_count: imgs,
+        })
+    }
+
+    #[test]
+    fn overall_requires_all_three_dimensions() {
+        // Üçü de done → Tamamlandı
+        assert_eq!(ov(true, true, true, true, 4), OverallStatus::Tamamlandi);
+        // Teknik tablo eksik → artık Tamamlandı DEĞİL
+        assert_eq!(ov(true, true, false, true, 4), OverallStatus::Bekliyor);
+        // Hiç teknik tablo yok → Eksik
+        assert_eq!(ov(false, false, false, false, 4), OverallStatus::Eksik);
+        // Görsel 3'ten az → üretim engelli → Eksik (içerik hazır olsa bile)
+        assert_eq!(ov(false, false, false, true, 2), OverallStatus::Eksik);
+        // Her şey hazır, hiçbiri işaretlenmemiş → Uygun
+        assert_eq!(ov(false, false, false, true, 3), OverallStatus::Uygun);
+    }
+
+    #[test]
+    fn overall_flags_broken_content() {
+        let st = overall_status(&OverallInput {
+            meta: MetaBadge::Hatali,
+            details: MetaBadge::Uygun,
+            meta_done: false,
+            details_done: false,
+            tech_done: false,
+            has_tech: true,
+            image_count: 4,
+        });
+        assert_eq!(st, OverallStatus::Hatali);
     }
 
     #[test]

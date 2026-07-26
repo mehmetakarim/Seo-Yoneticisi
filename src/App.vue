@@ -20,6 +20,12 @@ const pageSub = computed(() => {
   return `${active} ürün bekliyor · ${done} tamamlandı`;
 });
 
+// İş takibi: tamamlanan ürün oranı (meta + açıklama + teknik tablo hepsi işaretli).
+const donePct = computed(() => {
+  const total = store.allRows.length;
+  return total ? Math.round((store.counts.tamamlandi / total) * 100) : 0;
+});
+
 function fmtSync(): string {
   if (!store.lastSync) return "henüz senkron yok";
   return store.lastSync.run_at.replace("T", " ").slice(0, 16);
@@ -75,7 +81,15 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
           <div class="pg-sub">{{ pageSub }}</div>
         </div>
         <div v-if="isProducts" class="topbar-right">
-          <span class="last">Son güncelleme: {{ fmtSync() }}</span>
+          <div class="sync-info">
+            <span class="last">Son güncelleme: {{ fmtSync() }}</span>
+            <div v-if="store.allRows.length" class="progress" :title="`${store.counts.tamamlandi} ürün tamamlandı`">
+              <div class="pbar">
+                <div class="pfill" :style="{ width: donePct + '%' }"></div>
+              </div>
+              <span class="ptext">{{ store.counts.tamamlandi }}/{{ store.allRows.length }} tamamlandı</span>
+            </div>
+          </div>
           <button class="sync" :disabled="store.syncing" @click="store.sync()">
             <Icon name="refresh" :size="16" :class="{ spin: store.syncing }" />
             <span>{{ store.syncing ? "Güncelleniyor…" : "Manuel Güncelle" }}</span>
@@ -144,9 +158,39 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
   align-items: center;
   gap: 16px;
 }
+.sync-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
 .last {
   font-size: 12.5px;
   color: var(--c-soft);
+}
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pbar {
+  width: 140px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--c-track);
+  overflow: hidden;
+}
+.pfill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 999px;
+  transition: width 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.ptext {
+  font-size: 11px;
+  color: var(--c-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .sync {
   display: flex;
