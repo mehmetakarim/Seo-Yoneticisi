@@ -7,7 +7,10 @@ edition = "2021"
 
 [lib]
 name = "seo_yoneticisi_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# `staticlib` yalnızca iOS için üretilir; bu projede mobil hedef yok ve main.rs rlib'i
+# kullanıyor. Her derlemede boşuna 463 MB `.a` yazılıyordu — harici USB diskte (19 MB/s)
+# ciddi maliyet. `cdylib` (Android) yalnızca 0.5 MB, Tauri araçları bekleyebilir → duruyor.
+crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -39,3 +42,22 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# ── Derleme hızı (2026-07-26 ölçümleri) ─────────────────────────────────────
+# Proje harici USB diskte: 19 MB/s (dahili SSD 518 MB/s). Tek dosya değişince
+# `cargo build` 5dk23sn sürüyordu ama bunun yalnızca 21 saniyesi CPU işiydi
+# (%6) — zamanın %94'ü disk beklemesi. `deps/` 5.8 GB ve link aşamasında
+# okunuyor; hacmin çoğu, içine hiç girmediğimiz bağımlılıkların debug bilgisi.
+# NOT: bu tablo dosyanın SONUNDA durmalı — [target...] tablosunun içine
+# düşerse Cargo tarafından o hedefin bir parçası sanılır.
+[profile.dev]
+debug = 1                 # kendi kodumuz: backtrace'te satır numarası korunur
+# Inkremental derleme KAPALI — sezgiye aykırı ama bu projede ölçülerek doğrulandı:
+# tek dosya değişikliğinde 4dk15sn → 3dk01sn (−74 sn). Sebep, inkremental önbelleğin
+# 1.5 GB'lık binlerce küçük dosyası: 19 MB/s'lik USB diskte bu defterin tutulması,
+# ~6 bin satırlık bir crate'i yeniden derlemekten pahalıya geliyor. Proje hızlı bir
+# diske taşınırsa bu satır yeniden ölçülmeli — orada tersi doğru olabilir.
+incremental = false
+
+[profile.dev.package."*"]
+debug = 0                 # bağımlılıklar: debug bilgisi üretilmez
