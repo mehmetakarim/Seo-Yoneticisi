@@ -1,11 +1,11 @@
-use crate::ideasoft;
-use crate::images::{self, ImageCheck};
-use crate::seo_data::{self, SeoInsights};
-use crate::validation::{
+use seo_core::ideasoft;
+use seo_core::images::{self, ImageCheck};
+use seo_core::seo_data::{self, SeoInsights};
+use seo_core::validation::{
     details_badge, image_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallInput,
     OverallStatus,
 };
-use crate::{db, feed, gemini, sync};
+use seo_core::{db, feed, gemini, sync};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::path::PathBuf;

@@ -1,0 +1,23 @@
+[package]
+name = "seo-core"
+version = "0.5.2"
+description = "SEO Yöneticisi çekirdeği — feed, veritabanı, Gemini, SEO araştırma, IdeaSoft"
+edition = "2021"
+
+# Tauri'ye BAĞIMLI DEĞİL. Bu crate'e `tauri` eklenmesi gerekiyorsa, muhtemelen o kod
+# Tauri katmanına (src-tauri/src/commands.rs) ait demektir — bkz. src/lib.rs başlığı.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+quick-xml = { workspace = true }
+reqwest = { workspace = true }
+unicode-segmentation = { workspace = true }
+chrono = { workspace = true }
+regex = { workspace = true }
+tokio = { workspace = true }
+jsonwebtoken = { workspace = true }
+imagesize = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

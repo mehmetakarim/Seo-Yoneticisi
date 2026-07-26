@@ -5,21 +5,13 @@ description = "IdeaSoft feed tabanlı SEO yönetim aracı"
 authors = ["mehmetakarim"]
 edition = "2021"
 
-[lib]
-name = "seo_yoneticisi_lib"
-# `staticlib` yalnızca iOS için üretilir; bu projede mobil hedef yok ve main.rs rlib'i
-# kullanıyor. Her derlemede boşuna 463 MB `.a` yazılıyordu — harici USB diskte (19 MB/s)
-# ciddi maliyet. `cdylib` (Android) yalnızca 0.5 MB, Tauri araçları bekleyebilir → duruyor.
-crate-type = ["cdylib", "rlib"]
+# Bu dosya hem paket hem workspace kökü. Böylece `target/` yeri değişmiyor ve
+# tauri.conf.json / CI dokunulmadan çalışmaya devam ediyor.
+[workspace]
+members = [".", "core"]
 
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
-
-[dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-clipboard-manager = "2"
+# Sürümler tek yerde — iki crate arasında sürüklenmesin.
+[workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
@@ -35,6 +27,31 @@ jsonwebtoken = "9"
 # Faz 7: görsel boyutunu decode etmeden başlıktan okur (1:1 + çözünürlük kontrolü).
 imagesize = "0.13"
 
+[lib]
+name = "seo_yoneticisi_lib"
+# `staticlib` yalnızca iOS için üretilir; bu projede mobil hedef yok ve main.rs rlib'i
+# kullanıyor. Her derlemede boşuna 463 MB `.a` yazılıyordu — harici USB diskte (19 MB/s)
+# ciddi maliyet. `cdylib` (Android) yalnızca 0.5 MB, Tauri araçları bekleyebilir → duruyor.
+crate-type = ["cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# Bu crate yalnızca ince Tauri katmanı: komut kaydı + AppState + IPC sınırı.
+# İş mantığı `seo-core`'da; oraya ait bir şey buraya sızmamalı.
+[dependencies]
+seo-core = { path = "core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+reqwest = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
@@ -46,15 +63,14 @@ tauri-plugin-process = "2"
 # ── Derleme hızı (2026-07-26 ölçümleri) ─────────────────────────────────────
 # Proje harici USB diskte: 19 MB/s (dahili SSD 518 MB/s). Tek dosya değişince
 # `cargo build` 5dk23sn sürüyordu ama bunun yalnızca 21 saniyesi CPU işiydi
-# (%6) — zamanın %94'ü disk beklemesi. `deps/` 5.8 GB ve link aşamasında
-# okunuyor; hacmin çoğu, içine hiç girmediğimiz bağımlılıkların debug bilgisi.
+# (%6) — zamanın %94'ü disk beklemesi. Ayarlarla 2dk54sn'ye indi (−%46).
 # NOT: bu tablo dosyanın SONUNDA durmalı — [target...] tablosunun içine
 # düşerse Cargo tarafından o hedefin bir parçası sanılır.
 [profile.dev]
 debug = 1                 # kendi kodumuz: backtrace'te satır numarası korunur
 # Inkremental derleme KAPALI — sezgiye aykırı ama bu projede ölçülerek doğrulandı:
 # tek dosya değişikliğinde 4dk15sn → 3dk01sn (−74 sn). Sebep, inkremental önbelleğin
-# 1.5 GB'lık binlerce küçük dosyası: 19 MB/s'lik USB diskte bu defterin tutulması,
+# 3.2 GB'lık binlerce küçük dosyası: 19 MB/s'lik USB diskte bu defterin tutulması,
 # ~6 bin satırlık bir crate'i yeniden derlemekten pahalıya geliyor. Proje hızlı bir
 # diske taşınırsa bu satır yeniden ölçülmeli — orada tersi doğru olabilir.
 incremental = false

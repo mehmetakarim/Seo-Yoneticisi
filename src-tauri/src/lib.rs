@@ -1,14 +1,7 @@
 mod commands;
-mod db;
-mod feed;
-mod gemini;
-mod ideasoft;
-mod images;
-mod seo_data;
-mod sync;
-mod validation;
 
 use commands::AppState;
+use seo_core::db;
 use std::sync::Mutex;
 use tauri::Manager;
 

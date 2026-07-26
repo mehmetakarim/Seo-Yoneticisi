@@ -3648,7 +3648,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "seo-yoneticisi"
+name = "seo-core"
 version = "0.5.2"
 dependencies = [
  "chrono",
@@ -3660,6 +3660,20 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tokio",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "seo-yoneticisi"
+version = "0.5.2"
+dependencies = [
+ "chrono",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "seo-core",
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
@@ -3668,7 +3682,6 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tokio",
- "unicode-segmentation",
 ]
 
 [[package]]
