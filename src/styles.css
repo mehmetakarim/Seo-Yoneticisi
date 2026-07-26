@@ -42,6 +42,7 @@ textarea, input, button { font-family: inherit; }
   --overlay-bg: rgba(255, 255, 255, 0.72);
   --warn-bg: #fff5e6;  --warn-border: #ffe0b0;  --warn-icon: #c77700;  --warn-text: #8a5a00;
   --dens-zone: rgba(26, 138, 74, 0.18);
+  --tip-bg: #2c2c2e;  --tip-text: #f5f5f7;
 }
 
 :root[data-theme="dark"] {
@@ -78,6 +79,7 @@ textarea, input, button { font-family: inherit; }
   --warn-bg: rgba(240,185,74,0.12);  --warn-border: rgba(240,185,74,0.3);
   --warn-icon: #f0b94a;  --warn-text: #e6c078;
   --dens-zone: rgba(76,199,126,0.28);
+  --tip-bg: #3a3a3c;  --tip-text: #f2f2f4;
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -102,3 +104,65 @@ textarea, input, button { font-family: inherit; }
 
 /* input focus ortak */
 .fx:focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px var(--accent-tint); }
+
+/* ── Tooltip ──────────────────────────────────────────────────────────────
+   Kullanım: herhangi bir öğeye `data-tip="metin"` ekle.
+   Neden: buton ALTINA açıklama satırı koymak, eylem satırı flex+center
+   olduğu için diğer butonların hizasını bozuyordu. Bilgi hover'a taşındı.
+   Not: `disabled` butonlar fare olayı üretmez → data-tip'i butonun kendisine
+   değil, onu saran öğeye ver (ör. .gen-wrap). Baloncuk YUKARI açılır; kart
+   `overflow:hidden` olsa bile eylem satırı kartın altında olduğu için
+   kırpılmaz. Sola hizalı (ortalanmış olsa dar kartta sol kenardan taşardı). */
+[data-tip] { position: relative; }
+[data-tip]::after,
+[data-tip]::before {
+  position: absolute;
+  z-index: 30;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(3px);
+  transition: opacity .18s cubic-bezier(.32,.72,0,1),
+              transform .18s cubic-bezier(.32,.72,0,1),
+              visibility .18s;
+}
+[data-tip]::after {
+  content: attr(data-tip);
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: max-content;
+  max-width: 232px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: var(--tip-bg);
+  color: var(--tip-text);
+  font-size: 11.5px;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 4px 14px var(--heavy-shadow);
+}
+/* Ok: 10px'lik kutunun YALNIZCA üst yarısı renkli (aşağı bakan üçgen).
+   Renkli yarı baloncuğun alt kenarına (100% + 8px) dayanmalı → kutunun tepesi
+   orada bitsin diye bottom = 100% + 8px - 10px = 100% - 2px. */
+[data-tip]::before {
+  content: "";
+  bottom: calc(100% - 2px);
+  left: 20px;
+  border: 5px solid transparent;
+  border-top-color: var(--tip-bg);
+}
+[data-tip]:hover::after,      [data-tip]:hover::before,
+[data-tip]:focus-visible::after, [data-tip]:focus-visible::before,
+[data-tip]:focus-within::after,  [data-tip]:focus-within::before {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+/* Boş data-tip → hiç gösterme (koşullu ipuçları için) */
+[data-tip=""]::after, [data-tip=""]::before { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-tip]::after, [data-tip]::before { transition: none; transform: none; }
+}

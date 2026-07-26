@@ -21,6 +21,13 @@ const store = useStore();
 // Faz 7: en az 3 galeri görseli yoksa üretim engellenir.
 const imageGateOk = computed(() => props.imageCount >= 3);
 
+// Üret butonunun tooltip'i: engelliyken sebebi, normalde maliyet uyarısı.
+const genTip = computed(() =>
+  imageGateOk.value
+    ? "Uzun içerik üretir · daha fazla kredi harcar"
+    : `En az 3 görsel gerekli — şu an ${props.imageCount}/4`,
+);
+
 const badgeStyle = computed(() => ({
   background: `var(--badge-${props.badge}-bg)`,
   color: `var(--badge-${props.badge}-c)`,
@@ -151,31 +158,28 @@ function genDetails() {
     </div>
 
     <div class="card-actions">
-      <div class="gen-wrap">
+      <!-- data-tip butonun kendisinde değil sarmalayıcıda: disabled buton fare olayı üretmez -->
+      <div class="gen-wrap" :data-tip="genTip">
         <button
           class="gen"
           :class="{ busy: store.generatingDetails }"
           :disabled="store.generatingDetails || !imageGateOk"
-          :title="imageGateOk ? '' : `En az 3 görsel gerekli — şu an ${imageCount}/4`"
           @click="genDetails"
         >
           <Icon :name="store.generatingDetails ? 'loader' : 'sparkles'" :size="15" :stroke-width="store.generatingDetails ? 2.2 : 1.9" :class="{ spin: store.generatingDetails }" />
           {{ store.generatingDetails ? "Üretiliyor…" : "Açıklamayı Üret" }}
         </button>
-        <span class="gen-sub" :style="imageGateOk ? {} : { color: 'var(--red)' }">
-          {{ imageGateOk ? "uzun içerik · daha fazla kredi" : `En az 3 görsel gerekli (${imageCount}/4)` }}
-        </span>
       </div>
-        <button
-          v-if="store.settings?.ideasoft_active"
-          class="is-push"
-          :disabled="store.ideasoftBusy"
-          title="Bu kartın içeriğini IdeaSoft'a gönder"
-          @click="store.openIdeasoftPreview(['details'])"
-        >
-          <Icon name="upload" :size="14" />
-          IdeaSoft'a Gönder
-        </button>
+      <button
+        v-if="store.settings?.ideasoft_active"
+        class="is-push"
+        :disabled="store.ideasoftBusy"
+        title="Bu kartın içeriğini IdeaSoft'a gönder"
+        @click="store.openIdeasoftPreview(['details'])"
+      >
+        <Icon name="upload" :size="14" />
+        IdeaSoft'a Gönder
+      </button>
       <div style="flex:1"></div>
       <button class="done" :class="{ active: detailsDone }" @click="store.toggleDetailsDone()">
         <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
@@ -391,10 +395,9 @@ function genDetails() {
   border-top: 1px solid var(--c-border-soft);
   background: var(--c-input);
 }
+/* Yalnızca tooltip çıpası (data-tip) — konumlandırma [data-tip]'ten gelir. */
 .gen-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: inline-flex;
 }
 /* MetaSeoCard'daki birincil buton ile birebir aynı ölçüler. */
 .gen {
@@ -465,11 +468,6 @@ function genDetails() {
   font-size: 12.5px;
   font-weight: 560;
   color: var(--c-mid);
-}
-.gen-sub {
-  font-size: 10.5px;
-  color: var(--c-faint);
-  padding-left: 2px;
 }
 .done {
   display: inline-flex;
