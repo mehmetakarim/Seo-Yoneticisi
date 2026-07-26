@@ -6,7 +6,7 @@
 **Son güncelleme:** 2026-07-26
 **Aktif faz:** Faz 10 ✅ otomatik güncelleme (Tauri updater)
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
-**Yayınlanan sürümler:** v0.1.0 → v0.5.0 · **v0.5.1 = updater düzeltmesi (createUpdaterArtifacts)**
+**Yayınlanan sürümler:** v0.1.0 → v0.5.1 · **v0.5.2 = tooltip + ilk gerçek updater saha testi**
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
 1. ✅ **Updater zinciri UÇTAN UCA ÇALIŞIYOR (2026-07-26).** İki ayrı sorun vardı, ikisi de kapandı:
@@ -23,8 +23,19 @@
      geçmişinde** gerçek anahtar YOK (Gemini/CapSolver/GSC/minisign hepsi depo dışında). Tek bulgu bir
      input placeholder'ındaki token parçasıydı → temizlendi (`061cec9`). `.gitignore`'a
      `.env`/`*.key`/`*.pem`/`*-service-account*.json`/`*.db` koruması eklendi.
-   → Kalan tek doğrulama saha testi: v0.5.1 kuruluyken **bir sonraki sürüm** yayınlandığında
-   güncelleme modalının kendiliğinden çıkması. (v0.5.0 ve öncesi elle kurulmalı.)
+   → **v0.5.2 bu saha testinin ta kendisi:** v0.5.1 kurulu makinede güncelleme modalı kendiliğinden
+   çıkmalı. Çıkarsa updater zinciri uçtan uca kanıtlanmış olur. (v0.5.0 ve öncesi elle kurulmalı.)
+
+### 🎨 Tooltip deseni (v0.5.2)
+Butonların ALTINA açıklama satırı koymak eylem satırının hizasını bozuyor (flex + `align-items:center`).
+Bunun yerine global `[data-tip="metin"]` tooltip'i var (`styles.css`). Kurallar:
+- `data-tip`'i **disabled olabilecek butonun kendisine değil, sarmalayıcısına** ver — disabled butonlar
+  fare olayı üretmez, tooltip tam gerektiği anda açılmaz.
+- Baloncuk yukarı + **sola hizalı** açılır (ortalanmış olsa dar kartta sol kenardan taşar).
+  Yukarı açıldığı için `.card{overflow:hidden}` kırpmaz.
+- Ok, 10px'lik üçgen kutusunun üst yarısı renkli olduğundan `bottom: calc(100% - 2px)` ile konumlanır;
+  `100% + 3px` yapılırsa renkli yarı baloncuğun ARKASINDA kalır ve ok görünmez.
+- Diğer kartlarda hâlâ native `title=` var; istenirse `data-tip`'e çevrilebilir.
 2. **Sıradaki kuyruk (kullanıcı onaylı):** mimari toparlama (navigasyon kabuğu + gruplandırılmış menü;
    `gemini.rs` ~2000, `commands.rs` ~1700 satır → modül bölme; store ayırma; derleme ~8-9 dk çok yavaş)
    → GSC fırsat analizi (2. sayfadaki ürünler, gösterim var tıklama yok) + meta/açıklama sürüm geçmişi
