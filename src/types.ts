@@ -72,6 +72,20 @@ export interface ProductDetail {
   meta_model: string | null;
   details_model: string | null;
   tech_model: string | null;
+  /** Yeniden üretimden önceki hâller (en yeni başta). */
+  meta_history: MetaVersionMeta[];
+  details_history: DetailsVersionMeta[];
+}
+
+export interface MetaVersionMeta {
+  at: string;
+  title: string;
+  model: string;
+}
+export interface DetailsVersionMeta {
+  at: string;
+  words: number;
+  model: string;
 }
 
 /** IdeaSoft gönderim öncesi fark önizlemesi. */

@@ -163,6 +163,7 @@ async function openProduct() {
         :keyword="keyword"
         :meta-done="detail.meta_status === 'done'"
         :model="detail.meta_model"
+        :history="detail.meta_history"
         :badge="liveBadge"
         @update:title="onTitle"
         @update:desc="onDesc"
@@ -177,6 +178,7 @@ async function openProduct() {
         :badge="detail.details_badge"
         :image-count="detail.image_count"
         :model="detail.details_model"
+        :history="detail.details_history"
       />
 
       <TechTableCard

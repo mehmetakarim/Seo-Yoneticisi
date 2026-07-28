@@ -94,6 +94,10 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(conn, "seo_status", "meta_model", "TEXT")?;
     add_column_if_missing(conn, "seo_status", "details_model", "TEXT")?;
     add_column_if_missing(conn, "seo_status", "tech_model", "TEXT")?;
+    // Sürüm geçmişi: yeniden üretmeden önceki hâl saklanır (bkz. core/src/history.rs).
+    // Teknik tabloda zaten vardı; meta ve açıklamada içerik geri dönüşsüz kayboluyordu.
+    add_column_if_missing(conn, "seo_status", "meta_history_json", "TEXT")?;
+    add_column_if_missing(conn, "seo_status", "details_history_json", "TEXT")?;
     Ok(())
 }
 

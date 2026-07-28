@@ -40,6 +40,10 @@ export const api = {
   researchSeo: (sku: string, seed?: string) =>
     invoke<SeoInsights>("research_seo", { sku, seed: seed ?? null }),
   checkImages: (sku: string) => invoke<ImageCheck[]>("check_images", { sku }),
+  restoreMetaVersion: (sku: string, index: number) =>
+    invoke<ProductDetail>("restore_meta_version", { sku, index }),
+  restoreDetailsVersion: (sku: string, index: number) =>
+    invoke<ProductDetail>("restore_details_version", { sku, index }),
   analyzeOpportunities: () => invoke<OpportunityReport>("analyze_opportunities"),
   getOpportunityCache: () => invoke<OpportunityReport | null>("get_opportunity_cache"),
   saveTechSource: (sku: string, text: string) =>

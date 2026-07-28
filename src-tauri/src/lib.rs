@@ -54,6 +54,8 @@ pub fn run() {
             commands::tech_table_html,
             commands::mark_tech_done,
             commands::restore_tech_version,
+            commands::restore_meta_version,
+            commands::restore_details_version,
             commands::test_ideasoft,
             commands::ideasoft_preview,
             commands::ideasoft_push,

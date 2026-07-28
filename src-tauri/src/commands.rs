@@ -5,7 +5,7 @@ use seo_core::validation::{
     details_badge, image_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallInput,
     OverallStatus,
 };
-use seo_core::{db, feed, gemini, opportunity, sync};
+use seo_core::{db, feed, gemini, history, opportunity, sync};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -84,6 +84,9 @@ pub struct ProductDetail {
     pub meta_model: Option<String>,
     pub details_model: Option<String>,
     pub tech_model: Option<String>,
+    /// Yeniden üretimden önceki hâller (en yeni başta) — hafif özet.
+    pub meta_history: Vec<MetaVersionMeta>,
+    pub details_history: Vec<DetailsVersionMeta>,
 }
 
 #[derive(Debug, Serialize)]
@@ -280,7 +283,8 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 s.draft_details, s.draft_keywords, p.picture2, p.picture3, p.picture4, s.image_check_json,
                 s.tech_source_text, s.tech_specs_json, COALESCE(s.tech_status,'pending'),
                 s.tech_history_json, s.ideasoft_pushed_at, s.ideasoft_seo_rule,
-                s.meta_model, s.details_model, s.tech_model
+                s.meta_model, s.details_model, s.tech_model,
+                s.meta_history_json, s.details_history_json
          FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
          WHERE p.sku = ?1",
         [&sku],
@@ -297,7 +301,8 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 .as_deref()
                 .and_then(|j| serde_json::from_str(j).ok());
             let tech_status: String = row.get(27)?;
-            let tech_history: Vec<TechVersionMeta> = parse_history(row.get::<_, Option<String>>(28)?.as_deref())
+            let tech_history: Vec<TechVersionMeta> =
+                history::parse::<TechVersion>(row.get::<_, Option<String>>(28)?.as_deref())
                 .into_iter()
                 .map(|v| TechVersionMeta {
                     at: v.at,
@@ -305,6 +310,20 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                     groups: v.groups.len(),
                 })
                 .collect();
+            let meta_history: Vec<MetaVersionMeta> =
+                history::parse::<MetaVersion>(row.get::<_, Option<String>>(34)?.as_deref())
+                    .into_iter()
+                    .map(|v| MetaVersionMeta { at: v.at, title: v.title, model: v.model })
+                    .collect();
+            let details_history: Vec<DetailsVersionMeta> =
+                history::parse::<DetailsVersion>(row.get::<_, Option<String>>(35)?.as_deref())
+                    .into_iter()
+                    .map(|v| DetailsVersionMeta {
+                        at: v.at,
+                        words: seo_core::validation::word_count(&v.html),
+                        model: v.model,
+                    })
+                    .collect();
             let gallery: Vec<String> = [img_url.clone(), picture2, picture3, picture4]
                 .into_iter()
                 .filter_map(|u| u.filter(|s| !s.trim().is_empty()))
@@ -357,6 +376,8 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 meta_model: row.get(31)?,
                 details_model: row.get(32)?,
                 tech_model: row.get(33)?,
+                meta_history,
+                details_history,
             })
         },
     )
@@ -521,9 +542,15 @@ pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<Pr
 
     let conn = state.conn.lock().unwrap();
     ensure_seo_row(&conn, &sku)?;
+
+    // Yeniden üretimden ÖNCEKİ hâli geçmişe al — elle düzeltilmiş bir başlık geri dönüşsüz
+    // kaybolmasın. Boşsa (ilk üretim) veya sonuç aynıysa kayıt açma.
+    let history_json = snapshot_meta(&conn, &sku, &meta)?;
+
     conn.execute(
         "UPDATE seo_status SET target_keyword = ?2, draft_title = ?3, draft_descriptions = ?4,
-                draft_keywords = ?5, draft_search_keywords = ?6, updated_at = ?7, meta_model = ?8
+                draft_keywords = ?5, draft_search_keywords = ?6, updated_at = ?7, meta_model = ?8,
+                meta_history_json = COALESCE(?9, meta_history_json)
          WHERE sku = ?1",
         params![
             sku,
@@ -534,6 +561,7 @@ pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<Pr
             meta.search_keywords.trim(),
             now_str(),
             model,
+            history_json,
         ],
     )
     .map_err(|e| format!("Üretilen meta kaydedilemedi: {e}"))?;
@@ -625,9 +653,12 @@ pub async fn generate_details(
 
     let conn = state.conn.lock().unwrap();
     ensure_seo_row(&conn, &sku)?;
+    let history_json = snapshot_details(&conn, &sku, &new_html)?;
     conn.execute(
-        "UPDATE seo_status SET draft_details = ?2, updated_at = ?3, details_model = ?4 WHERE sku = ?1",
-        params![sku, new_html, now_str(), model],
+        "UPDATE seo_status SET draft_details = ?2, updated_at = ?3, details_model = ?4,
+                details_history_json = COALESCE(?5, details_history_json)
+         WHERE sku = ?1",
+        params![sku, new_html, now_str(), model, history_json],
     )
     .map_err(|e| format!("Üretilen açıklama kaydedilemedi: {e}"))?;
     read_detail(&conn, &sku)
@@ -870,7 +901,120 @@ pub async fn ideasoft_push(
 // ---- Faz 8: teknik özellik tablosu ----
 
 /// En fazla saklanan önceki sürüm sayısı.
-const TECH_HISTORY_MAX: usize = 5;
+
+/// Üretimden önceki meta hâlini geçmişe iter.
+///
+/// `Ok(None)` → geçmiş DEĞİŞMEMELİ (mevcut içerik boş, ya da yeni üretim eskisiyle birebir aynı).
+/// Aynı sonucu veren yeniden üretimi kaydetmek geçmişi çöple doldurur ve gerçek eski hâlleri
+/// `history::MAX` sınırından erken düşürürdü.
+fn snapshot_meta(
+    conn: &Connection,
+    sku: &str,
+    fresh: &gemini::GeneratedMeta,
+) -> Result<Option<String>, String> {
+    let cur: (String, String, String, String, String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT COALESCE(draft_title,''), COALESCE(draft_descriptions,''),
+                    COALESCE(draft_keywords,''), COALESCE(draft_search_keywords,''),
+                    COALESCE(target_keyword,''), meta_model, meta_history_json
+             FROM seo_status WHERE sku = ?1",
+            [sku],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .map_err(|e| format!("Mevcut meta okunamadı: {e}"))?;
+
+    // İlk üretim: saklanacak bir şey yok
+    if cur.0.trim().is_empty() && cur.1.trim().is_empty() {
+        return Ok(None);
+    }
+    // Sonuç aynıysa sürüm açma
+    if cur.0.trim() == fresh.title.trim() && cur.1.trim() == fresh.descriptions.trim() {
+        return Ok(None);
+    }
+
+    let hist = history::push(
+        history::parse::<MetaVersion>(cur.6.as_deref()),
+        MetaVersion {
+            at: now_str(),
+            title: cur.0,
+            descriptions: cur.1,
+            keywords: cur.2,
+            search_keywords: cur.3,
+            target_keyword: cur.4,
+            model: cur.5.unwrap_or_default(),
+        },
+    );
+    serde_json::to_string(&hist)
+        .map(Some)
+        .map_err(|e| format!("Meta geçmişi kaydedilemedi: {e}"))
+}
+
+/// Üretimden önceki açıklama hâlini geçmişe iter. Kurallar `snapshot_meta` ile aynı.
+fn snapshot_details(conn: &Connection, sku: &str, fresh: &str) -> Result<Option<String>, String> {
+    let (cur_html, cur_model, hist_json): (String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT COALESCE(draft_details,''), details_model, details_history_json
+             FROM seo_status WHERE sku = ?1",
+            [sku],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|e| format!("Mevcut açıklama okunamadı: {e}"))?;
+
+    if cur_html.trim().is_empty() || cur_html.trim() == fresh.trim() {
+        return Ok(None);
+    }
+    let hist = history::push(
+        history::parse::<DetailsVersion>(hist_json.as_deref()),
+        DetailsVersion {
+            at: now_str(),
+            html: cur_html,
+            model: cur_model.unwrap_or_default(),
+        },
+    );
+    serde_json::to_string(&hist)
+        .map(Some)
+        .map_err(|e| format!("Açıklama geçmişi kaydedilemedi: {e}"))
+}
+
+/// Saklanan bir meta sürümü. Hedef kelime de içeride: o meta ona göre üretilmişti,
+/// geri yüklerken ikisi birlikte dönmeli (kullanıcı kararı) yoksa çelişkili bir hâl oluşur.
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct MetaVersion {
+    pub at: String,
+    pub title: String,
+    pub descriptions: String,
+    pub keywords: String,
+    pub search_keywords: String,
+    pub target_keyword: String,
+    #[serde(default)]
+    pub model: String,
+}
+
+/// Saklanan bir açıklama sürümü.
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct DetailsVersion {
+    pub at: String,
+    pub html: String,
+    #[serde(default)]
+    pub model: String,
+}
+
+/// UI listesi için hafif özetler — tam sürümler payload'ı şişirmesin
+/// (açıklama HTML'i ürün başına ortalama 3,7 KB).
+#[derive(Debug, Serialize)]
+pub struct MetaVersionMeta {
+    pub at: String,
+    /// Başlık, sürümü tanımanın en hızlı yolu.
+    pub title: String,
+    pub model: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DetailsVersionMeta {
+    pub at: String,
+    pub words: usize,
+    pub model: String,
+}
 
 /// Saklanan bir teknik tablo sürümü (yeniden üretim öncesi anlık görüntü).
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
@@ -889,19 +1033,6 @@ pub struct TechVersionMeta {
     pub groups: usize,
 }
 
-fn parse_history(json: Option<&str>) -> Vec<TechVersion> {
-    json.map(str::trim)
-        .filter(|s| !s.is_empty())
-        .and_then(|j| serde_json::from_str::<Vec<TechVersion>>(j).ok())
-        .unwrap_or_default()
-}
-
-/// Mevcut tabloyu geçmişe iter (en yeni başa), üst sınırı aşanı atar.
-fn push_history(mut hist: Vec<TechVersion>, current: TechVersion) -> Vec<TechVersion> {
-    hist.insert(0, current);
-    hist.truncate(TECH_HISTORY_MAX);
-    hist
-}
 
 /// Kullanıcının yapıştırdığı ham teknik metni saklar (debounce'lu kayıt).
 #[tauri::command]
@@ -964,7 +1095,7 @@ pub async fn structure_tech_specs(
     let json = serde_json::to_string(&result.groups)
         .map_err(|e| format!("Teknik tablo serialize edilemedi: {e}"))?;
 
-    // Yeniden üretim: eski tabloyu kaybetmeden geçmişe al (son TECH_HISTORY_MAX sürüm).
+    // Yeniden üretim: eski tabloyu kaybetmeden geçmişe al (bkz. core/src/history.rs).
     let old_groups: Vec<gemini::TechGroup> = prev_specs
         .as_deref()
         .and_then(|j| serde_json::from_str(j).ok())
@@ -972,8 +1103,8 @@ pub async fn structure_tech_specs(
     let history_json = if old_groups.is_empty() {
         None
     } else {
-        let hist = push_history(
-            parse_history(prev_hist.as_deref()),
+        let hist = history::push(
+            history::parse(prev_hist.as_deref()),
             TechVersion { at: now_str(), groups: old_groups, source: source.clone() },
         );
         serde_json::to_string(&hist).ok()
@@ -1040,6 +1171,125 @@ pub fn tech_table_html(state: State<'_, AppState>, sku: String) -> Result<String
 
 /// Önceki bir sürümü geri yükler. **Takas mantığı**: mevcut tablo geçmişin başına konur, seçilen
 /// sürüm güncel olur → geri yükleme de kayıpsızdır (istenirse geri dönülebilir).
+/// Eski bir meta sürümünü geri yükler.
+///
+/// **Takas:** geri yüklenen sürüm listeden çıkar, mevcut içerik (boş değilse) geçmişe girer —
+/// böylece geri yükleme de geri alınabilir. `restore_tech_version` ile aynı semantik.
+/// Hedef kelime de birlikte döner: o meta ona göre üretilmişti (kullanıcı kararı).
+#[tauri::command]
+pub fn restore_meta_version(
+    state: State<'_, AppState>,
+    sku: String,
+    index: usize,
+) -> Result<ProductDetail, String> {
+    let conn = state.conn.lock().unwrap();
+    let cur: (String, String, String, String, String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT COALESCE(draft_title,''), COALESCE(draft_descriptions,''),
+                    COALESCE(draft_keywords,''), COALESCE(draft_search_keywords,''),
+                    COALESCE(target_keyword,''), meta_model, meta_history_json
+             FROM seo_status WHERE sku = ?1",
+            [&sku],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
+            other => format!("Meta okunamadı: {other}"),
+        })?;
+
+    let mut hist = history::parse::<MetaVersion>(cur.6.as_deref());
+    if index >= hist.len() {
+        return Err("Bu sürüm artık mevcut değil.".to_string());
+    }
+    let restored = hist.remove(index);
+
+    if !cur.0.trim().is_empty() || !cur.1.trim().is_empty() {
+        hist = history::push(
+            hist,
+            MetaVersion {
+                at: now_str(),
+                title: cur.0,
+                descriptions: cur.1,
+                keywords: cur.2,
+                search_keywords: cur.3,
+                target_keyword: cur.4,
+                model: cur.5.unwrap_or_default(),
+            },
+        );
+    }
+    let hist_json = serde_json::to_string(&hist)
+        .map_err(|e| format!("Meta geçmişi kaydedilemedi: {e}"))?;
+
+    conn.execute(
+        "UPDATE seo_status SET draft_title = ?2, draft_descriptions = ?3, draft_keywords = ?4,
+                draft_search_keywords = ?5, target_keyword = ?6, meta_model = ?7,
+                meta_history_json = ?8, updated_at = ?9
+         WHERE sku = ?1",
+        params![
+            sku,
+            restored.title,
+            restored.descriptions,
+            restored.keywords,
+            restored.search_keywords,
+            restored.target_keyword,
+            restored.model,
+            hist_json,
+            now_str(),
+        ],
+    )
+    .map_err(|e| format!("Meta geri yüklenemedi: {e}"))?;
+    read_detail(&conn, &sku)
+}
+
+/// Eski bir açıklama sürümünü geri yükler (takas semantiği `restore_meta_version` ile aynı).
+#[tauri::command]
+pub fn restore_details_version(
+    state: State<'_, AppState>,
+    sku: String,
+    index: usize,
+) -> Result<ProductDetail, String> {
+    let conn = state.conn.lock().unwrap();
+    let (cur_html, cur_model, hist_json): (String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT COALESCE(draft_details,''), details_model, details_history_json
+             FROM seo_status WHERE sku = ?1",
+            [&sku],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
+            other => format!("Açıklama okunamadı: {other}"),
+        })?;
+
+    let mut hist = history::parse::<DetailsVersion>(hist_json.as_deref());
+    if index >= hist.len() {
+        return Err("Bu sürüm artık mevcut değil.".to_string());
+    }
+    let restored = hist.remove(index);
+
+    if !cur_html.trim().is_empty() {
+        hist = history::push(
+            hist,
+            DetailsVersion {
+                at: now_str(),
+                html: cur_html,
+                model: cur_model.unwrap_or_default(),
+            },
+        );
+    }
+    let new_hist = serde_json::to_string(&hist)
+        .map_err(|e| format!("Açıklama geçmişi kaydedilemedi: {e}"))?;
+
+    conn.execute(
+        "UPDATE seo_status SET draft_details = ?2, details_model = ?3,
+                details_history_json = ?4, updated_at = ?5
+         WHERE sku = ?1",
+        params![sku, restored.html, restored.model, new_hist, now_str()],
+    )
+    .map_err(|e| format!("Açıklama geri yüklenemedi: {e}"))?;
+    read_detail(&conn, &sku)
+}
+
 #[tauri::command]
 pub fn restore_tech_version(
     state: State<'_, AppState>,
@@ -1059,7 +1309,7 @@ pub fn restore_tech_version(
             other => format!("Teknik tablo okunamadı: {other}"),
         })?;
 
-    let mut hist = parse_history(hist_json.as_deref());
+    let mut hist = history::parse(hist_json.as_deref());
     if index >= hist.len() {
         return Err("Bu sürüm artık mevcut değil.".to_string());
     }
@@ -1071,7 +1321,7 @@ pub fn restore_tech_version(
         .and_then(|j| serde_json::from_str(j).ok())
         .unwrap_or_default();
     if !cur_groups.is_empty() {
-        hist = push_history(
+        hist = history::push(
             hist,
             TechVersion { at: now_str(), groups: cur_groups, source: cur_source },
         );
@@ -1594,6 +1844,7 @@ fn export_json(conn: &Connection) -> Result<String, String> {
             "tech_source_text", "tech_specs_json", "tech_status", "tech_history_json",
             "ideasoft_product_id", "ideasoft_pushed_at", "ideasoft_seo_rule",
             "meta_model", "details_model", "tech_model",
+            "meta_history_json", "details_history_json",
         ],
     )?;
     let log = dump(
@@ -1687,9 +1938,10 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
                draft_details, research_json, image_check_json, image_check_fp,
                tech_source_text, tech_specs_json, tech_status, tech_history_json,
                ideasoft_product_id, ideasoft_pushed_at, ideasoft_seo_rule,
-               meta_model, details_model, tech_model)
+               meta_model, details_model, tech_model,
+               meta_history_json, details_history_json)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
-                     ?21,?22,?23)",
+                     ?21,?22,?23,?24,?25)",
             params![
                 s(&r, "sku"),
                 s(&r, "meta_status").unwrap_or_else(|| "pending".into()),
@@ -1702,6 +1954,7 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
                 s(&r, "tech_history_json"), i(&r, "ideasoft_product_id"),
                 s(&r, "ideasoft_pushed_at"), i(&r, "ideasoft_seo_rule"),
                 s(&r, "meta_model"), s(&r, "details_model"), s(&r, "tech_model"),
+                s(&r, "meta_history_json"), s(&r, "details_history_json"),
             ],
         )
         .map_err(|e| format!("SEO durumu geri yüklenemedi: {e}"))?;
@@ -1749,28 +2002,28 @@ mod tests {
     fn push_history_keeps_newest_first_and_caps() {
         let mut h: Vec<TechVersion> = Vec::new();
         for i in 1..=7 {
-            h = push_history(h, ver(&format!("v{i}")));
+            h = history::push(h, ver(&format!("v{i}")));
         }
         // En yeni başta, üst sınır aşılmaz
-        assert_eq!(h.len(), TECH_HISTORY_MAX);
+        assert_eq!(h.len(), history::MAX);
         assert_eq!(h[0].at, "v7");
-        assert_eq!(h[TECH_HISTORY_MAX - 1].at, "v3"); // v1, v2 düştü
+        assert_eq!(h[history::MAX - 1].at, "v3"); // v1, v2 düştü
     }
 
     #[test]
     fn parse_history_tolerates_missing_and_broken() {
-        assert!(parse_history(None).is_empty());
-        assert!(parse_history(Some("")).is_empty());
-        assert!(parse_history(Some("  ")).is_empty());
-        assert!(parse_history(Some("{bozuk json")).is_empty());
+        assert!(history::parse::<TechVersion>(None).is_empty());
+        assert!(history::parse::<TechVersion>(Some("")).is_empty());
+        assert!(history::parse::<TechVersion>(Some("  ")).is_empty());
+        assert!(history::parse::<TechVersion>(Some("{bozuk json")).is_empty());
         let json = serde_json::to_string(&vec![ver("v1")]).unwrap();
-        assert_eq!(parse_history(Some(&json)).len(), 1);
+        assert_eq!(history::parse::<TechVersion>(Some(&json)).len(), 1);
     }
 
     #[test]
     fn history_roundtrip_preserves_source_and_rows() {
         let json = serde_json::to_string(&vec![ver("2026-07-25T10:00:00")]).unwrap();
-        let back = parse_history(Some(&json));
+        let back = history::parse::<TechVersion>(Some(&json));
         assert_eq!(back[0].source, "kaynak 2026-07-25T10:00:00");
         assert_eq!(back[0].groups[0].rows[0].value, "i7");
     }

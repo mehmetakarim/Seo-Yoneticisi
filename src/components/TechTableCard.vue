@@ -7,6 +7,7 @@ import type { MetaBadge, TechGroup, TechVersionMeta } from "../types";
 import { BADGE_LABEL } from "../validation";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
+import VersionHistory from "./VersionHistory.vue";
 
 const props = defineProps<{
   sourceText: string;
@@ -76,9 +77,6 @@ function edit(gi: number, ri: number, field: "label" | "value", e: Event) {
 }
 // --- sürüm geçmişi ---
 const histOpen = ref(false);
-function fmtDate(s: string): string {
-  return s.replace("T", " ").slice(0, 16);
-}
 function restore(i: number) {
   store.restoreTechVersion(i);
   histOpen.value = false;
@@ -178,18 +176,12 @@ function removeRow(gi: number, ri: number) {
         <span class="hint">hücrelere tıklayarak düzenleyebilirsiniz</span>
       </div>
 
-      <!-- Sürüm geçmişi -->
-      <div v-if="histOpen && history.length" class="hist">
-        <div class="hist-head">
-          <Icon name="refresh" :size="12" />
-          Yeniden üretimden önceki tablolar — geri yüklemek mevcut tabloyu da saklar
-        </div>
-        <div v-for="(v, i) in history" :key="i" class="hist-row">
-          <span class="hist-at">{{ fmtDate(v.at) }}</span>
-          <span class="hist-meta">{{ v.rows }} satır · {{ v.groups }} grup</span>
-          <button class="hist-btn" @click="restore(i)">Geri yükle</button>
-        </div>
-      </div>
+      <VersionHistory
+        v-if="histOpen && history.length"
+        :items="history.map((v) => ({ at: v.at, summary: `${v.rows} satır · ${v.groups} grup` }))"
+        noun="tablo"
+        @restore="restore"
+      />
 
     <template #actions>
       <button
@@ -393,57 +385,6 @@ function removeRow(gi: number, ri: number) {
   margin-left: auto;
 }
 /* Sürüm geçmişi */
-.hist {
-  border: 1px solid var(--c-border-soft);
-  border-radius: 10px;
-  background: var(--c-list);
-  overflow: hidden;
-  animation: popIn 0.22s ease both;
-}
-.hist-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--c-soft);
-  background: var(--c-chip);
-  padding: 7px 12px;
-}
-.hist-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--c-border-soft);
-}
-.hist-row:last-child {
-  border-bottom: 0;
-}
-.hist-at {
-  font-size: 12px;
-  color: var(--c-text);
-  font-variant-numeric: tabular-nums;
-}
-.hist-meta {
-  font-size: 11.5px;
-  color: var(--c-soft);
-}
-.hist-btn {
-  margin-left: auto;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--c-border);
-  border-radius: 7px;
-  background: var(--c-input);
-  color: var(--c-mid);
-  font-size: 11.5px;
-  font-weight: 560;
-  cursor: pointer;
-}
-.hist-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
 /* MetaSeoCard/DetailsSeoCard ile birebir aynı birincil buton */
 .gen {
   display: inline-flex;

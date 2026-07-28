@@ -16,6 +16,7 @@
 pub mod db;
 pub mod feed;
 pub mod gemini;
+pub mod history;
 pub mod ideasoft;
 pub mod images;
 pub mod opportunity;

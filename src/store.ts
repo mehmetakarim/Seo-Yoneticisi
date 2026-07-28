@@ -395,6 +395,26 @@ export const useStore = defineStore("app", {
       }
     },
 
+    async restoreMetaVersion(index: number) {
+      if (!this.selectedSku) return;
+      try {
+        this.detail = await api.restoreMetaVersion(this.selectedSku, index);
+        this.toast("Önceki meta geri yüklendi", "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    async restoreDetailsVersion(index: number) {
+      if (!this.selectedSku) return;
+      try {
+        this.detail = await api.restoreDetailsVersion(this.selectedSku, index);
+        this.toast("Önceki açıklama geri yüklendi", "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
     async restoreTechVersion(index: number) {
       if (!this.selectedSku) return;
       try {

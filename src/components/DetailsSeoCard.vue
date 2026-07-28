@@ -5,9 +5,10 @@ import { density, wordCount } from "../validation";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
+import VersionHistory from "./VersionHistory.vue";
 
 import { BADGE_LABEL } from "../validation";
-import type { MetaBadge } from "../types";
+import type { MetaBadge, DetailsVersionMeta } from "../types";
 
 const props = defineProps<{
   detailsHtml: string;
@@ -17,7 +18,11 @@ const props = defineProps<{
   imageCount: number;
   /** İçeriği üreten Gemini modeli (null = henüz üretilmedi). */
   model: string | null;
+  /** Yeniden üretimden önceki hâller (en yeni başta). */
+  history: DetailsVersionMeta[];
 }>();
+
+const histOpen = ref(false);
 
 const store = useStore();
 
@@ -150,6 +155,16 @@ function genDetails() {
       İçerik boş değil
     </div>
 
+    <div v-if="history.length" class="hist-line">
+      <a class="link" @click="histOpen = !histOpen">önceki sürümler ({{ history.length }})</a>
+    </div>
+    <VersionHistory
+      v-if="histOpen && history.length"
+      :items="history.map((v) => ({ at: v.at, summary: `${v.words} kelime`, model: v.model }))"
+      noun="açıklama"
+      @restore="store.restoreDetailsVersion($event)"
+    />
+
     <template #actions>
       <!-- data-tip butonun kendisinde değil sarmalayıcıda: disabled buton fare olayı üretmez -->
       <div class="gen-wrap" :data-tip="genTip">
@@ -183,6 +198,16 @@ function genDetails() {
 </template>
 
 <style scoped>
+.hist-line {
+  margin-top: 10px;
+  font-size: 11.5px;
+}
+.link {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 560;
+}
+
 .info-row {
   display: flex;
   align-items: center;

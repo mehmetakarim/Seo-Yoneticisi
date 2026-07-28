@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import type { MetaBadge } from "../types";
+import type { MetaBadge, MetaVersionMeta } from "../types";
 import { BADGE_LABEL, descChecks, glen, titleChecks } from "../validation";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
+import VersionHistory from "./VersionHistory.vue";
 
 const props = defineProps<{
   title: string;
@@ -16,7 +17,11 @@ const props = defineProps<{
   badge: MetaBadge;
   /** İçeriği üreten Gemini modeli (null = henüz üretilmedi). */
   model: string | null;
+  /** Yeniden üretimden önceki hâller (en yeni başta). */
+  history: MetaVersionMeta[];
 }>();
+
+const histOpen = ref(false);
 
 const emit = defineEmits<{
   "update:title": [string];
@@ -154,6 +159,16 @@ function genMeta() {
         <span class="hint">{{ searchWords }} kelime · karakter sınırı yok</span>
       </div>
 
+      <div v-if="history.length" class="hist-line">
+        <a class="link" @click="histOpen = !histOpen">önceki sürümler ({{ history.length }})</a>
+      </div>
+      <VersionHistory
+        v-if="histOpen && history.length"
+        :items="history.map((v) => ({ at: v.at, summary: v.title || '(başlık yok)', model: v.model }))"
+        noun="meta"
+        @restore="store.restoreMetaVersion($event)"
+      />
+
     <template #actions>
       <button class="gen" :class="{ busy: store.generating }" :disabled="store.generating" @click="genMeta">
         <Icon :name="store.generating ? 'loader' : 'sparkles'" :size="15" :stroke-width="store.generating ? 2.2 : 1.9" :class="{ spin: store.generating }" />
@@ -179,6 +194,16 @@ function genMeta() {
 </template>
 
 <style scoped>
+.hist-line {
+  margin-top: 12px;
+  font-size: 11.5px;
+}
+.link {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 560;
+}
+
 .field-head {
   display: flex;
   align-items: center;
