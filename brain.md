@@ -9,6 +9,28 @@
 **Yayınlanan sürümler:** v0.1.0 → v0.5.1 · **v0.5.2 = tooltip + ilk gerçek updater saha testi**
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
+
+0. ⚠️ **GEMINI MODELLERİ EMEKLİYE AYRILIYOR — bu tekrar edecek (2026-07-28 saha hatası).**
+   `gemini-1.5-flash` emekli olunca üretim TAMAMEN durdu. İki sebep vardı, ikisi de düzeltildi
+   (`033996d`) ama dersi burada duruyor:
+   - Zincir bayatlamıştı; ama asıl kusur, **404'ün geri düşmeyi tetiklememesiydi**
+     (`is_quota = 429 || 503` → kota olmayan her şey zinciri anında kırıyordu). Bir modelin
+     yokluğu tam da sıradakini denemek için sebeptir. Artık `classify_error()` bunu yönetiyor.
+   - **Zincire asla `-preview` model konmaz** — habersiz kaybolurlar, bu hatanın sebebi buydu.
+     Zincirin son halkası `gemini-flash-latest` (takma ad) → liste bayatlasa bile canlı kalır.
+   - **Model eklemeden önce canlı doğrula.** Uygulamanın istek biçimi `system_instruction` +
+     `responseSchema` ve her model ikisini desteklemiyor. Doğrulama komutu (anahtar DB'den
+     okunur, ekrana basılmaz):
+     ```
+     DB="$HOME/Library/Application Support/com.kurumsalit.seo-yoneticisi/seo-yoneticisi.db"
+     KEY=$(sqlite3 "$DB" "select value from settings where key='gemini_api_key';")
+     curl -s "https://generativelanguage.googleapis.com/v1beta/models?key=${KEY}&pageSize=200"
+     ```
+     ⚠️ zsh tuzağı: URL'de `${M}:generateContent` yaz — `$M:generateContent` yazarsan zsh `:g`'yi
+     geçmiş değiştiricisi sanar, URL bozulur ve **her model sahte 404 verir** (bir tur kaybettirdi).
+   - Kota gerçeği: ücretsiz katmanda her modelin AYRI havuzu var; zincirdeki nesil çeşitliliği
+     bu yüzden bilinçli. 2.0/2.5-flash kotası dolduğunda 3.x hâlâ çalışıyordu.
+
 1. ✅ **Updater zinciri UÇTAN UCA ÇALIŞIYOR (2026-07-26).** İki ayrı sorun vardı, ikisi de kapandı:
    - **(a) `latest.json` üretilmiyordu** → `bundle.createUpdaterArtifacts: true` eksikti (v0.5.1'de eklendi).
    - **(b) Üretildi ama indirilemiyordu** → *depo private'dı.* GitHub, özel depoların release dosyalarını
