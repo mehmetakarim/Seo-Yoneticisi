@@ -3,10 +3,17 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-07-26
-**Aktif faz:** Faz 10 ✅ otomatik güncelleme (Tauri updater)
+**Son güncelleme:** 2026-07-28
+**Aktif faz:** Mimari toparlama — Faz 1 (derleme hızı) ✅ · 2a (`seo-core` crate) ✅ · 3 (kart
+iskeleti + navigasyon) ✅ · **2b (modül bölme) ⏸️ yarım** (bkz. madde 0b)
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
-**Yayınlanan sürümler:** v0.1.0 → v0.5.1 · **v0.5.2 = tooltip + ilk gerçek updater saha testi**
+**Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
+**v0.5.4 = zincir limitlere göre sıralandı + kullanılan model rozeti**
+
+**Yapı (2026-07-28'den beri workspace):**
+`src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
+bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.rs`, `lib.rs`).
+İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
 
