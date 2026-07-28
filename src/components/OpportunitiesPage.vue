@@ -1,0 +1,393 @@
+<script setup lang="ts">
+/**
+ * Fırsatlar — "önce hangi ürüne bakmalıyım?"
+ *
+ * 262 ürün arasında elle seçim yapmak yerine, Google Search Console verisiyle emeğin en çok
+ * getiri sağlayacağı ürünleri sıralar. Sıralama ölçütü soyut bir puan değil **kaçırılan
+ * tıklama**: "bu sayfa, konumunun getirmesi gereken tıklamanın kaçını alamıyor".
+ */
+import { computed, onMounted } from "vue";
+import { useStore } from "../store";
+import type { OpportunityReason } from "../types";
+import Icon from "./Icon.vue";
+
+const store = useStore();
+const report = computed(() => store.opportunity);
+
+onMounted(() => {
+  // Önbellekten yükle — sayfa her açıldığında GSC'ye gitmeye gerek yok.
+  if (!store.opportunity) void store.loadOpportunityCache();
+});
+
+/** Sebep → mevcut rozet token'ı. Yeni renk uydurulmuyor; anlam eşlemesi bilinçli:
+ *  kırmızı = hiç tıklanmıyor (en kötü), amber = meta çalışması, mavi = konum işi. */
+const REASON: Record<OpportunityReason, { label: string; badge: string; tip: string }> = {
+  no_clicks: {
+    label: "Tıklama yok",
+    badge: "eksik",
+    tip: "Gösterim alıyor ama hiç tıklanmıyor — başlık ve açıklama ilgi çekmiyor.",
+  },
+  low_ctr: {
+    label: "Düşük CTR",
+    badge: "hatali",
+    tip: "İlk sayfada ama tıklama oranı konumunun beklenenin çok altında — meta çalışması gerekiyor.",
+  },
+  second_page: {
+    label: "İkinci sayfa",
+    badge: "bekliyor",
+    tip: "11–20. sırada. İlk sayfaya çıkmak için küçük bir iyileştirme yeterli olabilir.",
+  },
+};
+
+const totalMissed = computed(() =>
+  Math.round((report.value?.opportunities ?? []).reduce((s, o) => s + o.missed_clicks, 0)),
+);
+
+const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
+const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
+</script>
+
+<template>
+  <div class="page om-scroll">
+    <!-- Üst şerit: özet + yenileme -->
+    <div class="top">
+      <div class="sum">
+        <template v-if="report">
+          <b>{{ report.opportunities.length }}</b> fırsat ·
+          yaklaşık <b>{{ totalMissed }}</b> tıklama kaçırılıyor
+          <span class="dim">
+            · son {{ report.days }} gün · {{ report.matched }}/{{ report.total_products }} ürün
+            Google'da bulundu · {{ fmtDate(report.analyzed_at) }}
+          </span>
+        </template>
+        <span v-else class="dim">Henüz analiz çalıştırılmadı.</span>
+      </div>
+      <button class="run" :disabled="store.opportunityBusy" @click="store.runOpportunityAnalysis()">
+        <Icon
+          :name="store.opportunityBusy ? 'loader' : 'refresh'"
+          :size="15"
+          :class="{ spin: store.opportunityBusy }"
+        />
+        {{ store.opportunityBusy ? "Analiz ediliyor…" : report ? "Yenile" : "Analizi çalıştır" }}
+      </button>
+    </div>
+
+    <!-- Hata kalıcı gösterilir: toast kaybolur, kullanıcı sebebi göremez -->
+    <div v-if="store.opportunityError" class="err">
+      <Icon name="alert" :size="14" />
+      <span>{{ store.opportunityError }}</span>
+    </div>
+
+    <!-- Hiç analiz yoksa: ne olduğunu anlat -->
+    <div v-if="!report && !store.opportunityBusy" class="empty">
+      <Icon name="search" :size="30" :stroke-width="1.5" />
+      <p class="e-title">Emeğinizi nereye harcayacağınızı Google söylesin</p>
+      <p class="e-sub">
+        Search Console verisiyle hangi ürünlerin gösterim alıp tıklanmadığını, hangilerinin
+        ikinci sayfada takıldığını sıralar. Tek bir sorgu ile tüm katalog taranır.
+      </p>
+    </div>
+
+    <!-- Fırsat tablosu -->
+    <div v-if="report?.opportunities.length" class="card">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th class="c-name">Ürün</th>
+            <th class="c-num">Gösterim</th>
+            <th class="c-num">Tıklama</th>
+            <th class="c-num">CTR</th>
+            <th class="c-num">Konum</th>
+            <th class="c-num">Kaçırılan</th>
+            <th class="c-reason">Sebep</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="o in report.opportunities"
+            :key="o.sku"
+            class="row"
+            :title="`${o.name} — ürüne git`"
+            @click="store.openProduct(o.sku)"
+          >
+            <td class="c-name">
+              <div class="nm">{{ o.name }}</div>
+              <div class="sku">{{ o.sku }}</div>
+            </td>
+            <td class="c-num">{{ Math.round(o.impressions) }}</td>
+            <td class="c-num">{{ Math.round(o.clicks) }}</td>
+            <td class="c-num">%{{ pct(o.ctr) }}</td>
+            <td class="c-num">{{ o.position.toFixed(1) }}</td>
+            <td class="c-num miss">{{ Math.round(o.missed_clicks) }}</td>
+            <td class="c-reason">
+              <span
+                class="status tip-below"
+                :style="{
+                  background: `var(--badge-${REASON[o.reason].badge}-bg)`,
+                  color: `var(--badge-${REASON[o.reason].badge}-c)`,
+                }"
+                :data-tip="REASON[o.reason].tip"
+              >
+                {{ REASON[o.reason].label }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Analiz yapıldı ama fırsat yok -->
+    <div v-else-if="report" class="clean">
+      <Icon name="check" :size="16" :stroke-width="2.4" style="color: var(--green)" />
+      Fırsat bulunamadı — Google'da bulunan ürünlerin tamamı konumuna göre beklenen performansta.
+    </div>
+
+    <!-- Google'da hiç görünmeyenler: farklı bir iş, bilinçli olarak ayrı -->
+    <div v-if="report?.invisible.length" class="card inv">
+      <div class="inv-head">
+        <div>
+          <div class="inv-title">Google'da görünmeyenler ({{ report.invisible.length }})</div>
+          <div class="inv-sub">
+            Son {{ report.days }} günde hiç gösterim almamışlar. Bu bir meta sorunu değil —
+            indeksleme veya görünürlük işi; içerik üretmek tek başına çözmez.
+          </div>
+        </div>
+      </div>
+      <div class="inv-list">
+        <div
+          v-for="p in report.invisible"
+          :key="p.sku"
+          class="inv-row"
+          @click="store.openProduct(p.sku)"
+        >
+          <span class="nm">{{ p.name }}</span>
+          <span class="sku">{{ p.sku }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px 28px;
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.sum {
+  font-size: 12.5px;
+  color: var(--c-text);
+  line-height: 1.5;
+}
+.sum b {
+  font-weight: 660;
+  font-variant-numeric: tabular-nums;
+}
+.dim {
+  color: var(--c-soft);
+}
+.run {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 590;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+.run:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.run:disabled {
+  opacity: 0.8;
+  cursor: default;
+}
+.err {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 9px;
+}
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  padding: 60px 20px;
+  color: var(--c-faint);
+}
+.e-title {
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 620;
+  color: var(--c-mid);
+}
+.e-sub {
+  margin: 0;
+  max-width: 460px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--c-soft);
+}
+.clean {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 16px 18px;
+  font-size: 12.5px;
+  color: var(--c-mid);
+  background: var(--ok-soft-bg);
+  border-radius: 11px;
+}
+
+/* Kart iskeleti SeoCard ile aynı dil (gölgesiz, aynı kenar/yarıçap) */
+.card {
+  border: 1px solid var(--c-border-soft);
+  border-radius: 13px;
+  background: var(--c-card);
+  overflow: hidden;
+}
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+}
+.tbl th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--c-input);
+  border-bottom: 1px solid var(--c-border-soft);
+  padding: 9px 12px;
+  font-size: 11px;
+  font-weight: 620;
+  color: var(--c-soft);
+  text-align: left;
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--c-border-soft);
+  font-size: 12.5px;
+  color: var(--c-text);
+  vertical-align: middle;
+}
+.tbl tr:last-child td {
+  border-bottom: 0;
+}
+.row {
+  cursor: pointer;
+}
+.row:hover td {
+  background: var(--c-hover);
+}
+.c-name {
+  width: 42%;
+}
+.c-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.c-reason {
+  text-align: right;
+  white-space: nowrap;
+}
+.nm {
+  font-weight: 560;
+  line-height: 1.35;
+  /* uzun ürün adları satırı şişirmesin */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sku {
+  font-size: 10.5px;
+  color: var(--c-faint);
+  margin-top: 1px;
+}
+/* Kaçırılan tıklama sıralama ölçütü — vurgulu */
+.miss {
+  font-weight: 660;
+  color: var(--c-text);
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* Görünmeyenler */
+.inv {
+  margin-top: 18px;
+}
+.inv-head {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+.inv-title {
+  font-size: 13.5px;
+  font-weight: 640;
+  color: var(--c-text);
+}
+.inv-sub {
+  font-size: 11.5px;
+  color: var(--c-soft);
+  margin-top: 2px;
+  line-height: 1.5;
+  max-width: 640px;
+}
+.inv-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.inv-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--c-border-soft);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.inv-row:last-child {
+  border-bottom: 0;
+}
+.inv-row:hover {
+  background: var(--c-hover);
+}
+.inv-row .nm {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+</style>

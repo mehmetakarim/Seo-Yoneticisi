@@ -22,6 +22,7 @@ export interface NavItem {
 
 export const NAV = [
   { key: "products", label: "Ürünler", icon: "box", title: "Ürünler" },
+  { key: "opportunities", label: "Fırsatlar", icon: "search", title: "Fırsatlar" },
   { key: "settings", label: "Ayarlar", icon: "settings", title: "Ayarlar" },
 ] as const satisfies readonly NavItem[];
 

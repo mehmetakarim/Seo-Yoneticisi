@@ -4,6 +4,7 @@ import { useStore } from "./store";
 import { titleOf, type Page } from "./navigation";
 import Sidebar from "./components/Sidebar.vue";
 import ProductsPage from "./components/ProductsPage.vue";
+import OpportunitiesPage from "./components/OpportunitiesPage.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 import UpdateModal from "./components/UpdateModal.vue";
 import Icon from "./components/Icon.vue";
@@ -19,12 +20,15 @@ const pageRef = ref<{ focusSearch?: () => void } | null>(null);
 /** navigation.ts'teki kayda karşılık gelen bileşenler. Yeni sayfa → buraya bir satır. */
 const PAGES: Record<Page, Component> = {
   products: ProductsPage,
+  opportunities: OpportunitiesPage,
   settings: SettingsPage,
 };
 
 const isProducts = computed(() => store.page === "products");
 const pageTitle = computed(() => titleOf(store.page));
 const pageSub = computed(() => {
+  if (store.page === "opportunities")
+    return "Google Search Console verisiyle önceliklendirme";
   if (!isProducts.value) return "Kaynaklar ve yedekleme";
   const done = store.counts.tamamlandi;
   const active = store.counts.tumu;

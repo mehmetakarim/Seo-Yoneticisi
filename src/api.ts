@@ -9,6 +9,7 @@ import type {
   SyncSummary,
   TechGroup,
   TechSpecsResult,
+  OpportunityReport,
 } from "./types";
 
 export const api = {
@@ -39,6 +40,8 @@ export const api = {
   researchSeo: (sku: string, seed?: string) =>
     invoke<SeoInsights>("research_seo", { sku, seed: seed ?? null }),
   checkImages: (sku: string) => invoke<ImageCheck[]>("check_images", { sku }),
+  analyzeOpportunities: () => invoke<OpportunityReport>("analyze_opportunities"),
+  getOpportunityCache: () => invoke<OpportunityReport | null>("get_opportunity_cache"),
   saveTechSource: (sku: string, text: string) =>
     invoke<void>("save_tech_source", { sku, text }),
   structureTechSpecs: (sku: string) =>

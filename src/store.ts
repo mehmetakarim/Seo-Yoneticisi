@@ -10,6 +10,7 @@ import type {
   IdeasoftPreview,
   SyncSummary,
   TechGroup,
+  OpportunityReport,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -36,6 +37,9 @@ interface State {
   research: SeoInsights | null;
   imageChecking: boolean;
   imageCheck: ImageCheck[] | null;
+  opportunity: OpportunityReport | null;
+  opportunityBusy: boolean;
+  opportunityError: string;
   techStructuring: boolean;
   techDropped: string[];
   ideasoftBusy: boolean;
@@ -72,6 +76,9 @@ export const useStore = defineStore("app", {
     research: null,
     imageChecking: false,
     imageCheck: null,
+    opportunity: null,
+    opportunityBusy: false,
+    opportunityError: "",
     techStructuring: false,
     techDropped: [],
     ideasoftBusy: false,
@@ -254,6 +261,38 @@ export const useStore = defineStore("app", {
 
     setSearch(q: string) {
       this.search = q;
+    },
+
+    /** Önbellekteki son analizi yükler (API'ye gitmez). Sayfa açılışında çağrılır. */
+    async loadOpportunityCache() {
+      try {
+        this.opportunity = await api.getOpportunityCache();
+      } catch {
+        // Önbellek okunamazsa sessiz kal — kullanıcı yine "Analizi çalıştır" diyebilir.
+      }
+    },
+
+    /** GSC'ye gidip analizi yeniler. Tek API çağrısı, birkaç saniye sürer. */
+    async runOpportunityAnalysis() {
+      if (this.opportunityBusy) return;
+      this.opportunityBusy = true;
+      this.opportunityError = "";
+      try {
+        this.opportunity = await api.analyzeOpportunities();
+        const n = this.opportunity.opportunities.length;
+        this.toast(n ? `${n} fırsat bulundu` : "Fırsat bulunamadı — tablo temiz", "ok");
+      } catch (e) {
+        // Hata mesajı sayfada kalıcı gösterilir; toast kaybolur, kullanıcı sebebi göremez.
+        this.opportunityError = String(e);
+      } finally {
+        this.opportunityBusy = false;
+      }
+    },
+
+    /** Fırsat satırından ürüne atla. */
+    async openProduct(sku: string) {
+      this.page = "products";
+      await this.select(sku);
     },
 
     async select(sku: string) {

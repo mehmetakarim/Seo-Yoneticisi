@@ -91,8 +91,10 @@ pub struct Opportunity {
 
 /// Bir sayfanın ölçümlerinden fırsat çıkar. Fırsat yoksa `None`.
 ///
-/// Sıra önemli: önce "hiç tıklanmıyor" (en net sinyal), sonra "ikinci sayfa" (konum sorunu),
-/// sonra "düşük CTR" (meta sorunu). Bir sayfa birden çok koşula uyabilir; en açıklayıcı olan seçilir.
+/// **Sıra önemli ve konum önce geliyor.** İkinci sayfadaki bir sayfanın tıklama almaması
+/// zaten beklenen davranıştır; ona "tıklama yok" demek meta sorunu varmış gibi yanıltır ve
+/// operatörü yanlış işe yönlendirir — asıl sorun konumdur. Bu yüzden önce konum bakılır,
+/// tıklama/CTR yorumları yalnızca **ilk sayfadaki** sayfalar için yapılır.
 pub fn classify(clicks: f64, impressions: f64, ctr: f64, position: f64) -> Option<(Reason, f64)> {
     if impressions <= 0.0 {
         return None;
@@ -101,11 +103,17 @@ pub fn classify(clicks: f64, impressions: f64, ctr: f64, position: f64) -> Optio
     // Beklenenden İYİ performans gösteren sayfa fırsat değildir → negatife düşmesin.
     let missed = (impressions * (expected - ctr)).max(0.0);
 
-    let reason = if clicks == 0.0 && impressions >= MIN_IMPRESSIONS_FOR_NO_CLICK {
+    let on_first_page = position <= FIRST_PAGE_LAST_POSITION;
+    let reason = if !on_first_page {
+        if position <= SECOND_PAGE_LAST_POSITION {
+            Reason::SecondPage
+        } else {
+            // 20+ sıra: buradan ilk sayfaya çıkmak "küçük bir iyileştirme" değil.
+            return None;
+        }
+    } else if clicks == 0.0 && impressions >= MIN_IMPRESSIONS_FOR_NO_CLICK {
         Reason::NoClicks
-    } else if position > FIRST_PAGE_LAST_POSITION && position <= SECOND_PAGE_LAST_POSITION {
-        Reason::SecondPage
-    } else if position <= FIRST_PAGE_LAST_POSITION && ctr < expected * LOW_CTR_RATIO {
+    } else if ctr < expected * LOW_CTR_RATIO {
         Reason::LowCtr
     } else {
         return None;
@@ -147,6 +155,20 @@ mod tests {
         assert_eq!(classify(5.0, 1000.0, 0.005, 11.0).unwrap().0, Reason::SecondPage);
         assert_eq!(classify(5.0, 1000.0, 0.005, 20.0).unwrap().0, Reason::SecondPage);
         assert!(classify(5.0, 1000.0, 0.004, 21.0).is_none(), "21. sıra fırsat sayılmamalı");
+    }
+
+    /// Regresyon: ikinci sayfadaki sıfır tıklama "Tıklama yok" ETİKETLENMEMELİ.
+    /// 2. sayfada tıklama zaten beklenmez; o etiket meta sorunu varmış gibi yanıltıp
+    /// operatörü yanlış işe yönlendirirdi. (Gerçek veride yakalandı: TP-Link CPE510,
+    /// konum 12.7, 636 gösterim, 0 tıklama → doğru etiket "İkinci sayfa".)
+    #[test]
+    fn zero_clicks_on_page_two_is_a_position_problem() {
+        let (reason, _) = classify(0.0, 636.0, 0.0, 12.7).unwrap();
+        assert_eq!(
+            reason,
+            Reason::SecondPage,
+            "2. sayfada tıklama alamamak konum sorunudur, meta sorunu değil"
+        );
     }
 
     #[test]

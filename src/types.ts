@@ -187,3 +187,35 @@ export type FilterKey =
   | "uygun"
   | "tamamlandi"
   | "tumu";
+
+/** Fırsat analizi: bir ürünün neden listede olduğu. */
+export type OpportunityReason = "second_page" | "no_clicks" | "low_ctr";
+
+export interface Opportunity {
+  sku: string;
+  name: string;
+  url: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  /** Konumunun getirmesi gereken tıklamanın kaçını alamıyor — sıralama buna göre. */
+  missed_clicks: number;
+  reason: OpportunityReason;
+}
+
+export interface InvisibleProduct {
+  sku: string;
+  name: string;
+  url: string;
+}
+
+export interface OpportunityReport {
+  analyzed_at: string;
+  days: number;
+  opportunities: Opportunity[];
+  /** GSC'de hiç satırı olmayanlar — farklı bir iş (indeksleme), ayrı listede. */
+  invisible: InvisibleProduct[];
+  total_products: number;
+  matched: number;
+}
