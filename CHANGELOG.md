@@ -13,6 +13,11 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.5.7
+- Meta ve açıklama için sürüm geçmişi: yeniden üretmeden önceki hâl saklanıyor, beğenmezseniz geri yükleyebilirsiniz
+- Geri yüklerken mevcut hâl de saklanıyor — geri yükleme de geri alınabilir
+- Her sürümün hangi modelle üretildiği listede görünüyor
+
 ## v0.5.6
 - Yeni "Fırsatlar" sayfası: Google Search Console verisiyle hangi ürüne öncelik vermeniz gerektiğini sıralar
 - Her ürün için kaç tıklama kaçırdığınız ve nedeni gösteriliyor — ikinci sayfada mı, meta mı çekmiyor
