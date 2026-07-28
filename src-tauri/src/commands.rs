@@ -1568,11 +1568,22 @@ pub async fn analyze_opportunities(
         let conn = state.conn.lock().unwrap();
         let gsc_json = db::get_setting(&conn, "gsc_service_account_json")?.unwrap_or_default();
         let gsc_site = db::get_setting(&conn, "gsc_site_url")?.unwrap_or_default();
+        // Kategori/marka ve SEO iş durumu da alınır — fırsat listesinde "hiç dokunulmamış" ile
+        // "çalışılmış ama hâlâ sorunlu" ayrımı için. Tek sorgu, ek ağ çağrısı yok.
         let mut stmt = conn
-            .prepare("SELECT sku, name, url FROM products WHERE url IS NOT NULL AND url <> ''")
+            .prepare(
+                "SELECT p.sku, p.name, p.url, COALESCE(p.category,''), COALESCE(p.brand,''),
+                        COALESCE(s.meta_status,'pending'), COALESCE(s.details_status,'pending')
+                 FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
+                 WHERE p.url IS NOT NULL AND p.url <> ''",
+            )
             .map_err(|e| format!("Ürünler okunamadı: {e}"))?;
-        let rows: Vec<(String, String, String)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        let rows: Vec<(String, String, String, String, String, String, String)> = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+                ))
+            })
             .map_err(|e| format!("Ürünler okunamadı: {e}"))?
             .filter_map(|r| r.ok())
             .collect();
@@ -1614,7 +1625,7 @@ pub async fn analyze_opportunities(
     let mut invisible = Vec::new();
     let mut matched = 0usize;
 
-    for (sku, name, url) in products {
+    for (sku, name, url, category, brand, meta_status, details_status) in products {
         match by_url.get(&norm_url(&url)) {
             Some(st) => {
                 matched += 1;
@@ -1631,6 +1642,10 @@ pub async fn analyze_opportunities(
                         position: st.position,
                         missed_clicks: missed,
                         reason,
+                        category,
+                        brand,
+                        meta_status,
+                        details_status,
                     });
                 }
             }

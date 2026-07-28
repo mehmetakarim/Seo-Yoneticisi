@@ -6,13 +6,92 @@
  * getiri sağlayacağı ürünleri sıralar. Sıralama ölçütü soyut bir puan değil **kaçırılan
  * tıklama**: "bu sayfa, konumunun getirmesi gereken tıklamanın kaçını alamıyor".
  */
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useStore } from "../store";
-import type { OpportunityReason } from "../types";
+import { workState, type Opportunity, type OpportunityReason, type WorkState } from "../types";
 import Icon from "./Icon.vue";
 
 const store = useStore();
 const report = computed(() => store.opportunity);
+
+// --- Filtreler ---
+// Tamamen istemcide: 60 satır için sunucuya gitmek gereksiz gecikme olurdu.
+const workFilter = ref<WorkState | "all">("all");
+const reasonFilter = ref<OpportunityReason | "all">("all");
+/** Kategori veya marka kesiti — "cat:Notebook" / "brand:Lenovo" biçiminde. */
+const sliceFilter = ref<string>("");
+
+const all = computed<Opportunity[]>(() => report.value?.opportunities ?? []);
+
+const filtered = computed(() =>
+  all.value.filter((o) => {
+    if (workFilter.value !== "all" && workState(o) !== workFilter.value) return false;
+    if (reasonFilter.value !== "all" && o.reason !== reasonFilter.value) return false;
+    if (sliceFilter.value) {
+      const [kind, val] = sliceFilter.value.split(/:(.*)/s);
+      if (kind === "cat" && o.category !== val) return false;
+      if (kind === "brand" && o.brand !== val) return false;
+    }
+    return true;
+  }),
+);
+
+const anyFilter = computed(
+  () => workFilter.value !== "all" || reasonFilter.value !== "all" || !!sliceFilter.value,
+);
+function clearFilters() {
+  workFilter.value = "all";
+  reasonFilter.value = "all";
+  sliceFilter.value = "";
+}
+
+/** Sayaçlar tüm listeden hesaplanır — filtre uygulanınca sayılar değişip kafa karıştırmasın. */
+const workCounts = computed(() => {
+  const c = { untouched: 0, partial: 0, worked: 0 };
+  for (const o of all.value) c[workState(o)]++;
+  return c;
+});
+const reasonCounts = computed(() => {
+  const c: Record<string, number> = { second_page: 0, no_clicks: 0, low_ctr: 0 };
+  for (const o of all.value) c[o.reason]++;
+  return c;
+});
+
+/** Kaçırılan tıklamaya göre en büyük kesitler — nereye toplu odaklanılacağını gösterir. */
+function topSlices(key: "category" | "brand", n: number) {
+  const m = new Map<string, { n: number; missed: number }>();
+  for (const o of all.value) {
+    const k = o[key] || "(belirtilmemiş)";
+    const cur = m.get(k) ?? { n: 0, missed: 0 };
+    cur.n++;
+    cur.missed += o.missed_clicks;
+    m.set(k, cur);
+  }
+  return [...m.entries()]
+    .sort((a, b) => b[1].missed - a[1].missed)
+    .slice(0, n)
+    .map(([name, v]) => ({ name, ...v }));
+}
+const topCats = computed(() => topSlices("category", 5));
+const topBrands = computed(() => topSlices("brand", 5));
+
+const WORK: Record<WorkState, { label: string; badge: string; tip: string }> = {
+  untouched: {
+    label: "Dokunulmamış",
+    badge: "eksik",
+    tip: "Bu ürün için henüz meta veya açıklama üretilmemiş — en hızlı kazanç burada.",
+  },
+  partial: {
+    label: "Kısmen",
+    badge: "hatali",
+    tip: "Meta veya açıklamadan yalnızca biri üretilmiş.",
+  },
+  worked: {
+    label: "Çalışıldı",
+    badge: "tamamlandi",
+    tip: "Meta ve açıklama üretilmiş ama sayfa hâlâ fırsat listesinde — yani üretim sonuç vermemiş. Hedef kelimeyi gözden geçirmek gerekebilir.",
+  },
+};
 
 onMounted(() => {
   // Önbellekten yükle — sayfa her açıldığında GSC'ye gitmeye gerek yok.
@@ -39,9 +118,7 @@ const REASON: Record<OpportunityReason, { label: string; badge: string; tip: str
   },
 };
 
-const totalMissed = computed(() =>
-  Math.round((report.value?.opportunities ?? []).reduce((s, o) => s + o.missed_clicks, 0)),
-);
+const totalMissed = computed(() => Math.round(filtered.value.reduce((s, o) => s + o.missed_clicks, 0)));
 
 const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
 const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
@@ -88,12 +165,74 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
       </p>
     </div>
 
+    <!-- Kesitler: kayıp nerede toplanıyor? Tek tek yerine grup halinde çalışma imkânı. -->
+    <div v-if="all.length" class="slices">
+      <div class="slice-group">
+        <span class="slice-label">Kategori</span>
+        <button
+          v-for="c in topCats"
+          :key="'c' + c.name"
+          class="slice"
+          :class="{ on: sliceFilter === 'cat:' + c.name }"
+          @click="sliceFilter = sliceFilter === 'cat:' + c.name ? '' : 'cat:' + c.name"
+        >
+          {{ c.name }}<b>{{ Math.round(c.missed) }}</b>
+        </button>
+      </div>
+      <div class="slice-group">
+        <span class="slice-label">Marka</span>
+        <button
+          v-for="b in topBrands"
+          :key="'b' + b.name"
+          class="slice"
+          :class="{ on: sliceFilter === 'brand:' + b.name }"
+          @click="sliceFilter = sliceFilter === 'brand:' + b.name ? '' : 'brand:' + b.name"
+        >
+          {{ b.name }}<b>{{ Math.round(b.missed) }}</b>
+        </button>
+      </div>
+    </div>
+
+    <!-- Filtreler: iş durumu ve sebep. ProductList'teki çip deseninin aynısı. -->
+    <div v-if="all.length" class="filters">
+      <button class="filter" :class="{ on: workFilter === 'all' }" @click="workFilter = 'all'">
+        <span>Hepsi</span><span class="count">{{ all.length }}</span>
+      </button>
+      <button
+        v-for="w in (['untouched', 'partial', 'worked'] as const)"
+        :key="w"
+        class="filter"
+        :class="{ on: workFilter === w }"
+        :data-tip="WORK[w].tip"
+        @click="workFilter = w"
+      >
+        <span>{{ WORK[w].label }}</span><span class="count">{{ workCounts[w] }}</span>
+      </button>
+
+      <span class="fsep"></span>
+
+      <button
+        v-for="r in (['low_ctr', 'no_clicks', 'second_page'] as const)"
+        :key="r"
+        class="filter"
+        :class="{ on: reasonFilter === r }"
+        @click="reasonFilter = reasonFilter === r ? 'all' : r"
+      >
+        <span>{{ REASON[r].label }}</span><span class="count">{{ reasonCounts[r] }}</span>
+      </button>
+
+      <button v-if="anyFilter" class="filter clear" @click="clearFilters()">
+        <Icon name="x" :size="12" :stroke-width="2.4" /> Filtreyi temizle
+      </button>
+    </div>
+
     <!-- Fırsat tablosu -->
-    <div v-if="report?.opportunities.length" class="card">
+    <div v-if="filtered.length" class="card">
       <table class="tbl">
         <thead>
           <tr>
             <th class="c-name">Ürün</th>
+            <th class="c-work">Durum</th>
             <th class="c-num">Gösterim</th>
             <th class="c-num">Tıklama</th>
             <th class="c-num">CTR</th>
@@ -104,7 +243,7 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
         </thead>
         <tbody>
           <tr
-            v-for="o in report.opportunities"
+            v-for="o in filtered"
             :key="o.sku"
             class="row"
             :title="`${o.name} — ürüne git`"
@@ -113,6 +252,18 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
             <td class="c-name">
               <div class="nm">{{ o.name }}</div>
               <div class="sku">{{ o.sku }}</div>
+            </td>
+            <td class="c-work">
+              <span
+                class="status tip-below"
+                :style="{
+                  background: `var(--badge-${WORK[workState(o)].badge}-bg)`,
+                  color: `var(--badge-${WORK[workState(o)].badge}-c)`,
+                }"
+                :data-tip="WORK[workState(o)].tip"
+              >
+                {{ WORK[workState(o)].label }}
+              </span>
             </td>
             <td class="c-num">{{ Math.round(o.impressions) }}</td>
             <td class="c-num">{{ Math.round(o.clicks) }}</td>
@@ -136,7 +287,14 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
       </table>
     </div>
 
-    <!-- Analiz yapıldı ama fırsat yok -->
+    <!-- Filtre hiçbir satır bırakmadı: sessiz boş tablo bırakma -->
+    <div v-else-if="report && all.length" class="clean">
+      <Icon name="search" :size="16" :stroke-width="2.2" style="color: var(--c-soft)" />
+      Bu filtrede fırsat yok.
+      <a class="link" @click="clearFilters()">Filtreyi temizle</a>
+    </div>
+
+    <!-- Analiz yapıldı ama hiç fırsat yok -->
     <div v-else-if="report" class="clean">
       <Icon name="check" :size="16" :stroke-width="2.4" style="color: var(--green)" />
       Fırsat bulunamadı — Google'da bulunan ürünlerin tamamı konumuna göre beklenen performansta.
@@ -304,7 +462,10 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   background: var(--c-hover);
 }
 .c-name {
-  width: 42%;
+  width: 36%;
+}
+.c-work {
+  white-space: nowrap;
 }
 .c-num {
   text-align: right;
@@ -342,6 +503,109 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 600;
+}
+
+/* Kesitler — kayıp nerede toplanıyor */
+.slices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.slice-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.slice-label {
+  font-size: 11px;
+  color: var(--c-faint);
+  width: 54px;
+  flex: none;
+}
+.slice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--c-border-soft);
+  border-radius: 7px;
+  background: var(--c-input);
+  color: var(--c-mid);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.slice b {
+  font-variant-numeric: tabular-nums;
+  color: var(--c-soft);
+  font-weight: 640;
+}
+.slice.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+.slice.on b {
+  color: var(--accent);
+}
+
+/* Filtre çipleri — ProductList.vue ile aynı dil */
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 6px 11px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-input);
+  color: var(--c-mid);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.filter.on {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.filter .count {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 20px;
+  background: var(--c-chip);
+  color: var(--c-soft);
+  font-weight: 600;
+}
+.filter.on .count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+.filter.clear {
+  border-style: dashed;
+  color: var(--c-soft);
+}
+.fsep {
+  width: 1px;
+  height: 20px;
+  background: var(--c-border);
+  margin: 0 4px;
+}
+.link {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 560;
 }
 
 /* Görünmeyenler */

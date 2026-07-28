@@ -216,6 +216,22 @@ export interface Opportunity {
   /** Konumunun getirmesi gereken tıklamanın kaçını alamıyor — sıralama buna göre. */
   missed_clicks: number;
   reason: OpportunityReason;
+  /** Bağlam alanları — eski önbellekte olmayabilir, bu yüzden boş string dönebilir. */
+  category: string;
+  brand: string;
+  meta_status: string;
+  details_status: string;
+}
+
+/** Ürünün SEO iş durumu — "üret" ile "neden işe yaramadı?" farklı işler. */
+export type WorkState = "untouched" | "partial" | "worked";
+
+export function workState(o: Opportunity): WorkState {
+  const m = o.meta_status === "done";
+  const d = o.details_status === "done";
+  if (m && d) return "worked";
+  if (!m && !d) return "untouched";
+  return "partial";
 }
 
 export interface InvisibleProduct {

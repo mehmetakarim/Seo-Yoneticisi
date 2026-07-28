@@ -87,6 +87,43 @@ pub struct Opportunity {
     /// Konumunun getirmesi gereken tıklamanın kaçını alamıyor (sıralama buna göre).
     pub missed_clicks: f64,
     pub reason: Reason,
+
+    // --- Bağlam alanları (GSC'den değil, kendi kataloğumuzdan) ---
+    // Hepsi `serde(default)`: eski `opportunity_json` önbelleği bu alanları taşımıyor.
+    // Default olmasaydı eski önbellek çözümlenemez, kullanıcı sebepsiz boş ekran görürdü.
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub brand: String,
+    /// "pending" | "done" — ürünün meta durumu.
+    #[serde(default)]
+    pub meta_status: String,
+    #[serde(default)]
+    pub details_status: String,
+}
+
+/// Fırsat listesindeki ürünün SEO iş durumu.
+///
+/// Ayrım önemli: ölçüme göre 60 fırsatın 49'u hiç dokunulmamış, 11'i çalışılmış ama hâlâ
+/// sorunlu. Bunlar **farklı işler** — ilki "içerik üret", ikincisi "ürettiğim neden işe
+/// yaramadı?". Aynı listede karışık durmaları operatörü yanlış yönlendiriyordu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkState {
+    /// Ne meta ne açıklama üretilmiş.
+    Untouched,
+    /// Biri üretilmiş.
+    Partial,
+    /// İkisi de üretilmiş — ama sayfa hâlâ fırsat listesinde, yani sonuç alınamamış.
+    Worked,
+}
+
+pub fn work_state(meta_status: &str, details_status: &str) -> WorkState {
+    match (meta_status == "done", details_status == "done") {
+        (true, true) => WorkState::Worked,
+        (false, false) => WorkState::Untouched,
+        _ => WorkState::Partial,
+    }
 }
 
 /// Bir sayfanın ölçümlerinden fırsat çıkar. Fırsat yoksa `None`.
@@ -202,11 +239,35 @@ mod tests {
     }
 
     #[test]
+    fn work_state_maps_three_cases() {
+        assert_eq!(work_state("pending", "pending"), WorkState::Untouched);
+        assert_eq!(work_state("done", "done"), WorkState::Worked);
+        assert_eq!(work_state("done", "pending"), WorkState::Partial);
+        assert_eq!(work_state("pending", "done"), WorkState::Partial);
+        // Beklenmeyen değerler "done" değildir → dokunulmamış sayılır
+        assert_eq!(work_state("", ""), WorkState::Untouched);
+    }
+
+    /// Eski önbellek (yeni bağlam alanları yokken yazılmış) çözümlenebilmeli — aksi halde
+    /// kullanıcı analiz kaybolmuş gibi boş ekran görür.
+    #[test]
+    fn old_cache_without_context_fields_still_parses() {
+        let old = r#"{"sku":"X","name":"Ürün","url":"u","clicks":1.0,"impressions":100.0,
+                      "ctr":0.01,"position":8.0,"missed_clicks":2.3,"reason":"low_ctr"}"#;
+        let o: Opportunity = serde_json::from_str(old).expect("eski önbellek çözümlenmeli");
+        assert_eq!(o.sku, "X");
+        assert_eq!(o.category, "");
+        assert_eq!(o.meta_status, "");
+    }
+
+    #[test]
     fn sorting_puts_biggest_loss_first() {
         let mk = |sku: &str, missed: f64| Opportunity {
             sku: sku.into(), name: "x".into(), url: "u".into(),
             clicks: 0.0, impressions: 0.0, ctr: 0.0, position: 0.0,
             missed_clicks: missed, reason: Reason::NoClicks,
+            category: String::new(), brand: String::new(),
+            meta_status: String::new(), details_status: String::new(),
         };
         let mut v = vec![mk("a", 5.0), mk("b", 120.0), mk("c", 40.0)];
         sort_by_impact(&mut v);
