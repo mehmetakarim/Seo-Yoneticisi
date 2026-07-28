@@ -11,7 +11,70 @@ use crate::validation::{grapheme_len, MetaBadge, MetaInput};
 use serde::{Deserialize, Serialize};
 
 /// Kota dolduğunda soldan sağa denenecek modeller.
-pub const MODEL_CHAIN: &[&str] = &["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+/// Kota dolduğunda (veya model emekliye ayrıldığında) soldan sağa denenecek modeller.
+///
+/// **Sıralama mantığı:** en yeni/yetenekli önce, sonra aynı neslin `lite` sürümü, sonra bir
+/// önceki nesil. Her modelin ücretsiz katmanda **ayrı kota havuzu** var; bu yüzden zincirde
+/// nesil çeşitliliği olması, bir modelin limiti dolduğunda üretimin durmamasını sağlıyor.
+///
+/// **Kurallar:**
+/// - `-preview` ekli modeller KULLANILMAZ. Habersiz emekliye ayrılıyorlar; 2026-07 sonunda
+///   `gemini-1.5-flash` tam olarak böyle kaybolup üretimi tamamen durdurmuştu.
+/// - Zincirin sonundaki `gemini-flash-latest` bir **takma ad**: Google onu güncel modele
+///   yönlendirir. Bu liste yıllar sonra bayatlasa bile son halka canlı kalır.
+/// - Yeni model eklemeden önce gerçekten çalıştığı doğrulanmalı: uygulamanın istek biçimi
+///   `system_instruction` + `responseSchema` kullanıyor ve her model ikisini birden
+///   desteklemiyor.
+///
+/// Son doğrulama 2026-07-28: aşağıdakilerin tamamı 200 döndü ve şemaya uydu.
+pub const MODEL_CHAIN: &[&str] = &[
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-flash-latest",
+];
+
+/// HTTP hatasını sınıflandırır: **zincirdeki sıradaki modele geçilmeli mi**, ve kullanıcıya
+/// ne yazılmalı.
+///
+/// `true` → "bu model şu an olmaz, başkası olabilir". `false` → modelden bağımsız kesin hata,
+/// zinciri denemenin anlamı yok.
+///
+/// ⚠️ **404 bilinçli olarak `true`.** Uzun süre kota dışındaki her şey gibi `false` sayılıyordu;
+/// `gemini-1.5-flash` emekliye ayrıldığında zincir o modele gelince kırıldı ve üretim tamamen
+/// durdu — oysa "bu model artık yok" tam da sıradakini denemek için sebep.
+fn classify_error(code: u16, text: &str, model: &str) -> (bool, String) {
+    // Anahtar/yetki hataları her modelde aynı sonucu verir → zinciri gezmek zaman kaybı.
+    if code == 400 && text.contains("API_KEY_INVALID") {
+        return (false, "Gemini API anahtarı geçersiz.".to_string());
+    }
+    if code == 403 {
+        return (
+            false,
+            format!("Gemini erişimi reddedildi (HTTP 403): {}", short(text)),
+        );
+    }
+    match code {
+        429 | 503 => (true, format!("{model} kotası/limiti doldu (HTTP {code}).")),
+        500 => (true, format!("{model} geçici sunucu hatası (HTTP 500).")),
+        404 => (
+            true,
+            format!("{model} artık mevcut değil (HTTP 404) — emekliye ayrılmış olabilir."),
+        ),
+        // Sınıflandırılmamış hatalar (ör. 400): zinciri denemeye devam et. Bir modelin
+        // isteğimizi reddetmesi (system_instruction/responseSchema desteklememesi) 400
+        // veriyor ve bu tam olarak modele özgü bir durum — burada durmak, düzelttiğimiz
+        // hatanın aynısını üretirdi. Bedeli: gerçekten bozuk bir istekte zincir boşuna
+        // gezilir; bunu telafi etmek için çağıran, son hatayı mesaja ekliyor.
+        _ => (
+            true,
+            format!("Gemini hatası (HTTP {code}): {}", short(text)),
+        ),
+    }
+}
 
 const API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -117,17 +180,7 @@ async fn call_model(
     let text = resp.text().await.unwrap_or_default();
 
     if !status.is_success() {
-        let code = status.as_u16();
-        // 429 = kota/limit → fallback tetikle. 400 + API_KEY_INVALID = anahtar hatası.
-        let is_quota = code == 429 || code == 503;
-        let msg = if code == 400 && text.contains("API_KEY_INVALID") {
-            "Gemini API anahtarı geçersiz.".to_string()
-        } else if is_quota {
-            format!("{model} kotası/limiti doldu (HTTP {code}).")
-        } else {
-            format!("Gemini hatası (HTTP {code}): {}", short(&text))
-        };
-        return Err((is_quota, msg));
+        return Err(classify_error(status.as_u16(), &text, model));
     }
 
     // Başarılı yanıttan JSON metni çıkar
@@ -272,10 +325,10 @@ pub async fn generate_meta(
                 };
                 return Ok(clamp_lengths(best));
             }
-            Err((is_quota, msg)) => {
+            Err((try_next, msg)) => {
                 last_err = msg;
                 // Kota değilse (anahtar/ağ/biçim hatası) fallback anlamsız, hemen dön
-                if !is_quota {
+                if !try_next {
                     return Err(last_err);
                 }
                 // Kota ise sıradaki modele geç
@@ -422,16 +475,7 @@ async fn call_details_model(
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        let code = status.as_u16();
-        let is_quota = code == 429 || code == 503;
-        let msg = if code == 400 && text.contains("API_KEY_INVALID") {
-            "Gemini API anahtarı geçersiz.".to_string()
-        } else if is_quota {
-            format!("{model} kotası/limiti doldu (HTTP {code}).")
-        } else {
-            format!("Gemini hatası (HTTP {code}): {}", short(&text))
-        };
-        return Err((is_quota, msg));
+        return Err(classify_error(status.as_u16(), &text, model));
     }
     let v: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| (false, format!("Yanıt çözümlenemedi: {e}")))?;
@@ -591,9 +635,9 @@ pub async fn generate_details(
                 }
                 return Ok(result);
             }
-            Err((is_quota, msg)) => {
+            Err((try_next, msg)) => {
                 last_err = msg;
-                if !is_quota {
+                if !try_next {
                     return Err(last_err);
                 }
             }
@@ -652,16 +696,7 @@ async fn call_scratch_model(
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        let code = status.as_u16();
-        let is_quota = code == 429 || code == 503;
-        let msg = if code == 400 && text.contains("API_KEY_INVALID") {
-            "Gemini API anahtarı geçersiz.".to_string()
-        } else if is_quota {
-            format!("{model} kotası/limiti doldu (HTTP {code}).")
-        } else {
-            format!("Gemini hatası (HTTP {code}): {}", short(&text))
-        };
-        return Err((is_quota, msg));
+        return Err(classify_error(status.as_u16(), &text, model));
     }
     let v: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| (false, format!("Yanıt çözümlenemedi: {e}")))?;
@@ -801,9 +836,9 @@ pub async fn generate_details_scratch(
                 }
                 return Ok(result);
             }
-            Err((is_quota, msg)) => {
+            Err((try_next, msg)) => {
                 last_err = msg;
-                if !is_quota {
+                if !try_next {
                     return Err(last_err);
                 }
             }
@@ -1039,9 +1074,9 @@ pub async fn optimize_details(
                 }
                 return Ok(Some(result));
             }
-            Err((is_quota, msg)) => {
+            Err((try_next, msg)) => {
                 last_err = msg;
-                if !is_quota {
+                if !try_next {
                     return Err(last_err);
                 }
             }
@@ -1148,16 +1183,7 @@ async fn call_specs_model(
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        let code = status.as_u16();
-        let is_quota = code == 429 || code == 503;
-        let msg = if code == 400 && text.contains("API_KEY_INVALID") {
-            "Gemini API anahtarı geçersiz.".to_string()
-        } else if is_quota {
-            format!("{model} kotası/limiti doldu (HTTP {code}).")
-        } else {
-            format!("Gemini hatası (HTTP {code}): {}", short(&text))
-        };
-        return Err((is_quota, msg));
+        return Err(classify_error(status.as_u16(), &text, model));
     }
     let v: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| (false, format!("Yanıt çözümlenemedi: {e}")))?;
@@ -1254,9 +1280,9 @@ pub async fn structure_tech_specs(
                 }
                 return Ok(result);
             }
-            Err((is_quota, msg)) => {
+            Err((try_next, msg)) => {
                 last_err = msg;
-                if !is_quota {
+                if !try_next {
                     return Err(last_err);
                 }
             }
@@ -1420,6 +1446,45 @@ mod tests {
         assert!(!out.ends_with(' '));
         // kısa metne dokunmaz
         assert_eq!(clamp_to("kısa metin", 155), "kısa metin");
+    }
+
+    /// Regresyon: 2026-07-28'de `gemini-1.5-flash` emekliye ayrılınca üretim tamamen durdu.
+    /// Sebep, 404'ün "kota değil" sayılıp zinciri kırmasıydı — oysa modelin yokluğu tam da
+    /// sıradakini denemek için sebep. Bu test o kararı sabitler.
+    #[test]
+    fn retired_model_advances_the_chain() {
+        let (try_next, msg) = classify_error(404, "{\"error\":{\"code\":404}}", "gemini-1.5-flash");
+        assert!(try_next, "404 sıradaki modele geçmeli, zinciri kırmamalı");
+        assert!(msg.contains("gemini-1.5-flash"), "mesaj modeli adlandırmalı: {msg}");
+
+        // Kota ve geçici sunucu hataları da zinciri sürdürür
+        for code in [429, 503, 500] {
+            assert!(classify_error(code, "", "m").0, "HTTP {code} devam etmeli");
+        }
+
+        // Anahtar/yetki hataları modelden bağımsız → zinciri gezmek anlamsız
+        let (try_next, msg) = classify_error(400, "{\"error\":\"API_KEY_INVALID\"}", "m");
+        assert!(!try_next, "geçersiz anahtarda zincir denenmemeli");
+        assert!(msg.contains("geçersiz"));
+        assert!(!classify_error(403, "yasak", "m").0, "403'te zincir denenmemeli");
+    }
+
+    /// Zincirde `-preview` model bulunmamalı: habersiz emekliye ayrılıp üretimi durduruyorlar.
+    /// Son halka bir takma ad olmalı ki liste bayatlasa bile canlı kalsın.
+    #[test]
+    fn model_chain_is_production_safe() {
+        assert!(!MODEL_CHAIN.is_empty());
+        for m in MODEL_CHAIN {
+            assert!(!m.contains("preview"), "zincirde preview model var: {m}");
+        }
+        assert!(
+            MODEL_CHAIN.last().unwrap().contains("latest"),
+            "zincirin sonu bir 'latest' takma adı olmalı"
+        );
+        // Emekli modeller geri sızmasın
+        for dead in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"] {
+            assert!(!MODEL_CHAIN.contains(&dead), "emekli model zincirde: {dead}");
+        }
     }
 
     #[test]
