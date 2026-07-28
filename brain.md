@@ -31,6 +31,36 @@
    - Kota gerçeği: ücretsiz katmanda her modelin AYRI havuzu var; zincirdeki nesil çeşitliliği
      bu yüzden bilinçli. 2.0/2.5-flash kotası dolduğunda 3.x hâlâ çalışıyordu.
 
+0b. ⏸️ **FAZ 2B YARIM KALDI — `gemini.rs` (1923 satır) modül bölme.** Faz 1/2a/3 bitti (bkz. aşağı).
+   **Önce şunu bil: bu iş TAMAMEN KOZMETİK.** Rust'ta derleme birimi dosya değil crate'tir;
+   dosyayı bölmek derleme süresini DÜŞÜRMEZ — bu ölçülerek doğrulandı. Değeri yalnızca
+   okunabilirlik. (Yine de değersiz değil: 2026-07-28 hatasında aynı hata sınıflandırması
+   4 yerde kopyalanmıştı ve dördü de yanlıştı.)
+
+   Hazır olan analiz — tekrar çıkarmaya gerek yok:
+   - **mod.rs (paylaşılan):** `use`'lar, `MODEL_CHAIN`, `classify_error`, `API_BASE`,
+     `ProductContext`, `short`, `esc`, `test_key`. Alt modüller bunlara `use super::*` ile erişir
+     (Rust'ta çocuk modül, atasının private öğelerini görebilir).
+   - **meta.rs:** `GeneratedMeta`, `system_prompt`, `build_prompt`, `response_schema`,
+     `call_model`, `violation_count`, `clamp_lengths`, `clamp_to`, `correction_for`, `generate_meta`
+   - **details.rs:** `ascii_lower_bytes` → `optimize_details` arası her şey (`esc` hariç, o paylaşımlı)
+   - **tech.rs:** `TECH_GROUPS`, `LIST_GROUP`, `TechRow`, `TechGroup`, `TechSpecsResult`,
+     `tech_system_prompt`, `call_specs_model`, `verify_traceable`, `structure_tech_specs`,
+     `assemble_tech_html`
+   - **Dış yüzey korunmalı:** `commands.rs` şu 12 öğeyi `gemini::X` olarak kullanıyor →
+     mod.rs'ten `pub use` ile yeniden dışa açılmalı: `ProductContext`, `TechGroup`, `TechRow`,
+     `TechSpecsResult`, `assemble_tech_html`, `generate_details`, `generate_details_scratch`,
+     `generate_meta`, `has_rewritable_content`, `optimize_details`, `structure_tech_specs`, `test_key`.
+   - **Testler (566 satır) konularıyla birlikte taşınmalı** — private fonksiyonları test ediyorlar,
+     tek yerde kalamazlar.
+
+   ⚠️ **Tuzak:** prompt fonksiyonları çok satırlı string literal döndürüyor; naif süslü-parantez
+   sayan bir betik bunlarda kırılıyor (denendi, `scratch_system_prompt`'ta patladı). Ya durum
+   takip eden bir tarayıcı yaz, ya da elle taşı. Her hâlükârda parçaların birleşimi orijinali
+   birebir vermeli — yazmadan önce bunu doğrula.
+
+   Doğrulama ucuz: `cargo test -p seo-core` ≈ 60 sn (Tauri derlenmiyor), 67 test geçmeli.
+
 1. ✅ **Updater zinciri UÇTAN UCA ÇALIŞIYOR (2026-07-26).** İki ayrı sorun vardı, ikisi de kapandı:
    - **(a) `latest.json` üretilmiyordu** → `bundle.createUpdaterArtifacts: true` eksikti (v0.5.1'de eklendi).
    - **(b) Üretildi ama indirilemiyordu** → *depo private'dı.* GitHub, özel depoların release dosyalarını
