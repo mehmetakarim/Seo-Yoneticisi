@@ -3649,7 +3649,7 @@ dependencies = [
 
 [[package]]
 name = "seo-core"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "chrono",
  "imagesize",
@@ -3666,7 +3666,7 @@ dependencies = [
 
 [[package]]
 name = "seo-yoneticisi"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "chrono",
  "reqwest 0.12.28",

@@ -122,6 +122,13 @@ Bunun yerine global `[data-tip="metin"]` tooltip'i var (`styles.css`). Kurallar:
 - Ok, 10px'lik üçgen kutusunun üst yarısı renkli olduğundan `bottom: calc(100% - 2px)` ile konumlanır;
   `100% + 3px` yapılırsa renkli yarı baloncuğun ARKASINDA kalır ve ok görünmez.
 - Diğer kartlarda hâlâ native `title=` var; istenirse `data-tip`'e çevrilebilir.
+- **`.card { overflow: hidden }` tooltip'i her yönde kırpar.** Kart BAŞLIĞINDAKİ öğeler için
+  `[data-tip].tip-below` varyantı var: aşağı + sağa hizalı açar. Yine de baloncuk kartın
+  İÇİNDE kalıyor → metin iki satırı geçerse alt kenardan taşıp kırpılıyor (v0.5.5'te
+  Gemma tooltip'i tam bunu yaptı). Tooltip metinleri kısa tutulmalı.
+- Görsel test yöntemi: gerçek CSS'i `styles.css`'ten çekip küçük bir harness sayfası üret,
+  `[data-tip]::after{opacity:1!important}` ile tooltip'i zorla göster, en kötü durumu
+  (en kısa kart gövdesi) dene. Bu yöntem üç ayrı kırpma hatasını yakaladı.
 2. **Sıradaki kuyruk (kullanıcı onaylı):** mimari toparlama (navigasyon kabuğu + gruplandırılmış menü;
    `gemini.rs` ~2000, `commands.rs` ~1700 satır → modül bölme; store ayırma; derleme ~8-9 dk çok yavaş)
    → GSC fırsat analizi (2. sayfadaki ürünler, gösterim var tıklama yok) + meta/açıklama sürüm geçmişi
