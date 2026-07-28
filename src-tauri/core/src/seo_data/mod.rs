@@ -52,6 +52,17 @@ pub struct GscQuery {
     pub position: f64,
 }
 
+/// GSC'de bir SAYFANIN toplam performansı (fırsat analizi için, sorgu bazlı değil sayfa bazlı).
+/// `search_queries` tek ürünün sorgularını getirirken bu, tek çağrıda tüm sayfaları getirir.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct PageStat {
+    pub page: String,
+    pub clicks: f64,
+    pub impressions: f64,
+    pub ctr: f64,
+    pub position: f64,
+}
+
 /// Google Trends trend terimi (Faz 6).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct TrendTerm {

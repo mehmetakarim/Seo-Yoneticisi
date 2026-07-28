@@ -8,7 +8,7 @@
 //! Kullanıcı SA'yı Google Cloud'da oluşturup GSC mülküne kullanıcı olarak ekler; SA JSON
 //! Ayarlar'dan yüklenir ve SQLite `settings`'te saklanır (koda/git'e gömülmez).
 
-use super::GscQuery;
+use super::{GscQuery, PageStat};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -174,6 +174,76 @@ fn parse_rows(data: &serde_json::Value) -> Vec<GscQuery> {
         .collect()
 }
 
+/// **Fırsat analizi için:** tüm sayfaların toplam performansı — tek API çağrısı.
+///
+/// `search_queries`'den farkı: orada `page` bir FİLTRE (tek ürün), burada bir BOYUT (tüm site).
+/// GSC `rowLimit` olarak 25.000'e izin veriyor; 262 ürünlük katalog tek istekte geliyor,
+/// yani ürün başına çağrı yapmaya gerek yok (öyle olsaydı 262 istek + kota sorunu olurdu).
+///
+/// Dönen `page` değerleri `products.url` ile eşleşir — mevcut `search_queries` zaten
+/// `page = products.url` filtresiyle çalışıyor, yani biçim uyumu kanıtlı.
+pub async fn page_stats(
+    client: &reqwest::Client,
+    sa_json: &str,
+    site_url: &str,
+    days: i64,
+    limit: u32,
+) -> Result<Vec<PageStat>, String> {
+    let token = access_token(client, sa_json).await?;
+    let end = chrono::Utc::now().date_naive();
+    let start = end - chrono::Duration::days(days);
+    let body = serde_json::json!({
+        "startDate": start.format("%Y-%m-%d").to_string(),
+        "endDate": end.format("%Y-%m-%d").to_string(),
+        "dimensions": ["page"],
+        "rowLimit": limit,
+    });
+    let url = format!("{SITES_URL}/{}/searchAnalytics/query", pct(site_url));
+    let resp = client
+        .post(&url)
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("GSC'ye ulaşılamadı: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "GSC searchAnalytics hatası (HTTP {}): {}",
+            status.as_u16(),
+            short(&text)
+        ));
+    }
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("GSC yanıtı okunamadı: {e}"))?;
+    Ok(parse_page_rows(&data))
+}
+
+fn parse_page_rows(data: &serde_json::Value) -> Vec<PageStat> {
+    let rows = match data.get("rows").and_then(|r| r.as_array()) {
+        Some(r) => r,
+        None => return Vec::new(),
+    };
+    rows.iter()
+        .filter_map(|row| {
+            let page = row
+                .get("keys")
+                .and_then(|k| k.as_array())
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())?
+                .to_string();
+            Some(PageStat {
+                page,
+                clicks: row.get("clicks").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                impressions: row.get("impressions").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                ctr: row.get("ctr").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                position: row.get("position").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            })
+        })
+        .collect()
+}
+
 /// Ayarlarda "Bağlantıyı test et": token al + site listesini çek, yapılandırılan mülkü doğrula.
 pub async fn test(sa_json: &str, site_url: &str) -> Result<String, String> {
     let email = validate_json(sa_json)?;
@@ -325,4 +395,33 @@ mod tests {
             }
         }
     }
+    /// Fırsat analizinin can damarı: `page_stats` gerçekte hangi URL'leri döndürüyor?
+    /// Bu URL'ler `products.url` ile eşleşmezse tüm özellik sessizce boş liste gösterir.
+    /// `GSC_SA_FILE=... GSC_SITE=... cargo test page_stats_real -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn page_stats_real() {
+        let file = std::env::var("GSC_SA_FILE").expect("GSC_SA_FILE ayarlı değil");
+        let sa_json = std::fs::read_to_string(&file).expect("SA dosyası okunamadı");
+        let site = std::env::var("GSC_SITE").expect("GSC_SITE ayarlı değil");
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .unwrap();
+        match page_stats(&client, &sa_json, &site, 90, 25_000).await {
+            Ok(rows) => {
+                println!("TOPLAM_SAYFA={}", rows.len());
+                // Tümünü basmak 8000+ satır olur; eşleşme kontrolü için ilk 400 yeterli.
+                // (2026-07-28 ölçümü: 8087 sayfa, 262 üründen 260'ı eşleşti — %99.2)
+                for r in rows.iter().take(400) {
+                    println!(
+                        "SAYFA\t{}\t{:.0}\t{:.0}\t{:.4}\t{:.1}",
+                        r.page, r.clicks, r.impressions, r.ctr, r.position
+                    );
+                }
+            }
+            Err(e) => panic!("page_stats hatası: {e}"),
+        }
+    }
+
 }

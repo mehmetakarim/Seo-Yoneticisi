@@ -5,7 +5,7 @@ use seo_core::validation::{
     details_badge, image_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallInput,
     OverallStatus,
 };
-use seo_core::{db, feed, gemini, sync};
+use seo_core::{db, feed, gemini, opportunity, sync};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -1276,6 +1276,143 @@ pub async fn research_seo(
         .map_err(|e| format!("Araştırma kaydedilemedi: {e}"))?;
     }
     Ok(ins)
+}
+
+// ---- Fırsat analizi: GSC verisiyle "önce hangi ürüne bakmalıyım?" ----
+
+#[derive(Serialize)]
+pub struct InvisibleProduct {
+    pub sku: String,
+    pub name: String,
+    pub url: String,
+}
+
+#[derive(Serialize)]
+pub struct OpportunityReport {
+    pub analyzed_at: String,
+    pub days: i64,
+    /// Kaçırılan tıklamaya göre azalan sıralı.
+    pub opportunities: Vec<opportunity::Opportunity>,
+    /// GSC'de hiç satırı olmayan ürünler — farklı bir iş (indeksleme/görünürlük),
+    /// meta üretimiyle çözülmediği için ayrı listede.
+    pub invisible: Vec<InvisibleProduct>,
+    pub total_products: usize,
+    /// GSC verisiyle eşleşen ürün sayısı — eşleşme düşükse sorun URL biçimindedir.
+    pub matched: usize,
+}
+
+/// GSC'nin döndürdüğü URL ile feed'deki URL arasındaki zararsız farkları törpüler
+/// (sondaki `/`, büyük/küçük harf). Aksi halde tek karakterlik fark yüzünden ürün
+/// "Google'da görünmüyor" gibi raporlanırdı.
+fn norm_url(u: &str) -> String {
+    u.trim().trim_end_matches('/').to_lowercase()
+}
+
+const OPPORTUNITY_DAYS: i64 = 90;
+
+#[tauri::command]
+pub async fn analyze_opportunities(
+    state: State<'_, AppState>,
+) -> Result<OpportunityReport, String> {
+    let (gsc_json, gsc_site, products) = {
+        let conn = state.conn.lock().unwrap();
+        let gsc_json = db::get_setting(&conn, "gsc_service_account_json")?.unwrap_or_default();
+        let gsc_site = db::get_setting(&conn, "gsc_site_url")?.unwrap_or_default();
+        let mut stmt = conn
+            .prepare("SELECT sku, name, url FROM products WHERE url IS NOT NULL AND url <> ''")
+            .map_err(|e| format!("Ürünler okunamadı: {e}"))?;
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(|e| format!("Ürünler okunamadı: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+        (gsc_json, gsc_site, rows)
+    };
+
+    // Yapılandırılmamışsa sessizce boş liste DÖNME — kullanıcı "fırsat yok" sanır.
+    if gsc_json.trim().is_empty() || gsc_site.trim().is_empty() {
+        return Err(
+            "Google Search Console bağlantısı kurulmamış. Ayarlar'dan service-account \
+             dosyasını yükleyip mülk adresini girin."
+                .to_string(),
+        );
+    }
+    if products.is_empty() {
+        return Err("Önce ürünleri senkronize edin.".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
+
+    // Tek çağrı: sayfa boyutunda tüm site. Ürün başına istek atmak 262 çağrı olurdu.
+    let stats = seo_data::gsc::page_stats(
+        &client,
+        &gsc_json,
+        gsc_site.trim(),
+        OPPORTUNITY_DAYS,
+        25_000,
+    )
+    .await?;
+
+    let by_url: std::collections::HashMap<String, &seo_data::PageStat> =
+        stats.iter().map(|s| (norm_url(&s.page), s)).collect();
+
+    let total_products = products.len();
+    let mut opportunities = Vec::new();
+    let mut invisible = Vec::new();
+    let mut matched = 0usize;
+
+    for (sku, name, url) in products {
+        match by_url.get(&norm_url(&url)) {
+            Some(st) => {
+                matched += 1;
+                if let Some((reason, missed)) =
+                    opportunity::classify(st.clicks, st.impressions, st.ctr, st.position)
+                {
+                    opportunities.push(opportunity::Opportunity {
+                        sku,
+                        name,
+                        url,
+                        clicks: st.clicks,
+                        impressions: st.impressions,
+                        ctr: st.ctr,
+                        position: st.position,
+                        missed_clicks: missed,
+                        reason,
+                    });
+                }
+            }
+            None => invisible.push(InvisibleProduct { sku, name, url }),
+        }
+    }
+
+    opportunity::sort_by_impact(&mut opportunities);
+
+    let report = OpportunityReport {
+        analyzed_at: now_str(),
+        days: OPPORTUNITY_DAYS,
+        opportunities,
+        invisible,
+        total_products,
+        matched,
+    };
+
+    // Önbelleğe al: GSC verisi günlük değişir, her sayfa açılışında API'ye gitmeye gerek yok.
+    if let Ok(json) = serde_json::to_string(&report) {
+        let conn = state.conn.lock().unwrap();
+        let _ = db::set_setting(&conn, "opportunity_json", &json);
+    }
+    Ok(report)
+}
+
+/// Önbellekteki son analiz (API'ye gitmeden). Hiç çalıştırılmadıysa `None`.
+#[tauri::command]
+pub fn get_opportunity_cache(state: State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
+    let conn = state.conn.lock().unwrap();
+    let raw = db::get_setting(&conn, "opportunity_json")?;
+    Ok(raw.and_then(|j| serde_json::from_str(&j).ok()))
 }
 
 #[tauri::command]

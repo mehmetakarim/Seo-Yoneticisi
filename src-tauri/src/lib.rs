@@ -59,6 +59,8 @@ pub fn run() {
             commands::ideasoft_push,
             commands::ideasoft_pull_keyword,
             commands::research_seo,
+            commands::analyze_opportunities,
+            commands::get_opportunity_cache,
             commands::get_settings,
             commands::save_settings,
             commands::set_gsc_service_account,

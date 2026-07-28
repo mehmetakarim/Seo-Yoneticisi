@@ -18,6 +18,7 @@ pub mod feed;
 pub mod gemini;
 pub mod ideasoft;
 pub mod images;
+pub mod opportunity;
 pub mod seo_data;
 pub mod sync;
 pub mod validation;
