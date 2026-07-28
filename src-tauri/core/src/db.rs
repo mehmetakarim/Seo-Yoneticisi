@@ -88,6 +88,12 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(conn, "seo_status", "ideasoft_product_id", "INTEGER")?;
     add_column_if_missing(conn, "seo_status", "ideasoft_pushed_at", "TEXT")?;
     add_column_if_missing(conn, "seo_status", "ideasoft_seo_rule", "INTEGER")?;
+    // Hangi Gemini modeli üretti. Zincir kotaya takıldıkça alt modellere düştüğü için
+    // kullanıcının bunu görmesi gerekiyor: içerik son çare modeliyle üretildiyse limitler
+    // yenilendiğinde yeniden üretmek isteyebilir. Üç üretim türü ayrı izlenir.
+    add_column_if_missing(conn, "seo_status", "meta_model", "TEXT")?;
+    add_column_if_missing(conn, "seo_status", "details_model", "TEXT")?;
+    add_column_if_missing(conn, "seo_status", "tech_model", "TEXT")?;
     Ok(())
 }
 

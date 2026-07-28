@@ -162,6 +162,7 @@ async function openProduct() {
         :search-kw="searchKw"
         :keyword="keyword"
         :meta-done="detail.meta_status === 'done'"
+        :model="detail.meta_model"
         :badge="liveBadge"
         @update:title="onTitle"
         @update:desc="onDesc"
@@ -175,11 +176,13 @@ async function openProduct() {
         :details-done="detail.details_status === 'done'"
         :badge="detail.details_badge"
         :image-count="detail.image_count"
+        :model="detail.details_model"
       />
 
       <TechTableCard
         :source-text="detail.tech_source_text ?? ''"
         :specs="detail.tech_specs"
+        :model="detail.tech_model"
         :tech-done="detail.tech_status === 'done'"
         :badge="detail.tech_badge"
         :history="detail.tech_history"

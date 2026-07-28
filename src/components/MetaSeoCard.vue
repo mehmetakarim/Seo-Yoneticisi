@@ -6,6 +6,7 @@ import { BADGE_LABEL, descChecks, glen, titleChecks } from "../validation";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
+import ModelTag from "./ModelTag.vue";
 
 const props = defineProps<{
   title: string;
@@ -14,6 +15,8 @@ const props = defineProps<{
   keyword: string;
   metaDone: boolean;
   badge: MetaBadge;
+  /** İçeriği üreten Gemini modeli (null = henüz üretilmedi). */
+  model: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -147,6 +150,7 @@ function genMeta() {
       </div>
 
     <template #actions>
+      <ModelTag :model="model" />
       <button class="gen" :class="{ busy: store.generating }" :disabled="store.generating" @click="genMeta">
         <Icon :name="store.generating ? 'loader' : 'sparkles'" :size="15" :stroke-width="store.generating ? 2.2 : 1.9" :class="{ spin: store.generating }" />
         {{ store.generating ? "Üretiliyor…" : "Gemini ile Üret" }}

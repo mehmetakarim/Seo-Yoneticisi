@@ -184,3 +184,35 @@ textarea, input, button { font-family: inherit; }
 @media (prefers-reduced-motion: reduce) {
   [data-tip]::after, [data-tip]::before { transition: none; transform: none; }
 }
+
+/* ── Üretim modeli rozeti ───────────────────────────────────────────────────
+   Hangi Gemini modelinin ürettiğini kart eylem satırında gösterir. Model zinciri
+   kota dolduğunda alt modellere düşüyor ve günlük limitler modeller arasında 25×
+   fark ediyor; kullanıcı hangi modelde olduğunu görüp "devam mı edeyim, limitler
+   yenilensin mi bekleyeyim" kararını verebilmeli. Eylem satırı flex+center olduğu
+   için satır içi durur — hizayı bozmaz (bkz. tooltip notu). */
+.model-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--soft-neutral-bg);
+  color: var(--c-soft);
+  font-size: 10.5px;
+  font-weight: 550;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+}
+.model-tag b {
+  color: var(--c-mid);
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+}
+/* Son çare modeli (Gemma) — farklı aile, üslup sapabilir. Dikkat çeksin. */
+.model-tag.fallback {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text);
+}
+.model-tag.fallback b { color: var(--warn-text); }

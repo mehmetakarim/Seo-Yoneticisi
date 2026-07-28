@@ -26,15 +26,27 @@ use serde::{Deserialize, Serialize};
 ///   `system_instruction` + `responseSchema` kullanıyor ve her model ikisini birden
 ///   desteklemiyor.
 ///
-/// Son doğrulama 2026-07-28: aşağıdakilerin tamamı 200 döndü ve şemaya uydu.
+/// **Günlük limitler çok farklı** (2026-07-28, ücretsiz katman — konsoldan doğrulandı):
+/// normal `flash` modelleri günde yalnızca **20** istek, `flash-lite` sürümleri **500**,
+/// Gemma ise **14.400**. Sıralama bu yüzden "kalite azalan, havuz büyüyen": kıt ama iyi
+/// olanlar önce harcanır, arkada gittikçe genişleyen emniyet ağı durur.
+///
+/// Son doğrulama 2026-07-28: hepsi 200 döndü ve `responseSchema`'ya uydu.
 pub const MODEL_CHAIN: &[&str] = &[
+    // ── kaliteli ama kıt: 5 istek/dk, 20 istek/gün ────────────────────────
     "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    // ── hafif sürümler: 15 istek/dk, 500 istek/gün (25× daha geniş havuz) ──
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
-    "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    // ── takma ad: liste bayatlarsa da canlı kalsın diye ───────────────────
     "gemini-flash-latest",
+    // ── son çare: 30 istek/dk, 14.400 istek/gün. Farklı model ailesi olduğu
+    //    için üslup Gemini'lerden sapabilir; buraya ancak yukarıdakilerin
+    //    tamamı tükendiğinde düşülür — üretimin hiç durmaması için.
+    "gemma-4-31b-it",
 ];
 
 /// HTTP hatasını sınıflandırır: **zincirdeki sıradaki modele geçilmeli mi**, ve kullanıcıya
@@ -97,6 +109,16 @@ pub struct ProductContext<'a> {
     pub target_keyword: Option<&'a str>,
     /// Faz 4: gerçek SEO verisi (Ahrefs/GSC/Trends). None → prompt'a hiçbir şey eklenmez.
     pub insights: Option<&'a SeoInsights>,
+}
+
+/// Üretim sonucu + **hangi modelin ürettiği**.
+///
+/// Zincir kotaya takıldıkça alttaki modellere düşüyor; kullanıcının hangi modelde olduğunu
+/// görmesi, "devam mı edeyim yoksa limitler yenilensin mi bekleyeyim" kararını verebilmesi
+/// için gerekli — günlük limitler modeller arasında 25× fark ediyor.
+pub struct Produced<T> {
+    pub value: T,
+    pub model: &'static str,
 }
 
 fn system_prompt() -> &'static str {
@@ -296,7 +318,7 @@ fn correction_for(meta: &GeneratedMeta) -> Option<String> {
 pub async fn generate_meta(
     api_key: &str,
     ctx: &ProductContext<'_>,
-) -> Result<GeneratedMeta, String> {
+) -> Result<Produced<GeneratedMeta>, String> {
     let key = api_key.trim();
     if key.is_empty() {
         return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
@@ -323,7 +345,7 @@ pub async fn generate_meta(
                         }
                     }
                 };
-                return Ok(clamp_lengths(best));
+                return Ok(Produced { value: clamp_lengths(best), model });
             }
             Err((try_next, msg)) => {
                 last_err = msg;
@@ -538,7 +560,7 @@ pub async fn generate_details(
     ctx: &ProductContext<'_>,
     details_html: &str,
     target_keyword: &str,
-) -> Result<String, String> {
+) -> Result<Produced<String>, String> {
     let key = api_key.trim();
     if key.is_empty() {
         return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
@@ -614,7 +636,8 @@ pub async fn generate_details(
 
                 // Img invariant: yeni HTML'deki src'ler orijinalle aynı olmalı.
                 if extract_img_srcs(&result) != original_imgs {
-                    return Ok(details_html.to_string()); // görsel güvenliği: orijinali koru
+                    // görsel güvenliği: orijinali koru
+                    return Ok(Produced { value: details_html.to_string(), model });
                 }
 
                 // Yoğunluk aralık dışıysa tek retry; daha iyi (hedefe yakın) olanı seç.
@@ -633,7 +656,7 @@ pub async fn generate_details(
                         }
                     }
                 }
-                return Ok(result);
+                return Ok(Produced { value: result, model });
             }
             Err((try_next, msg)) => {
                 last_err = msg;
@@ -774,7 +797,7 @@ pub async fn generate_details_scratch(
     ctx: &ProductContext<'_>,
     images: &[String],
     target_keyword: &str,
-) -> Result<String, String> {
+) -> Result<Produced<String>, String> {
     let key = api_key.trim();
     if key.is_empty() {
         return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
@@ -834,7 +857,7 @@ pub async fn generate_details_scratch(
                         }
                     }
                 }
-                return Ok(result);
+                return Ok(Produced { value: result, model });
             }
             Err((try_next, msg)) => {
                 last_err = msg;
@@ -999,14 +1022,14 @@ pub async fn optimize_details(
     ctx: &ProductContext<'_>,
     details_html: &str,
     target_keyword: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Produced<Option<String>>, String> {
     let key = api_key.trim();
     if key.is_empty() {
         return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
     }
     let blocks = match extract_blocks(details_html) {
         Some(b) if !b.is_empty() => b,
-        _ => return Ok(None),
+        _ => return Ok(Produced { value: None, model: "" }),
     };
 
     let items: Vec<serde_json::Value> = blocks
@@ -1054,7 +1077,8 @@ pub async fn optimize_details(
                 let mut result = assemble_optimized(ctx.name, &blocks, &texts);
                 // Görsel değişmezliği: yeni HTML orijinaldeki tüm src'leri aynı sırada içermeli.
                 if extract_img_srcs(&result) != orig_imgs {
-                    return Ok(None); // güvenli tarafta kal → eski yol
+                    // güvenli tarafta kal → eski yol
+                    return Ok(Produced { value: None, model });
                 }
                 // Yoğunluk aralık dışıysa tek retry; hedefe yakın olanı seç.
                 if let Some(d) = density_out_of_range(&result, target_keyword) {
@@ -1072,7 +1096,7 @@ pub async fn optimize_details(
                         }
                     }
                 }
-                return Ok(Some(result));
+                return Ok(Produced { value: Some(result), model });
             }
             Err((try_next, msg)) => {
                 last_err = msg;
@@ -1243,7 +1267,7 @@ pub async fn structure_tech_specs(
     api_key: &str,
     ctx: &ProductContext<'_>,
     source_text: &str,
-) -> Result<TechSpecsResult, String> {
+) -> Result<Produced<TechSpecsResult>, String> {
     let key = api_key.trim();
     if key.is_empty() {
         return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
@@ -1278,7 +1302,7 @@ pub async fn structure_tech_specs(
                             .to_string(),
                     );
                 }
-                return Ok(result);
+                return Ok(Produced { value: result, model });
             }
             Err((try_next, msg)) => {
                 last_err = msg;
@@ -1374,7 +1398,9 @@ mod tests {
             target_keyword: None,
             insights: None,
         };
-        let meta = generate_meta(&key, &ctx).await.expect("üretim başarısız");
+        let produced = generate_meta(&key, &ctx).await.expect("üretim başarısız");
+        println!("model: {}", produced.model);
+        let meta = produced.value;
         println!("target_keyword: {}", meta.target_keyword);
         println!("title ({}): {}", grapheme_len(&meta.title), meta.title);
         println!("descriptions ({}): {}", grapheme_len(&meta.descriptions), meta.descriptions);
@@ -1427,7 +1453,9 @@ mod tests {
             target_keyword: Some("all in one bilgisayar"),
             insights: Some(&insights),
         };
-        let meta = generate_meta(&key, &ctx).await.expect("üretim başarısız");
+        let produced = generate_meta(&key, &ctx).await.expect("üretim başarısız");
+        println!("model: {}", produced.model);
+        let meta = produced.value;
         println!("target_keyword: {}", meta.target_keyword);
         println!("title: {}", meta.title);
         println!("descriptions: {}", meta.descriptions);
@@ -1478,8 +1506,15 @@ mod tests {
             assert!(!m.contains("preview"), "zincirde preview model var: {m}");
         }
         assert!(
-            MODEL_CHAIN.last().unwrap().contains("latest"),
-            "zincirin sonu bir 'latest' takma adı olmalı"
+            MODEL_CHAIN.iter().any(|m| m.contains("latest")),
+            "zincirde bir 'latest' takma adı olmalı — liste bayatlasa da canlı kalsın"
+        );
+        // Havuzu en geniş model en sonda dursun: yukarıdakilerin tamamı tükenirse
+        // üretim yine de durmasın.
+        assert_eq!(
+            *MODEL_CHAIN.last().unwrap(),
+            "gemma-4-31b-it",
+            "son çare, günlük limiti en yüksek model olmalı"
         );
         // Emekli modeller geri sızmasın
         for dead in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"] {
@@ -1780,9 +1815,11 @@ mod tests {
             target_keyword: None,
             insights: None,
         };
-        let out = generate_details(&key, &ctx, SAMPLE_DETAILS, "all in one bilgisayar")
+        let produced = generate_details(&key, &ctx, SAMPLE_DETAILS, "all in one bilgisayar")
             .await
             .expect("üretim başarısız");
+        println!("model: {}", produced.model);
+        let out = produced.value;
         println!("--- ÜRETİLEN ---\n{out}\n----------------");
         // Yapı ve img'ler korunmalı
         assert_eq!(extract_img_srcs(&out), extract_img_srcs(SAMPLE_DETAILS));
@@ -1807,10 +1844,11 @@ mod tests {
             target_keyword: None,
             insights: None,
         };
-        let out = optimize_details(&key, &ctx, REAL_DETAILS, "all in one bilgisayar")
+        let produced = optimize_details(&key, &ctx, REAL_DETAILS, "all in one bilgisayar")
             .await
-            .expect("optimize hatası")
-            .expect("yapı desteklenmeliydi");
+            .expect("optimize hatası");
+        println!("model: {}", produced.model);
+        let out = produced.value.expect("yapı desteklenmeliydi");
         println!("--- OPTİMİZE EDİLEN ---\n{out}\n----------------");
         // Görseller birebir korunmalı
         assert_eq!(extract_img_srcs(&out), extract_img_srcs(REAL_DETAILS));
@@ -1844,9 +1882,11 @@ mod tests {
             "https://cdn.example/2.png".to_string(),
             "https://cdn.example/3.png".to_string(),
         ];
-        let out = generate_details_scratch(&key, &ctx, &images, "all in one bilgisayar")
+        let produced = generate_details_scratch(&key, &ctx, &images, "all in one bilgisayar")
             .await
             .expect("sıfırdan üretim başarısız");
+        println!("model: {}", produced.model);
+        let out = produced.value;
         println!("--- SIFIRDAN ÜRETİLEN ---\n{out}\n----------------");
         // Semantik yapı: dış section, iç div, iç içe section YOK
         assert_eq!(extract_img_srcs(&out), images);
@@ -1880,7 +1920,9 @@ mod tests {
                       Operating System: FreeDOS\n\
                       Ethernet: RJ45 Gigabit\n\
                       In the box: keyboard, mouse, power adapter";
-        let res = structure_tech_specs(&key, &ctx, source).await.expect("yapılandırma başarısız");
+        let produced = structure_tech_specs(&key, &ctx, source).await.expect("yapılandırma başarısız");
+        println!("model: {}", produced.model);
+        let res = produced.value;
         println!("--- GRUPLAR ---");
         for g in &res.groups {
             println!("[{}]", g.group);

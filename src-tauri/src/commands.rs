@@ -79,6 +79,11 @@ pub struct ProductDetail {
     pub ideasoft_pushed_at: Option<String>,
     /// IdeaSoft'un kendi SEO kural skoru (yalnızca liste ucunda dolu gelir, cache'lenir).
     pub ideasoft_seo_rule: Option<i64>,
+    /// İçeriği hangi Gemini modelinin ürettiği. Zincir kotaya takıldıkça alt modellere
+    /// düşüyor; kullanıcı bunu görüp limitler yenilendiğinde yeniden üretmeye karar verebilir.
+    pub meta_model: Option<String>,
+    pub details_model: Option<String>,
+    pub tech_model: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -274,7 +279,8 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_search_keywords,
                 s.draft_details, s.draft_keywords, p.picture2, p.picture3, p.picture4, s.image_check_json,
                 s.tech_source_text, s.tech_specs_json, COALESCE(s.tech_status,'pending'),
-                s.tech_history_json, s.ideasoft_pushed_at, s.ideasoft_seo_rule
+                s.tech_history_json, s.ideasoft_pushed_at, s.ideasoft_seo_rule,
+                s.meta_model, s.details_model, s.tech_model
          FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
          WHERE p.sku = ?1",
         [&sku],
@@ -348,6 +354,9 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 tech_history,
                 ideasoft_pushed_at: row.get(29)?,
                 ideasoft_seo_rule: row.get(30)?,
+                meta_model: row.get(31)?,
+                details_model: row.get(32)?,
+                tech_model: row.get(33)?,
             })
         },
     )
@@ -507,13 +516,14 @@ pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<Pr
         target_keyword: if kw.is_empty() { None } else { Some(kw) },
         insights: insights.as_ref().filter(|i| i.has_data()),
     };
-    let meta = gemini::generate_meta(&api_key, &ctx).await?;
+    let produced = gemini::generate_meta(&api_key, &ctx).await?;
+    let (meta, model) = (produced.value, produced.model);
 
     let conn = state.conn.lock().unwrap();
     ensure_seo_row(&conn, &sku)?;
     conn.execute(
         "UPDATE seo_status SET target_keyword = ?2, draft_title = ?3, draft_descriptions = ?4,
-                draft_keywords = ?5, draft_search_keywords = ?6, updated_at = ?7
+                draft_keywords = ?5, draft_search_keywords = ?6, updated_at = ?7, meta_model = ?8
          WHERE sku = ?1",
         params![
             sku,
@@ -523,6 +533,7 @@ pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<Pr
             meta.keywords.trim(),
             meta.search_keywords.trim(),
             now_str(),
+            model,
         ],
     )
     .map_err(|e| format!("Üretilen meta kaydedilemedi: {e}"))?;
@@ -595,21 +606,28 @@ pub async fn generate_details(
     //  1) İçerik yok / yeniden yazılabilir metin yok → sıfırdan semantik HTML (galeri görselleri).
     //  2) Düzenli yapı → OPTIMIZE: metin iyileştirilir + yapı semantikleştirilir + anlamlı alt eklenir.
     //  3) Düzensiz yapı → eski güvenli yol (yapıyı aynen koruyarak yalnızca metni yeniden yaz).
-    let new_html = if details_html.trim().is_empty() || !gemini::has_rewritable_content(&details_html)
+    let (new_html, model) = if details_html.trim().is_empty()
+        || !gemini::has_rewritable_content(&details_html)
     {
-        gemini::generate_details_scratch(&api_key, &ctx, &gallery, &keyword).await?
+        let p = gemini::generate_details_scratch(&api_key, &ctx, &gallery, &keyword).await?;
+        (p.value, p.model)
     } else {
-        match gemini::optimize_details(&api_key, &ctx, &details_html, &keyword).await? {
-            Some(html) => html,
-            None => gemini::generate_details(&api_key, &ctx, &details_html, &keyword).await?,
+        let opt = gemini::optimize_details(&api_key, &ctx, &details_html, &keyword).await?;
+        match opt.value {
+            Some(html) => (html, opt.model),
+            // Yapı beklenmedik → yapı-koruyan eski yol. Modeli o çağrıdan al.
+            None => {
+                let p = gemini::generate_details(&api_key, &ctx, &details_html, &keyword).await?;
+                (p.value, p.model)
+            }
         }
     };
 
     let conn = state.conn.lock().unwrap();
     ensure_seo_row(&conn, &sku)?;
     conn.execute(
-        "UPDATE seo_status SET draft_details = ?2, updated_at = ?3 WHERE sku = ?1",
-        params![sku, new_html, now_str()],
+        "UPDATE seo_status SET draft_details = ?2, updated_at = ?3, details_model = ?4 WHERE sku = ?1",
+        params![sku, new_html, now_str(), model],
     )
     .map_err(|e| format!("Üretilen açıklama kaydedilemedi: {e}"))?;
     read_detail(&conn, &sku)
@@ -940,7 +958,8 @@ pub async fn structure_tech_specs(
         target_keyword: None,
         insights: None, // teknik tablo pazarlama verisi değil — SEO araştırması karıştırılmaz
     };
-    let result = gemini::structure_tech_specs(&api_key, &ctx, &source).await?;
+    let produced = gemini::structure_tech_specs(&api_key, &ctx, &source).await?;
+    let (result, model) = (produced.value, produced.model);
 
     let json = serde_json::to_string(&result.groups)
         .map_err(|e| format!("Teknik tablo serialize edilemedi: {e}"))?;
@@ -965,13 +984,15 @@ pub async fn structure_tech_specs(
         ensure_seo_row(&conn, &sku)?;
         match &history_json {
             Some(h) => conn.execute(
-                "UPDATE seo_status SET tech_specs_json = ?2, tech_history_json = ?3, updated_at = ?4
+                "UPDATE seo_status SET tech_specs_json = ?2, tech_history_json = ?3, updated_at = ?4,
+                        tech_model = ?5
                  WHERE sku = ?1",
-                params![sku, json, h, now_str()],
+                params![sku, json, h, now_str(), model],
             ),
             None => conn.execute(
-                "UPDATE seo_status SET tech_specs_json = ?2, updated_at = ?3 WHERE sku = ?1",
-                params![sku, json, now_str()],
+                "UPDATE seo_status SET tech_specs_json = ?2, updated_at = ?3, tech_model = ?4
+                 WHERE sku = ?1",
+                params![sku, json, now_str(), model],
             ),
         }
         .map_err(|e| format!("Teknik tablo kaydedilemedi: {e}"))?;
@@ -1435,6 +1456,7 @@ fn export_json(conn: &Connection) -> Result<String, String> {
             "draft_details", "research_json", "image_check_json", "image_check_fp",
             "tech_source_text", "tech_specs_json", "tech_status", "tech_history_json",
             "ideasoft_product_id", "ideasoft_pushed_at", "ideasoft_seo_rule",
+            "meta_model", "details_model", "tech_model",
         ],
     )?;
     let log = dump(
@@ -1527,8 +1549,10 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
                draft_title, draft_descriptions, draft_keywords, draft_search_keywords, updated_at,
                draft_details, research_json, image_check_json, image_check_fp,
                tech_source_text, tech_specs_json, tech_status, tech_history_json,
-               ideasoft_product_id, ideasoft_pushed_at, ideasoft_seo_rule)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
+               ideasoft_product_id, ideasoft_pushed_at, ideasoft_seo_rule,
+               meta_model, details_model, tech_model)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
+                     ?21,?22,?23)",
             params![
                 s(&r, "sku"),
                 s(&r, "meta_status").unwrap_or_else(|| "pending".into()),
@@ -1540,6 +1564,7 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
                 s(&r, "tech_status").unwrap_or_else(|| "pending".into()),
                 s(&r, "tech_history_json"), i(&r, "ideasoft_product_id"),
                 s(&r, "ideasoft_pushed_at"), i(&r, "ideasoft_seo_rule"),
+                s(&r, "meta_model"), s(&r, "details_model"), s(&r, "tech_model"),
             ],
         )
         .map_err(|e| format!("SEO durumu geri yüklenemedi: {e}"))?;

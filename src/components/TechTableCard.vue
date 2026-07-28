@@ -7,6 +7,7 @@ import type { MetaBadge, TechGroup, TechVersionMeta } from "../types";
 import { BADGE_LABEL } from "../validation";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
+import ModelTag from "./ModelTag.vue";
 
 const props = defineProps<{
   sourceText: string;
@@ -14,6 +15,8 @@ const props = defineProps<{
   techDone: boolean;
   badge: MetaBadge;
   history: TechVersionMeta[];
+  /** İçeriği üreten Gemini modeli (null = henüz üretilmedi). */
+  model: string | null;
 }>();
 
 const store = useStore();
@@ -189,6 +192,7 @@ function removeRow(gi: number, ri: number) {
       </div>
 
     <template #actions>
+      <ModelTag :model="model" />
       <button
         class="gen"
         :class="{ busy: store.techStructuring }"

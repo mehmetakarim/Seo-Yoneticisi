@@ -5,6 +5,7 @@ import { density, wordCount } from "../validation";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
+import ModelTag from "./ModelTag.vue";
 
 import { BADGE_LABEL } from "../validation";
 import type { MetaBadge } from "../types";
@@ -15,6 +16,8 @@ const props = defineProps<{
   detailsDone: boolean;
   badge: MetaBadge;
   imageCount: number;
+  /** İçeriği üreten Gemini modeli (null = henüz üretilmedi). */
+  model: string | null;
 }>();
 
 const store = useStore();
@@ -148,6 +151,7 @@ function genDetails() {
     </div>
 
     <template #actions>
+      <ModelTag :model="model" />
       <!-- data-tip butonun kendisinde değil sarmalayıcıda: disabled buton fare olayı üretmez -->
       <div class="gen-wrap" :data-tip="genTip">
         <button

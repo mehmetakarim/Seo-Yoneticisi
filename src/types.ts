@@ -67,6 +67,11 @@ export interface ProductDetail {
   tech_history: TechVersionMeta[];
   ideasoft_pushed_at: string | null;
   ideasoft_seo_rule: number | null;
+  /** İçeriği hangi Gemini modelinin ürettiği. Zincir kotaya takıldıkça alt modellere
+   *  düşüyor; kullanıcı bunu görüp limitler yenilendiğinde yeniden üretebilir. */
+  meta_model: string | null;
+  details_model: string | null;
+  tech_model: string | null;
 }
 
 /** IdeaSoft gönderim öncesi fark önizlemesi. */
