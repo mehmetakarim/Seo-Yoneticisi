@@ -31,6 +31,29 @@
    - Kota gerçeği: ücretsiz katmanda her modelin AYRI havuzu var; zincirdeki nesil çeşitliliği
      bu yüzden bilinçli. 2.0/2.5-flash kotası dolduğunda 3.x hâlâ çalışıyordu.
 
+0a. ✅ **MODEL ZİNCİRİ LİMİTLERE GÖRE SIRALANDI + KULLANILAN MODEL GÖRÜNÜYOR (v0.5.4).**
+   Konsoldan doğrulanan gerçek limitler (ücretsiz katman, 2026-07-28) sıralamayı değiştirdi —
+   havuzlar **25× fark ediyor**:
+   | model | dk | **gün** |
+   |---|---|---|
+   | 3.6 / 3.5 / 2.5 Flash | 5 | **20** |
+   | 3.5 / 3.1 Flash Lite | 15 | **500** |
+   | 2.5 Flash Lite | 10 | 20 |
+   | Gemma 4 31B | 30 | **14.400** |
+
+   Sıralama ilkesi: **kalite azalan, havuz büyüyen.** Kıt ama iyi olanlar önce harcanır,
+   arkada gittikçe genişleyen emniyet ağı durur. `gemma-4-31b-it` bilinçli olarak EN SONDA:
+   farklı model ailesi, üslup Gemini'lerden sapabilir; oraya ancak diğerlerinin tamamı
+   tükendiğinde düşülür. (Halüsinasyon kalkanı kod düzeyinde olduğu için teknik tabloda
+   yine de korunuyoruz.)
+
+   **`Produced<T>`**: üretim fonksiyonları sonucu ÜRETEN MODELLE döndürüyor. Model üç sütunda
+   KALICI saklanıyor (`meta_model`/`details_model`/`tech_model`) — geçici gösterim "şu an
+   hangi modeldeyim"i cevaplar ama asıl değer şu: içerik son çare modeliyle üretildiyse
+   kullanıcı bunu günler sonra görüp limitler yenilendiğinde yeniden üretebilir.
+   `ModelTag.vue` eylem satırında satır içi rozet (altına koymak hizayı bozuyordu);
+   Gemma'da amber uyarı rengine dönüyor.
+
 0b. ⏸️ **FAZ 2B YARIM KALDI — `gemini.rs` (1923 satır) modül bölme.** Faz 1/2a/3 bitti (bkz. aşağı).
    **Önce şunu bil: bu iş TAMAMEN KOZMETİK.** Rust'ta derleme birimi dosya değil crate'tir;
    dosyayı bölmek derleme süresini DÜŞÜRMEZ — bu ölçülerek doğrulandı. Değeri yalnızca
