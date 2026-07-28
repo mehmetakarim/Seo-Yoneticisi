@@ -12,6 +12,32 @@ const pct = computed(() => {
   return t > 0 ? Math.min(100, Math.round((store.updateDownloaded / t) * 100)) : 0;
 });
 const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
+
+/**
+ * Sürüm notlarını satırlara ayırır: `-` / `*` / `•` ile başlayanlar madde, diğerleri paragraf.
+ *
+ * ⚠️ Bilinçli olarak `v-html` KULLANILMIYOR. Bu metin uzak sunucudan (release JSON) geliyor;
+ * HTML olarak basmak, sürüm notu yazabilen herkese uygulama içinde kod çalıştırma imkânı verirdi.
+ * Biçimlendirme yalnızca CSS ile yapılıyor, enjeksiyon yüzeyi yok.
+ */
+type NoteLine = { text: string; bullet: boolean };
+const noteLines = computed<NoteLine[]>(() => {
+  const out: NoteLine[] = [];
+  for (const raw of (info.value?.notes ?? "").split(/\r?\n/)) {
+    if (!raw.trim()) continue;
+    const m = /^\s*[-*•]\s+(.*)$/.exec(raw);
+    if (m) {
+      out.push({ text: m[1].trim(), bullet: true });
+    } else if (/^\s/.test(raw) && out.length) {
+      // Girintili satır = önceki maddenin devamı (CHANGELOG'da uzun madde sarmışsa).
+      // Ayrı paragraf olarak basılsa madde ortadan kopmuş görünürdü.
+      out[out.length - 1].text += " " + raw.trim();
+    } else {
+      out.push({ text: raw.trim(), bullet: false });
+    }
+  }
+  return out;
+});
 </script>
 
 <template>
@@ -39,7 +65,9 @@ const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
         </header>
 
         <div class="body">
-          <div v-if="info.notes" class="notes om-scroll">{{ info.notes }}</div>
+          <div v-if="noteLines.length" class="notes om-scroll">
+            <p v-for="(l, i) in noteLines" :key="i" :class="{ bullet: l.bullet }">{{ l.text }}</p>
+          </div>
           <div v-else class="notes muted">Bu sürüm için not girilmemiş.</div>
 
           <!-- İndirme durumu -->
@@ -154,8 +182,29 @@ const mb = (n: number) => (n / 1024 / 1024).toFixed(1);
   background: var(--c-list);
   border: 1px solid var(--c-border-soft);
   border-radius: 9px;
-  padding: 10px 12px;
-  white-space: pre-wrap;
+  padding: 11px 13px;
+}
+.notes p {
+  margin: 0 0 5px;
+}
+.notes p:last-child {
+  margin-bottom: 0;
+}
+/* Madde işareti ::before ile — metin içeriğinden gelmiyor, dolayısıyla
+   uzaktan gelen notun görünümü etkilemesi mümkün değil. */
+.notes p.bullet {
+  padding-left: 15px;
+  position: relative;
+}
+.notes p.bullet::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--c-soft);
 }
 .notes.muted {
   color: var(--c-faint);

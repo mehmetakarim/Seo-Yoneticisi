@@ -50,6 +50,35 @@ jobs:
       - name: Frontend bağımlılıkları
         run: npm ci
 
+      # Sürüm notları CHANGELOG.md'den gelir. tauri-action bunu HEM GitHub Release gövdesine
+      # HEM de latest.json'ın `notes` alanına yazıyor — yani kullanıcının uygulama içindeki
+      # güncelleme ekranında gördüğü metin buradan çıkıyor. Tek kaynak, iki yerde görünür.
+      - name: Sürüm notlarını CHANGELOG'dan çıkar
+        id: notes
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          # "## v0.5.6" satırından bir sonraki "## " başlığına kadar olan bölüm
+          BODY=$(awk -v tag="## $TAG" '
+            $0 == tag { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md)
+          # baştaki/sondaki boş satırları at
+          BODY=$(printf '%s\n' "$BODY" | sed -e '/./,$!d' -e ':a' -e '/^\n*$/{$d;N;ba' -e '}')
+          if [ -z "$BODY" ]; then
+            # Bölüm yoksa release ASLA bu yüzden kırılmasın — anlamlı bir metne düş.
+            echo "::warning::CHANGELOG.md içinde '## $TAG' bölümü bulunamadı"
+            BODY="Bu sürümde yapılan değişiklikler için depodaki CHANGELOG.md dosyasına bakabilirsiniz."
+          fi
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$BODY"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "--- çıkarılan notlar ---"
+          echo "$BODY"
+
       - name: Derle + Release yükle
         uses: tauri-apps/tauri-action@v0
         env:
@@ -60,7 +89,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'SEO Yöneticisi ${{ github.ref_name }}'
-          releaseBody: 'Otomatik derleme. macOS için .dmg, Windows için .exe kurulum dosyası ektedir. (İmzasız — ilk açılışta işletim sistemi uyarısını onaylayın.)'
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           # latest.json üretilip Release'e eklenir → uygulama buradan güncelleme kontrolü yapar
