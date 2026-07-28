@@ -1,11 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell($dest = \"C:\\\\Users\\\\Lenovo\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Lenovo-Downloads-MaProject-seo-yoneticisi\\\\9b59e22d-f776-4f14-bf65-31cb91cff4d1\\\\scratchpad\\\\design\"; Get-ChildItem -Recurse $dest | ForEach-Object { $_.FullName.Replace\\($dest, ''\\) + \"  [\" + $_.Length + \"]\" })",
-      "PowerShell(cargo --version)",
-      "PowerShell(rustc --version)",
-      "PowerShell(node --version)",
-      "PowerShell(npm --version)"
+      "Bash(git clone *)",
+      "Bash(curl -s \"https://pypi.org/pypi/google-news-trends-mcp/json\" -o pypi.json)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s --max-time 60 \"https://www.kurumsalit.com/output/2567783262\" -o feed.xml)",
+      "Bash(awk '/<product>/{f=1} f{print} /<\\\\/product>/{exit}' feed.xml)",
+      "Bash(grep -nA25 'CREATE TABLE.*products' src-tauri/src/db.rs)"
     ]
   }
 }

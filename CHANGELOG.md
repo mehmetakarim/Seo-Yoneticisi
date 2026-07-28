@@ -13,6 +13,12 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.5.6
+- Yeni "Fırsatlar" sayfası: Google Search Console verisiyle hangi ürüne öncelik vermeniz gerektiğini sıralar
+- Her ürün için kaç tıklama kaçırdığınız ve nedeni gösteriliyor — ikinci sayfada mı, meta mı çekmiyor
+- Google'da hiç görünmeyen ürünler ayrı listeleniyor
+- Bu ekran artık her sürümde o sürümün gerçek yeniliklerini gösteriyor
+
 ## v0.5.5
 - Üretimi yapan yapay zekâ modeli artık kart başlığında görünüyor
 - Kart düzeni düzeltildi: model bilgisi butonların hizasını bozmuyor
