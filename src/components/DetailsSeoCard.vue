@@ -5,7 +5,6 @@ import { density, wordCount } from "../validation";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
-import ModelTag from "./ModelTag.vue";
 
 import { BADGE_LABEL } from "../validation";
 import type { MetaBadge } from "../types";
@@ -91,6 +90,7 @@ function genDetails() {
     sub="Ürün detay sayfası uzun içeriği"
     :badge-label="BADGE_LABEL[badge]"
     :badge-style="badgeStyle"
+    :model="model"
   >
     <div class="info-row">
       <span class="info">
@@ -151,7 +151,6 @@ function genDetails() {
     </div>
 
     <template #actions>
-      <ModelTag :model="model" />
       <!-- data-tip butonun kendisinde değil sarmalayıcıda: disabled buton fare olayı üretmez -->
       <div class="gen-wrap" :data-tip="genTip">
         <button

@@ -181,38 +181,70 @@ textarea, input, button { font-family: inherit; }
 /* Boş data-tip → hiç gösterme (koşullu ipuçları için) */
 [data-tip=""]::after, [data-tip=""]::before { display: none; }
 
+/* Kart BAŞLIĞINDAKİ gibi üstte duran öğeler için: baloncuk AŞAĞI açılır.
+   Yukarı açılsaydı `.card { overflow: hidden }` onu kırpardı — denendi, kırpıldı.
+   Ayrıca bu öğeler kartın sağında durduğu için baloncuk sağa hizalı: sola hizalı
+   olsa kartın sağ kenarından taşardı. */
+[data-tip].tip-below::after {
+  top: calc(100% + 8px);
+  bottom: auto;
+  left: auto;
+  right: 0;
+  transform: translateY(-3px);
+}
+[data-tip].tip-below::before {
+  top: calc(100% - 2px);
+  bottom: auto;
+  left: auto;
+  right: 20px;
+  border-top-color: transparent;
+  border-bottom-color: var(--tip-bg);
+  transform: translateY(-3px);
+}
+[data-tip].tip-below:hover::after,      [data-tip].tip-below:hover::before,
+[data-tip].tip-below:focus-visible::after, [data-tip].tip-below:focus-visible::before,
+[data-tip].tip-below:focus-within::after,  [data-tip].tip-below:focus-within::before {
+  transform: translateY(0);
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-tip]::after, [data-tip]::before { transition: none; transform: none; }
 }
 
 /* ── Üretim modeli rozeti ───────────────────────────────────────────────────
-   Hangi Gemini modelinin ürettiğini kart eylem satırında gösterir. Model zinciri
-   kota dolduğunda alt modellere düşüyor ve günlük limitler modeller arasında 25×
-   fark ediyor; kullanıcı hangi modelde olduğunu görüp "devam mı edeyim, limitler
-   yenilensin mi bekleyeyim" kararını verebilmeli. Eylem satırı flex+center olduğu
-   için satır içi durur — hizayı bozmaz (bkz. tooltip notu). */
+   Hangi Gemini modelinin ürettiğini kart BAŞLIĞINDA, durum rozetinin yanında
+   gösterir. İkisi de "bu kartın içeriği hakkında üstveri" olduğu için oraya ait.
+   (Önce eylem satırında denendi: üretimden sonra beliren rozet butonları bir alt
+   satıra itip düzeni bozuyordu — kullanıcı bildirdi.)
+
+   Geometri bilinçli olarak .status ile aynı: aynı yarıçap, aynı font boyu, aynı
+   dikey dolgu. Yan yana duran iki rozet birbirinin eşi gibi okunmalı.
+
+   Neden gerekli: zincir kota dolunca alt modellere düşüyor ve günlük limitler
+   modeller arasında 25× fark ediyor (flash 20/gün, flash-lite 500, Gemma 14.400).
+   Kullanıcı hangi modelde olduğunu görmeden "devam mı edeyim, limitler yenilensin
+   mi bekleyeyim" kararını veremez. */
 .model-tag {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 8px;
-  border-radius: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
   background: var(--soft-neutral-bg);
   color: var(--c-soft);
-  font-size: 10.5px;
-  font-weight: 550;
+  font-size: 11.5px;
+  font-weight: 600;
   letter-spacing: -0.005em;
   white-space: nowrap;
 }
 .model-tag b {
   color: var(--c-mid);
-  font-weight: 620;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 /* Son çare modeli (Gemma) — farklı aile, üslup sapabilir. Dikkat çeksin. */
 .model-tag.fallback {
   background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
   color: var(--warn-text);
 }
 .model-tag.fallback b { color: var(--warn-text); }

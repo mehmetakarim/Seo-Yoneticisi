@@ -6,7 +6,6 @@ import { BADGE_LABEL, descChecks, glen, titleChecks } from "../validation";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
-import ModelTag from "./ModelTag.vue";
 
 const props = defineProps<{
   title: string;
@@ -68,7 +67,13 @@ function genMeta() {
 </script>
 
 <template>
-  <SeoCard icon="type" title="Meta SEO" :badge-label="BADGE_LABEL[badge]" :badge-style="badgeStyle">
+  <SeoCard
+    icon="type"
+    title="Meta SEO"
+    :badge-label="BADGE_LABEL[badge]"
+    :badge-style="badgeStyle"
+    :model="model"
+  >
       <!-- Sayfa Başlığı -->
       <div class="field-head">
         <div class="field-label">Sayfa Başlığı</div>
@@ -150,7 +155,6 @@ function genMeta() {
       </div>
 
     <template #actions>
-      <ModelTag :model="model" />
       <button class="gen" :class="{ busy: store.generating }" :disabled="store.generating" @click="genMeta">
         <Icon :name="store.generating ? 'loader' : 'sparkles'" :size="15" :stroke-width="store.generating ? 2.2 : 1.9" :class="{ spin: store.generating }" />
         {{ store.generating ? "Üretiliyor…" : "Gemini ile Üret" }}

@@ -7,7 +7,6 @@ import type { MetaBadge, TechGroup, TechVersionMeta } from "../types";
 import { BADGE_LABEL } from "../validation";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
-import ModelTag from "./ModelTag.vue";
 
 const props = defineProps<{
   sourceText: string;
@@ -103,6 +102,7 @@ function removeRow(gi: number, ri: number) {
     sub="Web site teknik özellik alanı için"
     :badge-label="BADGE_LABEL[badge]"
     :badge-style="badgeStyle"
+    :model="model"
     stack
   >
       <!-- Üst bilgi şeridi (DetailsSeoCard ile aynı düzen) -->
@@ -192,7 +192,6 @@ function removeRow(gi: number, ri: number) {
       </div>
 
     <template #actions>
-      <ModelTag :model="model" />
       <button
         class="gen"
         :class="{ busy: store.techStructuring }"

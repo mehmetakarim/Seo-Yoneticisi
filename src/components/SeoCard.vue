@@ -10,6 +10,7 @@
  * ölçüde birleştirildi — en az görsel değişiklik, en güncel tasarım dili.
  */
 import Icon from "./Icon.vue";
+import ModelTag from "./ModelTag.vue";
 
 defineProps<{
   /** Icon.vue'daki ikon adı */
@@ -21,6 +22,13 @@ defineProps<{
   badgeLabel?: string;
   /** Çağıranın mevcut `badgeStyle` computed'ı: { background, color } */
   badgeStyle?: Record<string, string>;
+  /**
+   * İçeriği üreten Gemini modeli (null = henüz üretilmedi).
+   * Durum rozetinin YANINDA duruyor: ikisi de "bu kartın içeriği hakkında üstveri".
+   * Eylem satırında denendi ve kötüydü — üretimden sonra beliren rozet butonları
+   * bir alt satıra itip düzeni bozuyordu.
+   */
+  model?: string | null;
   /** Gövde dikey akış olsun (kendi aralarında 12px boşluklu bloklar) */
   stack?: boolean;
   /** Gövde dolgusuz olsun — içerik kenara dayansın (ör. tam genişlik uyarı şeridi) */
@@ -38,9 +46,12 @@ defineProps<{
           <div v-if="sub" class="head-sub">{{ sub }}</div>
         </div>
       </div>
-      <span v-if="badgeLabel" class="status" :style="badgeStyle">
-        <span class="sdot" :style="{ background: badgeStyle?.color }"></span>{{ badgeLabel }}
-      </span>
+      <div class="head-right">
+        <ModelTag :model="model ?? null" />
+        <span v-if="badgeLabel" class="status" :style="badgeStyle">
+          <span class="sdot" :style="{ background: badgeStyle?.color }"></span>{{ badgeLabel }}
+        </span>
+      </div>
     </div>
 
     <div class="card-body" :class="{ stack, bare }">
@@ -72,6 +83,15 @@ defineProps<{
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0; /* uzun başlık sağdaki rozetleri sıkıştırmasın */
+}
+/* Model rozeti + durum rozeti yan yana. Durum rozeti en sağda kalır (yeri
+   yerleşmiş bir işaret); model rozeti onun soluna eklenir. */
+.head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
 }
 .icon-badge {
   width: 26px;
