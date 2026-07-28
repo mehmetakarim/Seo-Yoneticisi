@@ -8,7 +8,7 @@
 //! Kullanıcı SA'yı Google Cloud'da oluşturup GSC mülküne kullanıcı olarak ekler; SA JSON
 //! Ayarlar'dan yüklenir ve SQLite `settings`'te saklanır (koda/git'e gömülmez).
 
-use super::{GscQuery, PageStat};
+use super::{GscQuery, PageStat, QueryPageStat};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -244,6 +244,101 @@ fn parse_page_rows(data: &serde_json::Value) -> Vec<PageStat> {
         .collect()
 }
 
+/// **Sorgu × sayfa verisi** — fırsat analizinin "ne yazmalıyım" katmanı.
+///
+/// `page_stats` "bu sayfa toplam ne aldı" der; bu ise "bu sayfa ŞU SORGUDA kaçıncı sırada".
+///
+/// İki kısıt yönetiliyor:
+/// - **Hacim:** sorgu kırılımı sayfa kırılımından kat kat büyük. `path_filter` verilirse
+///   (ör. `/urun/`) GSC'ye `page contains` filtresi olarak geçilir; blog, kategori ve EOL
+///   sayfaları hiç gelmez. Filtre yoksa her şey gelir ve çağıran istemcide eler.
+/// - **Sayfalama:** GSC tek istekte en fazla 25.000 satır verir. `startRow` ile devam edilir;
+///   dönen satır sayısı `rowLimit`'ten azsa son sayfadır.
+///
+/// `max_rows` bir emniyet freni: beklenmedik büyüklükte bir mülkte sonsuz döngüye girmesin.
+pub async fn query_page_stats(
+    client: &reqwest::Client,
+    sa_json: &str,
+    site_url: &str,
+    days: i64,
+    path_filter: Option<&str>,
+    max_rows: usize,
+) -> Result<Vec<QueryPageStat>, String> {
+    const PAGE_SIZE: u32 = 25_000;
+    let token = access_token(client, sa_json).await?;
+    let end = chrono::Utc::now().date_naive();
+    let start = end - chrono::Duration::days(days);
+    let url = format!("{SITES_URL}/{}/searchAnalytics/query", pct(site_url));
+
+    let mut out: Vec<QueryPageStat> = Vec::new();
+    let mut start_row: usize = 0;
+
+    loop {
+        let mut body = serde_json::json!({
+            "startDate": start.format("%Y-%m-%d").to_string(),
+            "endDate": end.format("%Y-%m-%d").to_string(),
+            "dimensions": ["page", "query"],
+            "rowLimit": PAGE_SIZE,
+            "startRow": start_row,
+        });
+        if let Some(pf) = path_filter {
+            body["dimensionFilterGroups"] = serde_json::json!([{
+                "filters": [{ "dimension": "page", "operator": "contains", "expression": pf }]
+            }]);
+        }
+
+        let resp = client
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("GSC'ye ulaşılamadı: {e}"))?;
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(format!(
+                "GSC searchAnalytics hatası (HTTP {}): {}",
+                status.as_u16(),
+                short(&text)
+            ));
+        }
+        let data: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("GSC yanıtı okunamadı: {e}"))?;
+        let batch = parse_query_page_rows(&data);
+        let got = batch.len();
+        out.extend(batch);
+
+        // Son sayfa: dönen satır istenen sayfadan az.
+        if got < PAGE_SIZE as usize || out.len() >= max_rows {
+            break;
+        }
+        start_row += got;
+    }
+    out.truncate(max_rows);
+    Ok(out)
+}
+
+fn parse_query_page_rows(data: &serde_json::Value) -> Vec<QueryPageStat> {
+    let rows = match data.get("rows").and_then(|r| r.as_array()) {
+        Some(r) => r,
+        None => return Vec::new(),
+    };
+    rows.iter()
+        .filter_map(|row| {
+            let keys = row.get("keys")?.as_array()?;
+            Some(QueryPageStat {
+                page: keys.first()?.as_str()?.to_string(),
+                query: keys.get(1)?.as_str()?.to_string(),
+                clicks: row.get("clicks").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                impressions: row.get("impressions").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                ctr: row.get("ctr").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                position: row.get("position").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            })
+        })
+        .collect()
+}
+
 /// Ayarlarda "Bağlantıyı test et": token al + site listesini çek, yapılandırılan mülkü doğrula.
 pub async fn test(sa_json: &str, site_url: &str) -> Result<String, String> {
     let email = validate_json(sa_json)?;
@@ -421,6 +516,44 @@ mod tests {
                 }
             }
             Err(e) => panic!("page_stats hatası: {e}"),
+        }
+    }
+
+    /// **Aşama 2'nin ön koşulu:** sorgu × sayfa verisi gerçekte kaç satır ve ne kadar sürüyor?
+    /// Bu ölçüm yapılmadan sayfalama stratejisi kesinleştirilmemeli.
+    /// `GSC_SA_FILE=... GSC_SITE=... GSC_PATH=/urun/ cargo test qp_volume -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn qp_volume() {
+        let file = std::env::var("GSC_SA_FILE").expect("GSC_SA_FILE ayarlı değil");
+        let sa_json = std::fs::read_to_string(&file).expect("SA dosyası okunamadı");
+        let site = std::env::var("GSC_SITE").expect("GSC_SITE ayarlı değil");
+        let path = std::env::var("GSC_PATH").ok();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()
+            .unwrap();
+        let t0 = std::time::Instant::now();
+        match query_page_stats(&client, &sa_json, &site, 90, path.as_deref(), 200_000).await {
+            Ok(rows) => {
+                let pages: std::collections::HashSet<&str> =
+                    rows.iter().map(|r| r.page.as_str()).collect();
+                let queries: std::collections::HashSet<&str> =
+                    rows.iter().map(|r| r.query.as_str()).collect();
+                println!("SATIR={}", rows.len());
+                println!("BENZERSIZ_SAYFA={}", pages.len());
+                println!("BENZERSIZ_SORGU={}", queries.len());
+                println!("SURE_SN={:.1}", t0.elapsed().as_secs_f64());
+                // GSC_DUMP=1 → tüm satırlar (katalogla karşılaştırma analizi için)
+                let n = if std::env::var("GSC_DUMP").is_ok() { rows.len() } else { 5 };
+                for r in rows.iter().take(n) {
+                    println!(
+                        "ORNEK\t{}\t{}\t{:.0}\t{:.0}\t{:.1}",
+                        r.page, r.query, r.clicks, r.impressions, r.position
+                    );
+                }
+            }
+            Err(e) => panic!("query_page_stats hatası: {e}"),
         }
     }
 

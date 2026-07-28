@@ -126,6 +126,34 @@ pub fn work_state(meta_status: &str, details_status: &str) -> WorkState {
     }
 }
 
+/// Ürün URL'lerinden ortak yol önekini türetir (ör. `/urun/`).
+///
+/// **Neden gerekli:** sorgu × sayfa verisi çok hacimli. Bu sitede GSC'de 8087 sayfa var ama
+/// bunların çoğu blog/kategori ve **EOL olmuş eski nesil ürünler**; sorgu kırılımıyla on
+/// binlerce satır olur. GSC'ye `page contains <önek>` filtresi vererek yalnızca ürün
+/// sayfalarını istiyoruz.
+///
+/// **Sabit yazılmıyor**, ürünlerin kendi URL'lerinden türetiliyor — uygulama global kullanım
+/// için geliştiriliyor ve her mağazanın yol yapısı farklı olabilir.
+///
+/// Ortak bir ilk segment yoksa `None` döner → çağıran filtresiz çeker ve istemcide eler.
+pub fn common_path_prefix(urls: &[String]) -> Option<String> {
+    let first_segment = |u: &str| -> Option<String> {
+        // "https://host/urun/xyz" → "urun"
+        let after_scheme = u.split("://").nth(1)?;
+        let path = after_scheme.split_once('/')?.1;
+        let seg = path.split('/').find(|s| !s.is_empty())?;
+        Some(seg.to_lowercase())
+    };
+    let mut it = urls.iter().filter_map(|u| first_segment(u));
+    let first = it.next()?;
+    if it.all(|s| s == first) {
+        Some(format!("/{first}/"))
+    } else {
+        None
+    }
+}
+
 /// Bir sayfanın ölçümlerinden fırsat çıkar. Fırsat yoksa `None`.
 ///
 /// **Sıra önemli ve konum önce geliyor.** İkinci sayfadaki bir sayfanın tıklama almaması
@@ -236,6 +264,26 @@ mod tests {
     fn tiny_losses_are_filtered_out() {
         // 20 gösterim, 9. sıra, beklenene yakın CTR → kayıp 1 tıklamanın altında
         assert!(classify(0.0, 20.0, 0.02, 9.0).is_none());
+    }
+
+    #[test]
+    fn derives_product_path_prefix() {
+        let urls = vec![
+            "https://www.kurumsalit.com/urun/lenovo-thinkpad".to_string(),
+            "https://www.kurumsalit.com/urun/dell-monitor".to_string(),
+        ];
+        assert_eq!(common_path_prefix(&urls).as_deref(), Some("/urun/"));
+    }
+
+    #[test]
+    fn no_prefix_when_paths_differ() {
+        // Ortak segment yoksa filtre uygulanmamalı — yanlış filtre veriyi sessizce yok ederdi.
+        let urls = vec![
+            "https://x.com/urun/a".to_string(),
+            "https://x.com/product/b".to_string(),
+        ];
+        assert!(common_path_prefix(&urls).is_none());
+        assert!(common_path_prefix(&[]).is_none());
     }
 
     #[test]

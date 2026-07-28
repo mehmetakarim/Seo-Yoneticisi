@@ -63,6 +63,20 @@ pub struct PageStat {
     pub position: f64,
 }
 
+/// GSC'de bir SORGU × SAYFA satırı — fırsat analizinin sorgu düzeyine geçişi için.
+///
+/// `PageStat` "bu sayfa toplam ne aldı" der; bu ise "bu sayfa ŞU SORGUDA kaçıncı sırada" der.
+/// Aradaki fark, "sorun var" ile "şunu yaz" arasındaki fark.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct QueryPageStat {
+    pub page: String,
+    pub query: String,
+    pub clicks: f64,
+    pub impressions: f64,
+    pub ctr: f64,
+    pub position: f64,
+}
+
 /// Google Trends trend terimi (Faz 6).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct TrendTerm {
