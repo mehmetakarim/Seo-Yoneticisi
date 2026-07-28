@@ -4,11 +4,12 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-07-28
-**Aktif faz:** Mimari toparlama — Faz 1 (derleme hızı) ✅ · 2a (`seo-core` crate) ✅ · 3 (kart
-iskeleti + navigasyon) ✅ · **2b (modül bölme) ⏸️ yarım** (bkz. madde 0b)
+**Aktif faz:** Fırsat analizi ✅ + sürüm notları ✅ · Mimari toparlama Faz 1/2a/3 ✅ ·
+**2b (modül bölme) ⏸️ ERTELENDİ** — kozmetik, kullanıcı kararı (bkz. madde 0b)
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
-**v0.5.4 = zincir limitlere göre sıralandı + kullanılan model rozeti**
+v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
+**v0.5.6 = Fırsatlar sayfası + gerçek sürüm notları**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
@@ -60,6 +61,33 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
    kullanıcı bunu günler sonra görüp limitler yenilendiğinde yeniden üretebilir.
    `ModelTag.vue` eylem satırında satır içi rozet (altına koymak hizayı bozuyordu);
    Gemma'da amber uyarı rengine dönüyor.
+
+0c. ✅ **FIRSAT ANALİZİ + SÜRÜM NOTLARI (v0.5.6).**
+
+   **Fırsatlar sayfası** — "önce hangi ürüne bakmalıyım?". `gsc.rs::page_stats()` ile TEK API
+   çağrısında tüm site (`page` bir filtre değil BOYUT; ürün başına çağrı 262 istek olurdu).
+   `core/src/opportunity.rs` saf mantık: soyut puan yerine **kaçırılan tıklama** =
+   `gösterim × (beklenen_ctr(konum) − gerçek_ctr)`, negatife düşmez.
+
+   ⚠️ **Sınıflandırmada sıra kritik: ÖNCE KONUM.** İlk sürümde "tıklama yok" kontrolü öndeydi
+   ve 2. sayfadaki bir ürün (konum 12.7, 0 tıklama) "Tıklama yok" etiketlendi — ama orada
+   tıklama zaten beklenmez; etiket meta sorunu varmış gibi yanıltıp operatörü yanlış işe
+   yönlendiriyordu. Artık tıklama/CTR yorumu YALNIZCA ilk sayfadakiler için yapılıyor.
+   Regresyon testi: `zero_clicks_on_page_two_is_a_position_problem`.
+
+   **Gerçek veriyle doğrulandı (2026-07-28, kurumsalit.com):** GSC'de 8087 sayfa ·
+   262 üründen 260'ı eşleşti (%99.2) · 60 fırsat (42 düşük CTR, 12 tıklama yok, 6 ikinci sayfa)
+   · 2 ürün Google'da hiç görünmüyor. Eşikler ne boş liste ne boğucu sonuç veriyor.
+   URL eşleşmesi `norm_url()` ile sondaki `/` ve harf farkına dayanıklı.
+
+   **Sürüm notları** — `CHANGELOG.md` tek doğruluk kaynağı; CI (`release.yml`) etikete karşılık
+   gelen `## vX.Y.Z` bölümünü awk ile çıkarıp `releaseBody`'ye koyuyor. `tauri-action` bunu hem
+   Release gövdesine hem `latest.json`'ın `notes` alanına yazıyor → güncelleme ekranında görünüyor.
+   Bölüm bulunamazsa anlamlı metne düşüyor (release kırılmasın).
+   ⚠️ `UpdateModal` notları satır satır render ediyor, **`v-html` YOK** — metin uzak sunucudan
+   geliyor, HTML basmak sürüm notu yazabilen herkese kod çalıştırma imkânı verirdi.
+   CHANGELOG maddeleri **tek satır** olmalı (sarma satırlar önceki maddeye ekleniyor ama
+   okunabilirlik için tek satır tercih edilir).
 
 0b. ⏸️ **FAZ 2B YARIM KALDI — `gemini.rs` (1923 satır) modül bölme.** Faz 1/2a/3 bitti (bkz. aşağı).
    **Önce şunu bil: bu iş TAMAMEN KOZMETİK.** Rust'ta derleme birimi dosya değil crate'tir;
