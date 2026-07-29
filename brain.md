@@ -3,7 +3,7 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-07-29
+**Son güncelleme:** 2026-07-30
 **Aktif faz:** Fırsatlar ekranı sorgu düzeyinde ✅ · EOL + halef + canonical yazma ✅ ·
 **2b (modül bölme) ⏸️ ERTELENDİ** — kozmetik, kullanıcı kararı (bkz. madde 0b)
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
@@ -13,7 +13,8 @@ v0.5.6 = Fırsatlar sayfası · v0.5.7 = meta/açıklama sürüm geçmişi ·
 v0.5.8 = EOL sayfalar + filtreler · v0.5.9 = boş ekran düzeltmesi ·
 v0.6.0 = sorgu düzeyi analizler · v0.6.1 = EOL halef önerisi ·
 v0.6.2 = Ahrefs zorluk düzeltmesi · v0.6.3 = düşüşte olanlar (trend) ·
-**v0.6.4 = canonical yazma akışı (tek tek, onaylı)**
+v0.6.4 = canonical yazma akışı ·
+**v0.6.5 = canonical: senkron ön koşulu kaldırıldı, hedef elle seçilebiliyor**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
@@ -117,6 +118,40 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
    **Kural:** üretim verisinde metot keşfi için YAZMA isteği atılmaz. Sırasıyla: (1) `OPTIONS`
    veya `Allow` başlığı, (2) belge, (3) kullanıcıya sor. "Boş gövde zararsızdır" varsayımı
    yanlıştı — API'nin boş gövdeyi nasıl yorumladığını bilmiyordum.
+
+0ah. ✅ **SLUG → ÜRÜN: TEK İSTEKTE, SENKRONA GEREK YOK (v0.6.5 saha düzeltmesi).**
+
+   Kullanıcı bildirdi: "Canonical ayarla"ya basınca *"Bu sayfa IdeaSoft kataloğunda
+   bulunamadı, önce katalog senkronunu çalıştırın."* Kök neden yerel DB'den okunarak bulundu:
+   `ideasoft_catalog` tablosu **0 satır** — 7 dakikalık senkron hiç tamamlanmamış. Asıl kusur
+   uyarı değil **tasarımdı**: tek satır yazmak için tüm katalog ön koşuldu ve senkron ilerleme
+   göstermediği için donmuş görünüyordu.
+
+   **Ölçüm yolu değiştirdi.** IdeaSoft `?s=` aramasıyla ürün tek istekte bulunuyor:
+   - ⚠️ **Arama ADA göre çalışır, SLUG'a göre DEĞİL.** `s=ergotron-lx-desk-monitor-arm` → 0 sonuç;
+     `s=Ergotron LX Desk Monitor Arm` → aynı ürün. Slug bu yüzden sözcüklere çevriliyor.
+     (`?slug=`, `?name=`, `?seoLink=`, `filter[slug]` hepsi **sessizce yok sayılıyor** —
+     filtre uygulanmamış tam liste dönüyor, bu yüzden "çalışıyor" sanmak kolay.)
+   - Arama **tüm** sözcüklerin geçmesini istiyor; uzun slug'da ad ile slug örtüşmediği için boş
+     dönüyor. Merdiven: **tam → 6 → 4 → 3 sözcük**, ilk birebir eşleşmede durur.
+   - **Ölçüm (25 EOL sayfası, gerçek mağaza): 25/25, 1,44 istek/satır.** Rust üzerinden canlı:
+     kolay vaka 1,0 sn · en zor vaka 6,2 sn (4 istek). **7 dakika → 1-6 saniye.**
+   - Senkron artık yalnızca hızlandırma. Çözülen slug yerel tabloya yazılıyor → 2. çağrı bedava.
+
+   ⚠️ **Yaklaşık eşleşme YOK** (`pick_exact_slug`): yanlış ürüne canonical yazmak geri alınması
+   zor bir SEO hatası; "bulamadım" her zaman daha güvenli. Test bunu sabitliyor.
+
+   ⚠️ **Hedef de doğrulanıyor** ve onay ekranında hedefin **adı** gösteriliyor. Var olmayan bir
+   sayfaya canonical yazmak hiç yazmamaktan kötüdür: Google'a "asıl sayfa şu" der, o sayfa 404'tür.
+
+   **İkinci saha hatası:** halef bulunamayınca buton hiç çıkmıyordu → sayfa için hiçbir şey
+   yapılamıyordu. Kullanıcı: *"Uygun halef bulunamasa bile canonical ayarlama imkânı sunulmalı."*
+   Haklı — modelin halef bulamaması hedefin olmadığı anlamına gelmiyor, karar operatörde.
+   Buton artık her satırda; öneri yoksa arama modali açılıyor, varsa onaydan "değiştir"le
+   değiştirilebiliyor. Akış hâlâ tek satır, önizlemeli, açık onaylı.
+
+   **Yan bulgu:** ölçülen 25 EOL sayfasının **tamamı IdeaSoft'ta status=1 (aktif)**. Bu sayfalar
+   mağazada pasife alınmış değil — yalnızca XML feed dışında kaldıkları için görünmüyorlardı.
 
 0af. ✅ **CANONICAL YAZMA — IdeaSoft'ta 301 YOK, mekanizma `seo_settings` (v0.6.4).**
 
