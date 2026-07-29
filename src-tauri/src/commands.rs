@@ -2024,6 +2024,102 @@ pub fn lookup_catalog(
     Ok(out)
 }
 
+#[derive(Serialize)]
+pub struct CanonicalPreview {
+    pub product_id: i64,
+    pub product_name: String,
+    /// Şu an tanımlı canonical (boşsa yok).
+    pub current: String,
+    /// Yazılacak değer (`urun/<slug>` biçiminde).
+    pub proposed: String,
+    /// Kayıt yoksa oluşturulacak — kullanıcıya ne olacağı söylensin.
+    pub will_create: bool,
+}
+
+/// Canonical yazmadan ÖNCE ne olacağını gösterir. Yazma yapmaz.
+///
+/// Faz 9'daki gönderim modalinin aynı deseni: önce fark, sonra onay.
+#[tauri::command]
+pub async fn preview_canonical(
+    state: State<'_, AppState>,
+    eol_slug: String,
+    target_slug: String,
+) -> Result<CanonicalPreview, String> {
+    let (domain, token, product) = {
+        let conn = state.conn.lock().unwrap();
+        let d = db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default();
+        let t = db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default();
+        let row = conn.query_row(
+            "SELECT id, name FROM ideasoft_catalog WHERE slug = ?1",
+            [&eol_slug.to_lowercase()],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+        );
+        (d, t, row)
+    };
+    if domain.trim().is_empty() || token.trim().is_empty() {
+        return Err("IdeaSoft bağlantısı kurulmamış. Ayarlar'dan girin.".into());
+    }
+    let (product_id, product_name) = product.map_err(|_| {
+        "Bu sayfa IdeaSoft kataloğunda bulunamadı. Önce katalog senkronunu çalıştırın.".to_string()
+    })?;
+
+    let cur = ideasoft::get_seo_setting(&domain, &token, product_id).await?;
+    Ok(CanonicalPreview {
+        product_id,
+        product_name,
+        current: cur.canonical,
+        proposed: format!("urun/{}", target_slug.trim().trim_start_matches('/')),
+        will_create: cur.setting_id.is_none(),
+    })
+}
+
+/// Canonical'ı yazar. **Canlı mağazayı değiştirir.**
+///
+/// ⚠️ Kullanıcı kararı: **toplu değil, gerektiğinde ve tek tek, açık onayla.** Bu komut
+/// yalnızca `preview_canonical` gösterildikten ve kullanıcı onayladıktan sonra çağrılmalı.
+/// Bilinçli olarak liste almıyor — imza toplu kullanımı zorlaştırıyor.
+///
+/// Canonical bir 301 DEĞİLDİR: ziyaretçi yine eski sayfaya düşer, yalnızca Google'a
+/// "asıl sayfa şu" sinyali gider. Arayüz bunu söylemeli.
+#[tauri::command]
+pub async fn apply_canonical(
+    state: State<'_, AppState>,
+    eol_slug: String,
+    target_slug: String,
+) -> Result<String, String> {
+    let (domain, token, product_id) = {
+        let conn = state.conn.lock().unwrap();
+        let d = db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default();
+        let t = db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default();
+        let id = conn
+            .query_row(
+                "SELECT id FROM ideasoft_catalog WHERE slug = ?1",
+                [&eol_slug.to_lowercase()],
+                |r| r.get::<_, i64>(0),
+            )
+            .map_err(|_| "Sayfa IdeaSoft kataloğunda yok — katalog senkronunu çalıştırın.".to_string())?;
+        (d, t, id)
+    };
+    if domain.trim().is_empty() || token.trim().is_empty() {
+        return Err("IdeaSoft bağlantısı kurulmamış.".into());
+    }
+
+    // Mevcut kaydı oku: index/follow korunmalı, yalnızca canonical değişmeli.
+    let cur = ideasoft::get_seo_setting(&domain, &token, product_id).await?;
+    let target = format!("urun/{}", target_slug.trim().trim_start_matches('/'));
+    ideasoft::set_canonical(&domain, &token, product_id, &target, &cur).await?;
+
+    // Yerel katalogda da güncelle ki arayüz yeniden senkron beklemeden doğruyu göstersin.
+    {
+        let conn = state.conn.lock().unwrap();
+        let _ = conn.execute(
+            "UPDATE ideasoft_catalog SET canonical = ?2 WHERE slug = ?1",
+            params![eol_slug.to_lowercase(), target],
+        );
+    }
+    Ok(target)
+}
+
 /// Önbellekteki son analiz (API'ye gitmeden). Hiç çalıştırılmadıysa `None`.
 #[tauri::command]
 pub fn get_opportunity_cache(

@@ -320,3 +320,18 @@ export interface SuccessorSuggestion {
   model: string;
   candidates: SuccessorCandidate[];
 }
+
+export interface CatalogSyncResult {
+  fetched: number;
+  synced_at: string;
+  matched_eol: number;
+}
+
+/** Canonical yazmadan önce gösterilen fark. */
+export interface CanonicalPreview {
+  product_id: number;
+  product_name: string;
+  current: string;
+  proposed: string;
+  will_create: boolean;
+}

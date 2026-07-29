@@ -11,6 +11,8 @@ import type {
   TechSpecsResult,
   OpportunityReport,
   SuccessorSuggestion,
+  CatalogSyncResult,
+  CanonicalPreview,
 } from "./types";
 
 export const api = {
@@ -49,6 +51,11 @@ export const api = {
   getOpportunityCache: () => invoke<OpportunityReport | null>("get_opportunity_cache"),
   suggestEolSuccessor: (url: string) =>
     invoke<SuccessorSuggestion>("suggest_eol_successor", { url }),
+  syncIdeasoftCatalog: () => invoke<CatalogSyncResult>("sync_ideasoft_catalog"),
+  previewCanonical: (eolSlug: string, targetSlug: string) =>
+    invoke<CanonicalPreview>("preview_canonical", { eolSlug, targetSlug }),
+  applyCanonical: (eolSlug: string, targetSlug: string) =>
+    invoke<string>("apply_canonical", { eolSlug, targetSlug }),
   saveTechSource: (sku: string, text: string) =>
     invoke<void>("save_tech_source", { sku, text }),
   structureTechSpecs: (sku: string) =>

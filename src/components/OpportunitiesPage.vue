@@ -128,6 +128,9 @@ const REASON: Record<OpportunityReason, { label: string; badge: string; tip: str
 
 const totalMissed = computed(() => Math.round(filtered.value.reduce((s, o) => s + o.missed_clicks, 0)));
 
+/** Tam URL'den son yol parçası — canonical hedefi olarak gönderilir. */
+const slugOf = (u: string) => u.trim().replace(/\/$/, "").split("/").pop() ?? "";
+
 const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
 const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
 </script>
@@ -460,6 +463,19 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
             Bazı sayfaları bilinçli tutuyor olabilirsiniz — liste öneridir, karar sizin.
           </div>
         </div>
+        <button
+          class="succ-btn cat-sync"
+          :disabled="store.catalogBusy"
+          data-tip="IdeaSoft kataloğunu çeker (~7 dk). Sayfaları ürünlerle eşleştirir; canonical ayarlamak için gerekli."
+          @click="store.syncCatalog()"
+        >
+          <Icon
+            :name="store.catalogBusy ? 'loader' : 'refresh'"
+            :size="11"
+            :class="{ spin: store.catalogBusy }"
+          />
+          {{ store.catalogBusy ? "Katalog alınıyor…" : "Katalogla eşleştir" }}
+        </button>
       </div>
       <table class="tbl">
         <thead>
@@ -496,6 +512,16 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
                       <Icon name="check" :size="11" :stroke-width="2.6" />
                       {{ store.successors[e.url].name }}
                     </span>
+                    <!-- Canonical yazma: her satır için ayrı, onaylı. Toplu işlem YOK. -->
+                    <button
+                      v-if="store.successors[e.url].sku && store.successors[e.url].url"
+                      class="succ-btn"
+                      :disabled="store.canonicalBusy"
+                      @click="store.askCanonical(e.slug, slugOf(store.successors[e.url].url!))"
+                    >
+                      <Icon name="upload" :size="11" />
+                      Canonical ayarla
+                    </button>
                     <span v-else class="succ-none">Uygun halef bulunamadı</span>
                     <span class="succ-why">{{ store.successors[e.url].reason }}</span>
                   </template>
@@ -538,6 +564,59 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
         </div>
       </div>
     </div>
+
+    <!-- Canonical onay modali. Faz 9 gönderim modalinin deseni: önce fark, sonra onay. -->
+    <Transition name="upd">
+      <div
+        v-if="store.canonicalPending"
+        class="overlay"
+        @click.self="store.cancelCanonical()"
+      >
+        <div class="modal" role="dialog" aria-label="Canonical onayı">
+          <header class="m-head">
+            <div class="m-title">Canonical ayarlanacak</div>
+            <div class="m-sub">{{ store.canonicalPending.product_name }}</div>
+          </header>
+          <div class="m-body">
+            <div class="diff">
+              <div class="d-row">
+                <span class="d-lab">Şu an</span>
+                <span class="d-val muted">{{ store.canonicalPending.current || "tanımlı değil" }}</span>
+              </div>
+              <div class="d-row">
+                <span class="d-lab">Olacak</span>
+                <span class="d-val">{{ store.canonicalPending.proposed }}</span>
+              </div>
+            </div>
+            <div class="warn">
+              <Icon name="info" :size="13" />
+              <span>
+                <b>Bu bir yönlendirme değildir.</b> Ziyaretçi yine eski sayfaya düşer; yalnızca
+                Google'a "asıl sayfa şu" sinyali gider. Gerçek 301 için IdeaSoft panelini
+                kullanmanız gerekir.
+                <template v-if="store.canonicalPending.will_create">
+                  Bu ürünün SEO kaydı yok, oluşturulacak.
+                </template>
+              </span>
+            </div>
+          </div>
+          <footer class="m-foot">
+            <button class="ghost" :disabled="store.canonicalBusy" @click="store.cancelCanonical()">
+              Vazgeç
+            </button>
+            <div style="flex:1"></div>
+            <button class="run" :disabled="store.canonicalBusy" @click="store.confirmCanonical()">
+              <Icon
+                :name="store.canonicalBusy ? 'loader' : 'check'"
+                :size="14"
+                :class="{ spin: store.canonicalBusy }"
+              />
+              {{ store.canonicalBusy ? "Yazılıyor…" : "Onaylıyorum, yaz" }}
+            </button>
+          </footer>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -953,6 +1032,117 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   color: var(--c-faint);
   margin: 0 4px;
 }
+.cat-sync {
+  flex: none;
+  align-self: flex-start;
+}
+/* Onay modali — UpdateModal ile aynı dil */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--overlay-bg);
+  backdrop-filter: saturate(1.1) blur(3px);
+}
+.modal {
+  width: 480px;
+  max-width: 100%;
+  background: var(--c-card);
+  border: 1px solid var(--c-border);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px var(--heavy-shadow);
+}
+.m-head {
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+.m-title {
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--c-text);
+}
+.m-sub {
+  font-size: 11.5px;
+  color: var(--c-soft);
+  margin-top: 2px;
+}
+.m-body {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.diff {
+  border: 1px solid var(--c-border-soft);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.d-row {
+  display: flex;
+  gap: 10px;
+  padding: 9px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+.d-row:last-child {
+  border-bottom: 0;
+  background: var(--ok-soft-bg);
+}
+.d-lab {
+  width: 52px;
+  flex: none;
+  color: var(--c-soft);
+}
+.d-val {
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+.d-val.muted {
+  color: var(--c-faint);
+}
+/* Uyarı kutusu — UpdateModal'daki ile aynı dil. Canonical'ın yönlendirme
+   OLMADIĞINI söylüyor; gözden kaçmaması için vurgulu. */
+.warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 11px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 9px;
+}
+.warn svg {
+  flex: none;
+  margin-top: 2px;
+}
+.m-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--c-border-soft);
+}
+.ghost {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-input);
+  color: var(--c-mid);
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+.upd-enter-active, .upd-leave-active { transition: opacity .18s cubic-bezier(.32,.72,0,1); }
+.upd-enter-from, .upd-leave-to { opacity: 0; }
+
 .eol-more {
   padding: 10px 16px;
   border-top: 1px solid var(--c-border-soft);

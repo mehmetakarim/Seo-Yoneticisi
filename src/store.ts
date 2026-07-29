@@ -12,6 +12,7 @@ import type {
   TechGroup,
   OpportunityReport,
   SuccessorSuggestion,
+  CanonicalPreview,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -44,6 +45,11 @@ interface State {
   /** EOL url → halef önerisi. İstek üzerine dolar, önbelleklenir. */
   successors: Record<string, SuccessorSuggestion>;
   successorBusy: string;
+  catalogBusy: boolean;
+  /** Açık onay bekleyen canonical işlemi. Tek seferde YALNIZCA BİR tane —
+   *  kullanıcı kararı: toplu değil, gerektiğinde ve tek tek. */
+  canonicalPending: (CanonicalPreview & { eolSlug: string; targetSlug: string }) | null;
+  canonicalBusy: boolean;
   techStructuring: boolean;
   techDropped: string[];
   ideasoftBusy: boolean;
@@ -85,6 +91,9 @@ export const useStore = defineStore("app", {
     opportunityError: "",
     successors: {},
     successorBusy: "",
+    catalogBusy: false,
+    canonicalPending: null,
+    canonicalBusy: false,
     techStructuring: false,
     techDropped: [],
     ideasoftBusy: false,
@@ -311,6 +320,54 @@ export const useStore = defineStore("app", {
         this.toast(String(e), "error");
       } finally {
         this.successorBusy = "";
+      }
+    },
+
+    /** IdeaSoft kataloğunu çeker (~7 dk, 10.909 ürün). Elle tetiklenir. */
+    async syncCatalog() {
+      if (this.catalogBusy) return;
+      this.catalogBusy = true;
+      try {
+        const r = await api.syncIdeasoftCatalog();
+        this.toast(`${r.fetched} ürün alındı · ${r.matched_eol} sayfa eşleşti`, "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.catalogBusy = false;
+      }
+    },
+
+    /** Canonical önizlemesi aç — YAZMAZ, yalnızca ne olacağını gösterir. */
+    async askCanonical(eolSlug: string, targetSlug: string) {
+      if (this.canonicalBusy) return;
+      this.canonicalBusy = true;
+      try {
+        const p = await api.previewCanonical(eolSlug, targetSlug);
+        this.canonicalPending = { ...p, eolSlug, targetSlug };
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.canonicalBusy = false;
+      }
+    },
+
+    cancelCanonical() {
+      if (!this.canonicalBusy) this.canonicalPending = null;
+    },
+
+    /** Onaylanan canonical'ı yazar. Canlı mağazayı değiştirir. */
+    async confirmCanonical() {
+      const p = this.canonicalPending;
+      if (!p || this.canonicalBusy) return;
+      this.canonicalBusy = true;
+      try {
+        await api.applyCanonical(p.eolSlug, p.targetSlug);
+        this.toast("Canonical ayarlandı", "ok");
+        this.canonicalPending = null;
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.canonicalBusy = false;
       }
     },
 

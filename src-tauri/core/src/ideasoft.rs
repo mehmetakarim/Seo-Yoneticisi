@@ -113,6 +113,148 @@ pub struct Resolved {
 }
 
 /// sku → IdeaSoft ürün id'si (+ SEO kural skoru). `?s=` arama parametresi kullanılır
+// ---- Canonical (seo_settings) ----
+//
+// IdeaSoft admin API'sinde **301 yönlendirme ucu YOK** (rota haritası çıkarıldı: redirects,
+// url_rewrites vb. hepsi 404). Yapılabilen en yakın şey canonical. Ürün kaydındaki
+// `canonicalUrl` alanı kullanılmıyor (ilk 500 üründe tamamen boş); gerçek mekanizma
+// `seo_settings` kaynağı — 9.350 kayıt, ürün başına bir tane.
+//
+// Biçim: `urun/<slug>` — başında eğik çizgi YOK, alan adı YOK.
+//
+// ⚠️ Canonical bir yönlendirme DEĞİLDİR: ziyaretçi yine eski sayfaya düşer, yalnızca
+// Google'a "asıl sayfa şu" sinyali gider. Arayüzde bu fark açıkça yazılmalı.
+//
+// Doğrulandı (2026-07-29, gerçek mağaza):
+//   POST /admin-api/seo_settings        → 201, kaydı olmayan ürün için oluşturur
+//   PUT  /admin-api/seo_settings/{id}   → 200, mevcut kaydı günceller (kısmi)
+
+/// Bir ürünün mevcut canonical durumu.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct SeoSetting {
+    /// seo_settings kayıt id'si; kayıt yoksa `None` (oluşturmak gerekir).
+    pub setting_id: Option<i64>,
+    pub canonical: String,
+    pub index: String,
+    pub follow: String,
+}
+
+/// Ürünün seo_settings kaydını okur. Kayıt yoksa varsayılanlarla döner.
+pub async fn get_seo_setting(
+    domain: &str,
+    token: &str,
+    product_id: i64,
+) -> Result<SeoSetting, String> {
+    let base = base_url(domain)?;
+    let client = http()?;
+    let resp = client
+        .get(format!("{base}/admin-api/seo_settings"))
+        .query(&[("contextItemId", product_id.to_string())])
+        .bearer_auth(token.trim())
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("IdeaSoft'a ulaşılamadı: {e}"))?;
+    if resp.status().as_u16() == 401 {
+        return Err("IdeaSoft token süresi dolmuş — Ayarlar'dan yenileyin.".into());
+    }
+    let text = resp.text().await.unwrap_or_default();
+    let arr: Vec<serde_json::Value> =
+        serde_json::from_str(&text).map_err(|e| format!("Yanıt okunamadı: {e}"))?;
+    let jv = |v: &serde_json::Value, k: &str, d: &str| {
+        v.get("jsonValue")
+            .and_then(|x| x.get(k))
+            .and_then(|x| x.as_str())
+            .unwrap_or(d)
+            .to_string()
+    };
+    Ok(match arr.first() {
+        Some(r) => SeoSetting {
+            setting_id: r.get("id").and_then(|x| x.as_i64()),
+            canonical: jv(r, "canonical", ""),
+            index: jv(r, "index", "index"),
+            follow: jv(r, "follow", "follow"),
+        },
+        None => SeoSetting {
+            setting_id: None,
+            canonical: String::new(),
+            index: "index".into(),
+            follow: "follow".into(),
+        },
+    })
+}
+
+/// Canonical'ı IdeaSoft'un beklediği `urun/<slug>` biçimine getirir.
+///
+/// ⚠️ **Alan adını yalnızca şema varsa at.** İlk sürüm koşulsuz `split_once('/')` yapıyordu;
+/// bu, zaten göreli olan `urun/abc` girdisinde `urun` parçasını alan adı sanıp atıyor ve
+/// `abc` üretiyordu — sessizce çalışmayan bir canonical. Test yakaladı.
+fn normalize_canonical(input: &str) -> String {
+    let s = input.trim();
+    let rest = match s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")) {
+        // Tam URL: ilk `/`'a kadar olan kısım alan adıdır, atılır.
+        Some(after_scheme) => after_scheme.split_once('/').map(|(_h, r)| r).unwrap_or(""),
+        // Zaten göreli: dokunma.
+        None => s,
+    };
+    rest.trim_start_matches('/').to_string()
+}
+
+/// Ürünün canonical'ını ayarlar. Kayıt yoksa oluşturur, varsa günceller.
+///
+/// `canonical` **`urun/<slug>` biçiminde** olmalı — fonksiyon baştaki eğik çizgiyi ve tam
+/// URL öneklerini temizler ki çağıran biçimi yanlış vermesin.
+///
+/// ⚠️ **Canlı mağazaya yazar.** Çağıran, kullanıcıdan açık onay almış olmalı; toplu
+/// çağrılmamalı (kullanıcı kararı: gerektiğinde ve tek tek).
+pub async fn set_canonical(
+    domain: &str,
+    token: &str,
+    product_id: i64,
+    canonical: &str,
+    current: &SeoSetting,
+) -> Result<(), String> {
+    let clean = normalize_canonical(canonical);
+
+    let base = base_url(domain)?;
+    let client = http()?;
+    let body = serde_json::json!({
+        "context": "product",
+        "contextItemId": product_id,
+        "jsonValue": {
+            // index/follow korunur — yalnızca canonical değiştiriliyor.
+            "index": current.index,
+            "follow": current.follow,
+            "canonical": clean
+        }
+    });
+
+    let resp = match current.setting_id {
+        Some(id) => client.put(format!("{base}/admin-api/seo_settings/{id}")),
+        None => client.post(format!("{base}/admin-api/seo_settings")),
+    }
+    .bearer_auth(token.trim())
+    .header("Content-Type", "application/json")
+    .json(&body)
+    .send()
+    .await
+    .map_err(|e| format!("IdeaSoft'a ulaşılamadı: {e}"))?;
+
+    let status = resp.status();
+    if status.as_u16() == 401 {
+        return Err("IdeaSoft token süresi dolmuş — Ayarlar'dan yenileyin.".into());
+    }
+    if !status.is_success() {
+        let t = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "Canonical yazılamadı (HTTP {}): {}",
+            status.as_u16(),
+            t.chars().take(200).collect::<String>()
+        ));
+    }
+    Ok(())
+}
+
 /// Katalogdaki bir ürünün hafif özeti — EOL sayfaları eşleştirmek için.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct CatalogItem {
@@ -378,6 +520,18 @@ pub async fn test_connection(domain: &str, token: &str) -> Result<String, String
 
 #[cfg(test)]
 mod tests {
+
+    /// Canonical biçimi `urun/<slug>` olmalı. Üç girdi biçimi de aynı sonucu vermeli.
+    /// Regresyon: ilk sürüm göreli yolda `urun/` önekini alan adı sanıp atıyordu.
+    #[test]
+    fn canonical_format_is_normalized() {
+        assert_eq!(normalize_canonical("https://www.kurumsalit.com/urun/abc"), "urun/abc");
+        assert_eq!(normalize_canonical("http://x.com/urun/abc"), "urun/abc");
+        assert_eq!(normalize_canonical("/urun/abc"), "urun/abc");
+        assert_eq!(normalize_canonical("  urun/abc  "), "urun/abc");
+        // Alan adı dışında yol yoksa boş kalmalı, çöp üretmemeli
+        assert_eq!(normalize_canonical("https://x.com"), "");
+    }
     use super::*;
 
     fn local() -> LocalContent {
