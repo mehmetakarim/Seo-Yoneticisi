@@ -13,6 +13,10 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.5.9
+- Fırsatlar ekranının boş açılmasına yol açan hata giderildi
+- Yeni bölümleri görmek için Fırsatlar ekranında "Yenile" deyip analizi bir kez çalıştırın
+
 ## v0.5.8
 - Yeni bölüm: satışta olmayan ama Google'dan trafik alan sayfalar — ürün trafiğinizin büyük kısmı buraya gidiyor olabilir
 - Fırsat listesinde artık her ürünün SEO durumu görünüyor: hiç dokunulmamış mı, çalışılmış ama sonuç alınamamış mı
