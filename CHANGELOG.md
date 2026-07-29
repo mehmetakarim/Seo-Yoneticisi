@@ -13,6 +13,12 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.5.8
+- Yeni bölüm: satışta olmayan ama Google'dan trafik alan sayfalar — ürün trafiğinizin büyük kısmı buraya gidiyor olabilir
+- Fırsat listesinde artık her ürünün SEO durumu görünüyor: hiç dokunulmamış mı, çalışılmış ama sonuç alınamamış mı
+- Kategori ve marka kesitleri: kaybın nerede toplandığını gösterir, tıklayınca listeyi filtreler
+- Fırsatları iş durumuna ve sebebe göre filtreleyebilirsiniz
+
 ## v0.5.7
 - Meta ve açıklama için sürüm geçmişi: yeniden üretmeden önceki hâl saklanıyor, beğenmezseniz geri yükleyebilirsiniz
 - Geri yüklerken mevcut hâl de saklanıyor — geri yükleme de geri alınabilir
