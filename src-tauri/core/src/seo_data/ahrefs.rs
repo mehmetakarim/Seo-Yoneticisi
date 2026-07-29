@@ -293,17 +293,49 @@ pub async fn keyword_difficulty(
     parse_difficulty(&data, keyword).ok_or_else(|| "Ahrefs zorluk verisi çözümlenemedi.".to_string())
 }
 
+/// ⚠️ **Ahrefs bu uçtan `difficulty` diye bir alan DÖNDÜRMÜYOR** (2026-07-29 ham yanıt
+/// dökümüyle doğrulandı). Dönen şey bir SERP özeti: `{"serp":{"results":[...]}}` — kimlerin
+/// sıralandığı, alan otoriteleri (DR), yönlendiren alan sayıları.
+///
+/// Eski hâli `unwrap_or(0)` ile eksik alanları 0'a düşürüyordu; sonuç **sessizce "zorluk 0"**
+/// oluyordu ve 0, "çok kolay" demek. Yani veri yokluğu, en iyimser değer gibi görünüyordu.
+/// Bu hem bu fonksiyonu hem de onu kullanan "SEO Araştır" panelini yanıltıyordu.
+///
+/// Artık: veri yoksa `None`. Zorluk, SERP'teki ilk sonuçların **yönlendiren alan sayılarının
+/// medyanı** üzerinden türetiliyor — Ahrefs'in kendi formülü değil, yaygın bir yaklaşıklama.
+/// Bu yüzden arayüzde "Ahrefs zorluğu" değil, ne olduğu doğru adlandırılmalı.
 fn parse_difficulty(data: &serde_json::Value, keyword: &str) -> Option<KeywordDifficulty> {
     let inner = unwrap_ok(data)?;
+    // Uzun kuyruk sorgularda Ahrefs `["Ok", null]` dönüyor — veri yok demek.
+    if inner.is_null() {
+        return None;
+    }
+
+    let results = inner.get("serp")?.get("results")?.as_array()?;
+    // Her organik sonucun yönlendiren alan (referring domains) sayısı
+    let mut domains: Vec<i64> = results
+        .iter()
+        .filter_map(|r| {
+            let link = r.get("content")?.get(1)?.get("link")?.get(1)?;
+            link.get("metrics")?.get("domains")?.as_i64()
+        })
+        .collect();
+    if domains.is_empty() {
+        return None;
+    }
+    domains.sort_unstable();
+    let median = domains[domains.len() / 2];
+
+    // Medyan yönlendiren alan → 0-100 ölçeği. Logaritmik: 1 alan ≈ 0, 10 ≈ 33, 100 ≈ 66,
+    // 1000 ≈ 100. Kaba ama sıralama için yeterli; mutlak doğruluk iddiası yok.
+    let difficulty = ((median.max(1) as f64).log10() / 3.0 * 100.0).round().clamp(0.0, 100.0) as i64;
+
     Some(KeywordDifficulty {
         keyword: keyword.to_string(),
-        difficulty: inner.get("difficulty").and_then(|v| v.as_i64()).unwrap_or(0),
-        shortage: inner.get("shortage").and_then(|v| v.as_i64()).unwrap_or(0),
-        last_update: inner
-            .get("lastUpdate")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
+        difficulty,
+        // `shortage` bu uçta gelmiyor; medyan alan sayısını taşıyoruz (arayüzde açıklanır).
+        shortage: median,
+        last_update: String::new(),
     })
 }
 
@@ -438,14 +470,20 @@ mod tests {
     }
 
     #[test]
+    /// ⚠️ Bu testin eski hâli `{"difficulty":34,"shortage":2,...}` biçimini varsayıyordu —
+    /// **gerçek API bunu hiç döndürmüyor.** Hayali bir yanıta karşı yazıldığı için, kod
+    /// üretimde sessizce 0 döndürürken bile yeşil yanıyordu. Aşağıdaki gövde 2026-07-29'da
+    /// alınan GERÇEK yanıttan türetildi.
     fn parse_difficulty_reads_fields() {
-        let data = serde_json::json!(["Ok", {
-            "difficulty": 34, "shortage": 2, "lastUpdate": "2026-07-01T00:00:00Z"
-        }]);
+        let data = serde_json::json!(["Ok", { "serp": { "results": [
+            { "content": ["organic", { "link": ["Some", { "metrics": { "domains": 8 } }] }] },
+            { "content": ["organic", { "link": ["Some", { "metrics": { "domains": 12 } }] }] },
+            { "content": ["organic", { "link": ["Some", { "metrics": { "domains": 30 } }] }] }
+        ] } }]);
         let kd = parse_difficulty(&data, "all in one bilgisayar").unwrap();
-        assert_eq!(kd.difficulty, 34);
-        assert_eq!(kd.shortage, 2);
         assert_eq!(kd.keyword, "all in one bilgisayar");
+        assert_eq!(kd.shortage, 12, "medyan yönlendiren alan");
+        assert!(kd.difficulty > 0, "veri varken zorluk 0 olmamalı");
         assert!(parse_difficulty(&serde_json::json!(["Error"]), "x").is_none());
     }
 
@@ -540,4 +578,120 @@ mod tests {
         println!("zorluk: {} · shortage: {} · {}", kd.difficulty, kd.shortage, kd.last_update);
         assert_eq!(kd.keyword, "all in one bilgisayar");
     }
+    /// Zorluk verisi canlı test — striking distance akışının "itmeye değer mi?" katmanı.
+    /// ⚠️ Her çalıştırma bir CapSolver çözümü tüketir (ücretli). Tek sorguyla sınırlı tutuldu.
+    /// `CAPSOLVER_API_KEY=... cargo test kd_real -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn kd_real() {
+        let key = std::env::var("CAPSOLVER_API_KEY").expect("CAPSOLVER_API_KEY ayarlı değil");
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()
+            .unwrap();
+        // Gerçek striking-distance sorgusu: 6.2. sıra, 214 gösterim, 0 tıklama
+        match keyword_difficulty(&client, &key, "çift monitör kolu", "tr").await {
+            Ok(kd) => println!(
+                "ZORLUK\tkeyword={}\tdifficulty={}\tshortage={}\tlast_update={}",
+                kd.keyword, kd.difficulty, kd.shortage, kd.last_update
+            ),
+            Err(e) => panic!("keyword_difficulty hatası: {e}"),
+        }
+    }
+
+    /// KD ham yanıt dökümü — biçim değişikliğini teşhis etmek için.
+    /// `CAPSOLVER_API_KEY=... cargo test kd_raw_dump -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn kd_raw_dump() {
+        let key = std::env::var("CAPSOLVER_API_KEY").expect("CAPSOLVER_API_KEY ayarlı değil");
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()
+            .unwrap();
+        let kw = std::env::var("KD_KW").unwrap_or_else(|_| "monitör".to_string());
+        let kw = kw.as_str();
+        let site_url = tool_url("keyword-difficulty", "tr", kw);
+        let token = match capsolver_token(&client, &key, &site_url).await {
+            Ok(t) => {
+                println!("TOKEN_OK len={}", t.len());
+                t
+            }
+            Err(e) => panic!("CapSolver token alınamadı: {e}"),
+        };
+        let body = serde_json::json!({ "captcha": token, "country": "tr", "keyword": kw });
+        let resp = ahrefs_post(&client, KD_URL, &body, &site_url).await.expect("istek");
+        println!("HTTP={}", resp.status().as_u16());
+        let text = resp.text().await.unwrap_or_default();
+        println!("HAM_YANIT_BASI:\n{}", &text.chars().take(1200).collect::<String>());
+    }
+
+    /// Regresyon: veri yokluğu "zorluk 0" (yani "çok kolay") gibi görünmemeli.
+    /// Ahrefs uzun kuyruk sorgularda `["Ok", null]` dönüyor (2026-07-29 doğrulandı).
+    #[test]
+    fn missing_data_is_none_not_zero() {
+        let v: serde_json::Value = serde_json::from_str(r#"["Ok",null]"#).unwrap();
+        assert!(
+            parse_difficulty(&v, "x").is_none(),
+            "veri yoksa None dönmeli — 0 dönmek 'çok kolay' anlamına gelir ve yanıltır"
+        );
+    }
+
+    #[test]
+    fn difficulty_derives_from_median_referring_domains() {
+        let mk = |d: i64| {
+            serde_json::json!({
+                "content": ["organic", { "link": ["Some", { "metrics": { "domains": d } }] }]
+            })
+        };
+        let v = serde_json::json!(["Ok", { "serp": { "results": [mk(5), mk(10), mk(20)] } }]);
+        let kd = parse_difficulty(&v, "test").expect("veri var");
+        assert_eq!(kd.shortage, 10, "medyan yönlendiren alan sayısı taşınmalı");
+        assert!(kd.difficulty > 25 && kd.difficulty < 45, "medyan 10 → ~33 bekleniyor: {}", kd.difficulty);
+
+        // Daha rekabetçi SERP daha yüksek zorluk vermeli
+        let v2 = serde_json::json!(["Ok", { "serp": { "results": [mk(400), mk(500), mk(900)] } }]);
+        let kd2 = parse_difficulty(&v2, "test").expect("veri var");
+        assert!(kd2.difficulty > kd.difficulty);
+    }
+
+    #[test]
+    fn empty_serp_results_is_none() {
+        let v = serde_json::json!(["Ok", { "serp": { "results": [] } }]);
+        assert!(parse_difficulty(&v, "x").is_none());
+    }
+
+    /// **Kapsam ölçümü:** gerçek striking-distance sorgularının kaçında Ahrefs verisi var?
+    /// Uzun kuyruk sorgularda `["Ok", null]` geldiğini biliyoruz; oran neyse özelliğin
+    /// değerini o belirliyor. ⚠️ Her sorgu bir CapSolver çözümü tüketir.
+    /// `CAPSOLVER_API_KEY=... cargo test kd_coverage -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn kd_coverage() {
+        let key = std::env::var("CAPSOLVER_API_KEY").expect("CAPSOLVER_API_KEY ayarlı değil");
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()
+            .unwrap();
+        // Fırsatlar ekranındaki gerçek sorgular (2026-07-29 ölçümünden)
+        let queries = [
+            "21sr006rtx",
+            "creality raptor pro",
+            "logitech kablosuz",
+            "bambu lab a2 combo",
+            "ergotron",
+        ];
+        let mut with_data = 0;
+        for q in queries {
+            match keyword_difficulty(&client, &key, q, "tr").await {
+                Ok(kd) => {
+                    with_data += 1;
+                    println!("VERI_VAR\t{}\tzorluk={}\tmedyan_alan={}", q, kd.difficulty, kd.shortage);
+                }
+                Err(e) => println!("VERI_YOK\t{}\t{}", q, e),
+            }
+        }
+        println!("KAPSAM\t{}/{}", with_data, queries.len());
+    }
+
 }
