@@ -13,6 +13,11 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.6.1
+- Satışta olmayan sayfalar için "Halef öner": güncel neslin hangisi olduğunu yapay zekâ önerir
+- Uygun bir halef yoksa bunu açıkça söyler — yanlış yönlendirme önerilmez
+- Öneri tek tek alınır, en çok trafik alan sayfalardan başlayın
+
 ## v0.6.0
 - Yeni: "Yükselmeye yakın sorgular" — hangi aramada kaçıncı sırada olduğunuzu gösterir, o arama doğrudan hedef kelime adayıdır
 - Yeni: "Birbiriyle yarışan sayfalar" — aynı aramada çakışan kendi ürünlerinizi bulur
