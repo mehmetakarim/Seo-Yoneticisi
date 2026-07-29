@@ -126,6 +126,80 @@ pub fn work_state(meta_status: &str, details_status: &str) -> WorkState {
     }
 }
 
+/// EOL sayfanın listeye girmesi için gereken en az tıklama.
+/// Ölçüm (2026-07-29): 4.523 EOL sayfanın yalnızca 967'si en az 1 tıklama alıyor —
+/// gerisi tamamen gürültü. Tıklama alanlar toplam kaybın %100'ünü kapsıyor.
+const EOL_MIN_CLICKS: f64 = 1.0;
+/// Tıklama almasa da bu kadar gösterim alan sayfa da sorunludur (görünüyor ama tıklanmıyor).
+const EOL_MIN_IMPRESSIONS: f64 = 100.0;
+
+/// **Satışta olmayan ama trafik alan sayfa.**
+///
+/// Feed'de olmayan bir ürün URL'si = katalogdan çıkmış ama Google'da hâlâ sıralanan sayfa.
+/// Müşteri geliyor, ürünü satın alamıyor. Ölçüm (2026-07-29, kurumsalit.com): ürün
+/// trafiğinin **%69'u** bu sayfalara gidiyor — 3.840 tıklama.
+///
+/// Bu analizi QueryLoom gibi araçlar yapamaz: onlar yalnızca GSC'yi görür, hangi ürünün
+/// satışta olduğunu bilmez. Biz kataloğu da biliyoruz.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EolPage {
+    pub url: String,
+    /// URL'nin son parçası — listede okunabilir bir ad olarak gösterilir.
+    pub slug: String,
+    pub clicks: f64,
+    pub impressions: f64,
+    pub position: f64,
+}
+
+/// GSC'de görünen ama katalogda olmayan ürün sayfalarını bulur.
+///
+/// `live_urls` normalize edilmiş (küçük harf, sondaki `/` atılmış) olmalı — çağıran
+/// `norm_url` uygular. `path_prefix` verilirse yalnızca o yoldaki sayfalar değerlendirilir;
+/// aksi halde blog ve kategori sayfaları da "satışta olmayan ürün" sanılırdı.
+pub fn find_eol(
+    pages: &[(String, f64, f64, f64)],
+    live_urls: &std::collections::HashSet<String>,
+    path_prefix: Option<&str>,
+) -> Vec<EolPage> {
+    let mut out: Vec<EolPage> = pages
+        .iter()
+        .filter(|(url, clicks, imps, _)| {
+            let u = url.trim().trim_end_matches('/').to_lowercase();
+            // Ürün yolunda mı? (yoksa blog/kategori sayfaları listeye sızar)
+            if let Some(pfx) = path_prefix {
+                if !u.contains(pfx) {
+                    return false;
+                }
+            }
+            // Katalogda var mı? Varsa EOL değil.
+            if live_urls.contains(&u) {
+                return false;
+            }
+            *clicks >= EOL_MIN_CLICKS || *imps >= EOL_MIN_IMPRESSIONS
+        })
+        .map(|(url, clicks, imps, pos)| EolPage {
+            slug: url
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or("")
+                .to_string(),
+            url: url.clone(),
+            clicks: *clicks,
+            impressions: *imps,
+            position: *pos,
+        })
+        .collect();
+    // En çok trafik kaybeden başa
+    out.sort_by(|a, b| {
+        b.clicks
+            .partial_cmp(&a.clicks)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.impressions.partial_cmp(&a.impressions).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    out
+}
+
 /// Ürün URL'lerinden ortak yol önekini türetir (ör. `/urun/`).
 ///
 /// **Neden gerekli:** sorgu × sayfa verisi çok hacimli. Bu sitede GSC'de 8087 sayfa var ama
@@ -264,6 +338,52 @@ mod tests {
     fn tiny_losses_are_filtered_out() {
         // 20 gösterim, 9. sıra, beklenene yakın CTR → kayıp 1 tıklamanın altında
         assert!(classify(0.0, 20.0, 0.02, 9.0).is_none());
+    }
+
+    fn urls(v: &[&str]) -> std::collections::HashSet<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn eol_excludes_pages_that_are_still_in_catalog() {
+        let live = urls(&["https://x.com/urun/canli"]);
+        let pages = vec![
+            ("https://x.com/urun/canli".to_string(), 500.0, 9000.0, 2.0),
+            ("https://x.com/urun/emekli".to_string(), 50.0, 900.0, 3.0),
+        ];
+        let eol = find_eol(&pages, &live, Some("/urun/"));
+        assert_eq!(eol.len(), 1, "katalogdaki sayfa EOL sayılmamalı");
+        assert_eq!(eol[0].slug, "emekli");
+    }
+
+    #[test]
+    fn eol_ignores_non_product_paths() {
+        // Blog/kategori sayfaları "satışta olmayan ürün" sanılmamalı — yanlış pozitif üretir.
+        let live = urls(&[]);
+        let pages = vec![
+            ("https://x.com/blog/yazi".to_string(), 900.0, 9000.0, 1.0),
+            ("https://x.com/urun/emekli".to_string(), 5.0, 100.0, 8.0),
+        ];
+        let eol = find_eol(&pages, &live, Some("/urun/"));
+        assert_eq!(eol.len(), 1);
+        assert_eq!(eol[0].slug, "emekli");
+    }
+
+    #[test]
+    fn eol_filters_noise_and_sorts_by_clicks() {
+        let live = urls(&[]);
+        let pages = vec![
+            ("https://x.com/urun/az".to_string(), 0.0, 5.0, 40.0),      // gürültü
+            ("https://x.com/urun/orta".to_string(), 3.0, 200.0, 9.0),
+            ("https://x.com/urun/cok".to_string(), 90.0, 1500.0, 4.0),
+            ("https://x.com/urun/goster".to_string(), 0.0, 400.0, 15.0), // tıklama yok ama görünüyor
+        ];
+        let eol = find_eol(&pages, &live, Some("/urun/"));
+        assert_eq!(
+            eol.iter().map(|e| e.slug.as_str()).collect::<Vec<_>>(),
+            ["cok", "orta", "goster"],
+            "gürültü elenmeli, en çok tıklama başta olmalı"
+        );
     }
 
     #[test]

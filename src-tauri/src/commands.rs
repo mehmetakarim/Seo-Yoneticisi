@@ -1549,6 +1549,11 @@ pub struct OpportunityReport {
     pub total_products: usize,
     /// GSC verisiyle eşleşen ürün sayısı — eşleşme düşükse sorun URL biçimindedir.
     pub matched: usize,
+    /// **Satışta olmayan ama trafik alan sayfalar** (en çok tıklama alan başta).
+    /// Ölçüm: bu sitede ürün trafiğinin %69'u buraya gidiyor.
+    pub eol: Vec<opportunity::EolPage>,
+    /// EOL sayfaların toplam tıklaması — fırsat listesiyle kıyaslanabilsin diye.
+    pub eol_clicks: f64,
 }
 
 /// GSC'nin döndürdüğü URL ile feed'deki URL arasındaki zararsız farkları törpüler
@@ -1619,6 +1624,8 @@ pub async fn analyze_opportunities(
 
     let by_url: std::collections::HashMap<String, &seo_data::PageStat> =
         stats.iter().map(|s| (norm_url(&s.page), s)).collect();
+    // Yol öneki türetmek için ham (normalize edilmemiş) ürün URL'leri
+    let product_urls: Vec<String> = products.iter().map(|p| p.2.clone()).collect();
 
     let total_products = products.len();
     let mut opportunities = Vec::new();
@@ -1655,6 +1662,21 @@ pub async fn analyze_opportunities(
 
     opportunity::sort_by_impact(&mut opportunities);
 
+    // Satışta olmayan ama trafik alan sayfalar. `stats` zaten tüm siteyi içeriyor →
+    // EK API ÇAĞRISI YOK. Ürün yolu, ürünlerin kendi URL'lerinden türetiliyor ki
+    // blog/kategori sayfaları "satışta olmayan ürün" sanılmasın.
+    // DİKKAT: `by_url` GSC sayfalarını tutuyor, kataloğu değil. "Satışta" kümesi
+    // ÜRÜNLERDEN kurulmalı — yoksa her sayfa "satışta" sayılır ve EOL listesi hep boş çıkar.
+    let live: std::collections::HashSet<String> =
+        product_urls.iter().map(|u| norm_url(u)).collect();
+    let path_prefix = opportunity::common_path_prefix(&product_urls);
+    let page_tuples: Vec<(String, f64, f64, f64)> = stats
+        .iter()
+        .map(|s| (s.page.clone(), s.clicks, s.impressions, s.position))
+        .collect();
+    let eol = opportunity::find_eol(&page_tuples, &live, path_prefix.as_deref());
+    let eol_clicks = eol.iter().map(|e| e.clicks).sum();
+
     let report = OpportunityReport {
         analyzed_at: now_str(),
         days: OPPORTUNITY_DAYS,
@@ -1662,6 +1684,8 @@ pub async fn analyze_opportunities(
         invisible,
         total_products,
         matched,
+        eol,
+        eol_clicks,
     };
 
     // Önbelleğe al: GSC verisi günlük değişir, her sayfa açılışında API'ye gitmeye gerek yok.

@@ -240,6 +240,15 @@ export interface InvisibleProduct {
   url: string;
 }
 
+/** Satışta olmayan ama trafik alan sayfa — katalogda yok, Google'da hâlâ sıralanıyor. */
+export interface EolPage {
+  url: string;
+  slug: string;
+  clicks: number;
+  impressions: number;
+  position: number;
+}
+
 export interface OpportunityReport {
   analyzed_at: string;
   days: number;
@@ -248,4 +257,7 @@ export interface OpportunityReport {
   invisible: InvisibleProduct[];
   total_products: number;
   matched: number;
+  /** En çok tıklama alan başta. */
+  eol: EolPage[];
+  eol_clicks: number;
 }

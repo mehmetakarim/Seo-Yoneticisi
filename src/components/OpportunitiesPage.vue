@@ -21,6 +21,9 @@ const reasonFilter = ref<OpportunityReason | "all">("all");
 /** Kategori veya marka kesiti — "cat:Notebook" / "brand:Lenovo" biçiminde. */
 const sliceFilter = ref<string>("");
 
+/** EOL listesi uzun olabilir (bu sitede ~970 sayfa) — önce en değerlileri göster. */
+const eolLimit = ref(25);
+
 const all = computed<Opportunity[]>(() => report.value?.opportunities ?? []);
 
 const filtered = computed(() =>
@@ -298,6 +301,47 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
     <div v-else-if="report" class="clean">
       <Icon name="check" :size="16" :stroke-width="2.4" style="color: var(--green)" />
       Fırsat bulunamadı — Google'da bulunan ürünlerin tamamı konumuna göre beklenen performansta.
+    </div>
+
+    <!-- Satışta olmayan ama trafik alan sayfalar. Ölçüm: ürün trafiğinin %69'u burada. -->
+    <div v-if="report?.eol.length" class="card eol">
+      <div class="inv-head">
+        <div>
+          <div class="inv-title">
+            Satışta olmayan ama trafik alan sayfalar ({{ report.eol.length }})
+            <span class="eol-sum">{{ Math.round(report.eol_clicks) }} tıklama</span>
+          </div>
+          <div class="inv-sub">
+            Bu adresler kataloğunuzda yok ama Google'da hâlâ sıralanıyor — ziyaretçi geliyor,
+            ürünü satın alamıyor. Çözüm genelde güncel nesle <b>301 yönlendirme</b>; yönlendirmeyi
+            IdeaSoft panelinden tanımlamanız gerekir, uygulama bunu yapamaz.
+            Bazı sayfaları bilinçli tutuyor olabilirsiniz — liste öneridir, karar sizin.
+          </div>
+        </div>
+      </div>
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th class="c-name">Sayfa</th>
+            <th class="c-num">Tıklama</th>
+            <th class="c-num">Gösterim</th>
+            <th class="c-num">Konum</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="e in report.eol.slice(0, eolLimit)" :key="e.url">
+            <td class="c-name"><div class="nm">{{ e.slug }}</div></td>
+            <td class="c-num miss">{{ Math.round(e.clicks) }}</td>
+            <td class="c-num">{{ Math.round(e.impressions) }}</td>
+            <td class="c-num">{{ e.position.toFixed(1) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="report.eol.length > eolLimit" class="eol-more">
+        <a class="link" @click="eolLimit += 50">
+          Sonraki 50'yi göster ({{ report.eol.length - eolLimit }} kaldı)
+        </a>
+      </div>
     </div>
 
     <!-- Google'da hiç görünmeyenler: farklı bir iş, bilinçli olarak ayrı -->
@@ -606,6 +650,26 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   color: var(--accent);
   cursor: pointer;
   font-weight: 560;
+}
+
+/* Satışta olmayan ama trafik alan sayfalar */
+.eol {
+  margin-top: 18px;
+}
+.eol-sum {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-size: 11px;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+}
+.eol-more {
+  padding: 10px 16px;
+  border-top: 1px solid var(--c-border-soft);
+  font-size: 12px;
 }
 
 /* Görünmeyenler */
