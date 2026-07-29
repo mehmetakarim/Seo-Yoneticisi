@@ -1779,6 +1779,88 @@ pub async fn analyze_opportunities(
     Ok(report)
 }
 
+#[derive(Serialize)]
+pub struct SuccessorSuggestion {
+    /// Model bir halef seçtiyse dolu; "halef yok" dediyse boş.
+    pub sku: Option<String>,
+    pub name: Option<String>,
+    pub url: Option<String>,
+    pub reason: String,
+    pub model: String,
+    /// Deterministik adaylar — model seçmese de operatör kendi bakabilsin.
+    pub candidates: Vec<opportunity::SuccessorCandidate>,
+}
+
+/// Satışta olmayan bir sayfa için halef ürün önerisi.
+///
+/// **İstek üzerine, tek sayfa için** çalışır — 1.073 EOL sayfanın tamamı için model çağırmak
+/// günlük kotayı (flash modellerde 20/gün) anında tüketirdi. Trafik zaten en tepedeki
+/// sayfalarda yoğunlaşıyor; operatör oradan başlar.
+#[tauri::command]
+pub async fn suggest_eol_successor(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<SuccessorSuggestion, String> {
+    let (api_key, catalog) = {
+        let conn = state.conn.lock().unwrap();
+        let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
+        let mut stmt = conn
+            .prepare("SELECT sku, name, url FROM products WHERE url IS NOT NULL AND url <> ''")
+            .map_err(|e| format!("Ürünler okunamadı: {e}"))?;
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(|e| format!("Ürünler okunamadı: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+        (key, rows)
+    };
+
+    // Kod adayları daraltır (262 → 5), model karar verir. Bkz. successor_candidates dokümanı.
+    let candidates = opportunity::successor_candidates(&url, &catalog, 5);
+    if candidates.is_empty() {
+        return Ok(SuccessorSuggestion {
+            sku: None,
+            name: None,
+            url: None,
+            reason: "Katalogda benzer bir ürün bulunamadı.".into(),
+            model: String::new(),
+            candidates,
+        });
+    }
+
+    let pairs: Vec<(String, String)> = candidates
+        .iter()
+        .map(|c| (c.sku.clone(), c.name.clone()))
+        .collect();
+    let produced = gemini::suggest_successor(&api_key, &url, &pairs).await?;
+
+    let (sku, name, url_out, reason) = match produced.value {
+        Some((sku, reason)) => {
+            let found = catalog.iter().find(|(s, _, _)| s == &sku);
+            match found {
+                Some((s, n, u)) => (Some(s.clone()), Some(n.clone()), Some(u.clone()), reason),
+                // Şemadan geçmiş ama katalogda yoksa halef yok say.
+                None => (None, None, None, "Uygun bir halef bulunamadı.".into()),
+            }
+        }
+        None => (
+            None,
+            None,
+            None,
+            "Uygun bir halef bulunamadı — kategori sayfasına yönlendirmeyi değerlendirin.".into(),
+        ),
+    };
+
+    Ok(SuccessorSuggestion {
+        sku,
+        name,
+        url: url_out,
+        reason,
+        model: produced.model.to_string(),
+        candidates,
+    })
+}
+
 /// Önbellekteki son analiz (API'ye gitmeden). Hiç çalıştırılmadıysa `None`.
 #[tauri::command]
 pub fn get_opportunity_cache(

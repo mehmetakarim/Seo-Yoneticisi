@@ -357,6 +357,89 @@ pub fn find_eol(
     out
 }
 
+/// EOL sayfa için halef ürün adayı.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SuccessorCandidate {
+    pub sku: String,
+    pub name: String,
+    /// 0–1 arası benzerlik. **Bu bir öneri değil, sıralama ölçütüdür** — bkz. `successor_candidates`.
+    pub score: f64,
+}
+
+/// URL/ad parçalarını karşılaştırılabilir sözcüklere böler.
+fn slug_tokens(s: &str) -> Vec<String> {
+    let tail = s.rsplit("/urun/").next().unwrap_or(s);
+    tail.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .filter(|t| t.chars().count() >= 2)
+        .map(|t| t.to_string())
+        .collect()
+}
+
+/// Satışta olmayan bir sayfa için **halef adaylarını** sıralar.
+///
+/// ⚠️ **Bu bir öneri değil, aday listesidir.** Ölçüm (2026-07-29, 1.073 EOL sayfa) gösterdi ki
+/// yalnız başına sözcük örtüşmesi güvenilir değil: en çok trafik alan 12 sayfanın yalnızca
+/// 3'ünde güçlü eşleşme çıktı ve hatalar tehlikeliydi — `asus-zenbook-17-fold` için en iyi aday
+/// "Microsoft Windows 11 Pro" oldu (yalnızca "windows" sözcüğü örtüştüğü için). Eşik 0.45'te
+/// bile tıklamaların ancak %23'ü kapsanıyor.
+///
+/// Asıl işlevi: yapay zekâya **262 ürün yerine 5 aday** vermek. Kararı model verir, o da
+/// "halef yok" diyebilmelidir — yanlış yönlendirme, yönlendirmemekten kötüdür.
+///
+/// Nadir sözcükler (model kodları gibi) daha ağır sayılır: "thinkpad" her üründe geçerken
+/// "21sr006rtx" tek üründe geçer ve asıl ayırt edici olan odur.
+pub fn successor_candidates(
+    eol_slug: &str,
+    catalog: &[(String, String, String)],
+    top_n: usize,
+) -> Vec<SuccessorCandidate> {
+    use std::collections::{HashMap, HashSet};
+    let q: HashSet<String> = slug_tokens(eol_slug).into_iter().collect();
+    if q.is_empty() || catalog.is_empty() {
+        return Vec::new();
+    }
+
+    // Sözcük ne kadar yaygınsa o kadar az ayırt edici (IDF).
+    let mut df: HashMap<&str, usize> = HashMap::new();
+    let cat_tokens: Vec<HashSet<String>> = catalog
+        .iter()
+        .map(|(_, _, url)| slug_tokens(url).into_iter().collect())
+        .collect();
+    for set in &cat_tokens {
+        for t in set {
+            *df.entry(t.as_str()).or_insert(0) += 1;
+        }
+    }
+    let n = catalog.len() as f64;
+    let idf = |t: &str| ((n + 1.0) / (*df.get(t).unwrap_or(&0) as f64 + 1.0)).ln() + 1.0;
+
+    let q_norm: f64 = q.iter().map(|t| idf(t)).sum();
+    let mut out: Vec<SuccessorCandidate> = catalog
+        .iter()
+        .zip(cat_tokens.iter())
+        .filter_map(|((sku, name, _), c)| {
+            let inter: f64 = q.intersection(c).map(|t| idf(t)).sum();
+            if inter <= 0.0 {
+                return None;
+            }
+            let c_norm: f64 = c.iter().map(|t| idf(t)).sum();
+            let den = (q_norm * c_norm).sqrt();
+            Some(SuccessorCandidate {
+                sku: sku.clone(),
+                name: name.clone(),
+                score: if den > 0.0 { inter / den } else { 0.0 },
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(top_n);
+    out
+}
+
 /// Ürün URL'lerinden ortak yol önekini türetir (ör. `/urun/`).
 ///
 /// **Neden gerekli:** sorgu × sayfa verisi çok hacimli. Bu sitede GSC'de 8087 sayfa var ama
@@ -571,6 +654,55 @@ mod tests {
             ("p2".to_string(), "q".to_string(), 0.0, 50.0, 0.0, 30.0),
         ];
         assert!(cannibalization(&dom, &by_page).is_empty());
+    }
+
+    fn catalog() -> Vec<(String, String, String)> {
+        [
+            ("A", "Creality Filament Maker M1 & Shredder R1 Üretim Seti",
+             "https://x.com/urun/creality-filament-maker-m1-shredder-r1-uretim-seti"),
+            ("B", "Microsoft Windows 11 Pro Lisans",
+             "https://x.com/urun/microsoft-windows-11-pro-lisans"),
+            ("C", "Lenovo ThinkPad T14 G6 21QC00CKTX",
+             "https://x.com/urun/lenovo-thinkpad-t14-g6-21qc00cktx"),
+        ]
+        .iter()
+        .map(|(s, n, u)| (s.to_string(), n.to_string(), u.to_string()))
+        .collect()
+    }
+
+    #[test]
+    fn successor_ranks_same_product_line_first() {
+        let c = successor_candidates(
+            "https://x.com/urun/creality-filament-maker-m1-uretim-makinesi",
+            &catalog(),
+            3,
+        );
+        assert_eq!(c[0].sku, "A", "aynı ürün hattı başta olmalı");
+        assert!(c[0].score > 0.4);
+    }
+
+    #[test]
+    fn successor_returns_candidates_not_recommendations() {
+        // Halefi OLMAYAN bir ürün de aday döndürür — çünkü bu bir aday listesi, öneri değil.
+        // Kararı model verir ve "halef yok" diyebilmelidir. Ölçümde bu tam da yaşandı:
+        // asus-zenbook-17-fold için en iyi aday "Windows 11 Pro" çıkmıştı.
+        let c = successor_candidates(
+            "https://x.com/urun/asus-zenbook-17-fold-i7-windows-11-home",
+            &catalog(),
+            3,
+        );
+        assert!(!c.is_empty(), "aday üretilir");
+        assert!(
+            c[0].score < 0.45,
+            "ama skor düşük kalmalı — güvenilir eşleşme gibi görünmemeli ({})",
+            c[0].score
+        );
+    }
+
+    #[test]
+    fn successor_handles_empty_input() {
+        assert!(successor_candidates("", &catalog(), 3).is_empty());
+        assert!(successor_candidates("https://x.com/urun/abc", &[], 3).is_empty());
     }
 
     #[test]

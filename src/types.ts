@@ -291,3 +291,20 @@ export interface OpportunityReport {
   striking: QueryOpportunity[];
   cannibalization: Cannibalization[];
 }
+
+/** EOL sayfa için halef ürün adayı (deterministik sıralama — öneri değil, aday). */
+export interface SuccessorCandidate {
+  sku: string;
+  name: string;
+  score: number;
+}
+
+/** Yapay zekânın halef kararı. `sku` boşsa "uygun halef yok" demektir. */
+export interface SuccessorSuggestion {
+  sku: string | null;
+  name: string | null;
+  url: string | null;
+  reason: string;
+  model: string;
+  candidates: SuccessorCandidate[];
+}

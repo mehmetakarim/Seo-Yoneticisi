@@ -10,6 +10,7 @@ import type {
   TechGroup,
   TechSpecsResult,
   OpportunityReport,
+  SuccessorSuggestion,
 } from "./types";
 
 export const api = {
@@ -46,6 +47,8 @@ export const api = {
     invoke<ProductDetail>("restore_details_version", { sku, index }),
   analyzeOpportunities: () => invoke<OpportunityReport>("analyze_opportunities"),
   getOpportunityCache: () => invoke<OpportunityReport | null>("get_opportunity_cache"),
+  suggestEolSuccessor: (url: string) =>
+    invoke<SuccessorSuggestion>("suggest_eol_successor", { url }),
   saveTechSource: (sku: string, text: string) =>
     invoke<void>("save_tech_source", { sku, text }),
   structureTechSpecs: (sku: string) =>

@@ -11,6 +11,7 @@ import type {
   SyncSummary,
   TechGroup,
   OpportunityReport,
+  SuccessorSuggestion,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -40,6 +41,9 @@ interface State {
   opportunity: OpportunityReport | null;
   opportunityBusy: boolean;
   opportunityError: string;
+  /** EOL url → halef önerisi. İstek üzerine dolar, önbelleklenir. */
+  successors: Record<string, SuccessorSuggestion>;
+  successorBusy: string;
   techStructuring: boolean;
   techDropped: string[];
   ideasoftBusy: boolean;
@@ -79,6 +83,8 @@ export const useStore = defineStore("app", {
     opportunity: null,
     opportunityBusy: false,
     opportunityError: "",
+    successors: {},
+    successorBusy: "",
     techStructuring: false,
     techDropped: [],
     ideasoftBusy: false,
@@ -286,6 +292,25 @@ export const useStore = defineStore("app", {
         this.opportunityError = String(e);
       } finally {
         this.opportunityBusy = false;
+      }
+    },
+
+    /**
+     * Satışta olmayan bir sayfa için halef önerisi al.
+     *
+     * İSTEK ÜZERİNE, tek sayfa için: 1.073 EOL sayfanın tamamı için model çağırmak günlük
+     * kotayı (flash modellerde 20/gün) anında tüketirdi. Sonuç bellekte tutulur, aynı sayfa
+     * için ikinci kez çağrılmaz.
+     */
+    async suggestSuccessor(url: string) {
+      if (this.successorBusy || this.successors[url]) return;
+      this.successorBusy = url;
+      try {
+        this.successors[url] = await api.suggestEolSuccessor(url);
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.successorBusy = "";
       }
     },
 

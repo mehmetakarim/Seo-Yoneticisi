@@ -63,6 +63,7 @@ pub fn run() {
             commands::research_seo,
             commands::analyze_opportunities,
             commands::get_opportunity_cache,
+            commands::suggest_eol_successor,
             commands::get_settings,
             commands::save_settings,
             commands::set_gsc_service_account,

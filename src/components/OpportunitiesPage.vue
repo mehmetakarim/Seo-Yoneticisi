@@ -417,12 +417,41 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
           </tr>
         </thead>
         <tbody>
-          <tr v-for="e in report.eol.slice(0, eolLimit)" :key="e.url">
-            <td class="c-name"><div class="nm">{{ e.slug }}</div></td>
-            <td class="c-num miss">{{ Math.round(e.clicks) }}</td>
-            <td class="c-num">{{ Math.round(e.impressions) }}</td>
-            <td class="c-num">{{ e.position.toFixed(1) }}</td>
-          </tr>
+          <template v-for="e in report.eol.slice(0, eolLimit)" :key="e.url">
+            <tr>
+              <td class="c-name">
+                <div class="nm">{{ e.slug }}</div>
+                <!-- Halef önerisi: istek üzerine, tek sayfa için. Toplu çalıştırmak
+                     günlük model kotasını anında tüketirdi. -->
+                <div class="succ">
+                  <button
+                    v-if="!store.successors[e.url]"
+                    class="succ-btn"
+                    :disabled="!!store.successorBusy"
+                    @click="store.suggestSuccessor(e.url)"
+                  >
+                    <Icon
+                      :name="store.successorBusy === e.url ? 'loader' : 'sparkles'"
+                      :size="11"
+                      :class="{ spin: store.successorBusy === e.url }"
+                    />
+                    {{ store.successorBusy === e.url ? "Bakılıyor…" : "Halef öner" }}
+                  </button>
+                  <template v-else>
+                    <span v-if="store.successors[e.url].sku" class="succ-ok">
+                      <Icon name="check" :size="11" :stroke-width="2.6" />
+                      {{ store.successors[e.url].name }}
+                    </span>
+                    <span v-else class="succ-none">Uygun halef bulunamadı</span>
+                    <span class="succ-why">{{ store.successors[e.url].reason }}</span>
+                  </template>
+                </div>
+              </td>
+              <td class="c-num miss">{{ Math.round(e.clicks) }}</td>
+              <td class="c-num">{{ Math.round(e.impressions) }}</td>
+              <td class="c-num">{{ e.position.toFixed(1) }}</td>
+            </tr>
+          </template>
         </tbody>
       </table>
       <div v-if="report.eol.length > eolLimit" class="eol-more">
@@ -811,6 +840,56 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   font-size: 11px;
   font-weight: 640;
   font-variant-numeric: tabular-nums;
+}
+.succ {
+  margin-top: 5px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+}
+.succ-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px dashed var(--c-border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-soft);
+  font-size: 11px;
+  cursor: pointer;
+}
+.succ-btn:hover:not(:disabled) {
+  background: var(--c-hover);
+  color: var(--c-mid);
+}
+.succ-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.succ-ok {
+  display: inline-flex;
+  /* Metin sarınca ikon ortada kalmasın — üste hizalı dursun. */
+  align-items: flex-start;
+  gap: 5px;
+  color: var(--green);
+  font-weight: 580;
+  line-height: 1.4;
+}
+.succ-ok svg {
+  flex: none;
+  margin-top: 2px;
+}
+/* "Halef yok" bir başarısızlık değil, geçerli bir cevap — kırmızı DEĞİL, nötr. */
+.succ-none {
+  color: var(--c-soft);
+  font-weight: 560;
+}
+.succ-why {
+  color: var(--c-faint);
+  line-height: 1.4;
 }
 .eol-more {
   padding: 10px 16px;
