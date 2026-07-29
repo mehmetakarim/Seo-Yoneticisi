@@ -13,6 +13,12 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.6.4
+- Yeni: satıştan kalkmış bir sayfanın canonical'ını, halef ürüne doğrudan uygulamadan yazabilirsiniz
+- Yazma öncesi onay ekranı "şu an" ve "olacak" değerini yan yana gösterir; toplu işlem yoktur, her satır tek tek onaylanır
+- Onay ekranı bunun bir 301 yönlendirme olmadığını açıkça belirtir — ziyaretçi yine eski sayfaya düşer, yalnızca Google'a asıl sayfa sinyali gider
+- "Katalogla eşleştir" ile mağazanızın tüm ürün listesi çekilir; feed dışında kalan ürünler de artık eşleştirilebilir
+
 ## v0.6.3
 - Yeni: "Düşüşte olanlar" — önceki döneme göre trafik veya sıra kaybeden ürünleri gösterir
 - Tıklama ve konumun önce/sonra değerleri yan yana; nerede ne kadar kaybettiğiniz tek bakışta görünür
