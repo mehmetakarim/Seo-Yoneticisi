@@ -94,6 +94,22 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(conn, "seo_status", "meta_model", "TEXT")?;
     add_column_if_missing(conn, "seo_status", "details_model", "TEXT")?;
     add_column_if_missing(conn, "seo_status", "tech_model", "TEXT")?;
+    // IdeaSoft katalog önbelleği. XML feed bilinçli olarak sınırlı (bu mağazada 10.909
+    // üründen 262'si); feed dışı sayfalar Google'dan ciddi trafik alıyor ve uygulama
+    // onları hiç göremiyordu. Slug ile eşleştirme yapılabilsin diye ayrı tabloda tutulur.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ideasoft_catalog (
+            slug TEXT PRIMARY KEY,
+            id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            status INTEGER NOT NULL,
+            stock REAL NOT NULL,
+            canonical TEXT,
+            synced_at TEXT NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| format!("ideasoft_catalog tablosu oluşturulamadı: {e}"))?;
     // Sürüm geçmişi: yeniden üretmeden önceki hâl saklanır (bkz. core/src/history.rs).
     // Teknik tabloda zaten vardı; meta ve açıklamada içerik geri dönüşsüz kayboluyordu.
     add_column_if_missing(conn, "seo_status", "meta_history_json", "TEXT")?;

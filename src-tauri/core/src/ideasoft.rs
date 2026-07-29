@@ -113,6 +113,106 @@ pub struct Resolved {
 }
 
 /// sku → IdeaSoft ürün id'si (+ SEO kural skoru). `?s=` arama parametresi kullanılır
+/// Katalogdaki bir ürünün hafif özeti — EOL sayfaları eşleştirmek için.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct CatalogItem {
+    pub id: i64,
+    /// URL'nin son parçası (`/urun/<slug>`), eşleştirme anahtarı.
+    pub slug: String,
+    pub name: String,
+    /// IdeaSoft ürün durumu (1 = aktif).
+    pub status: i64,
+    /// ⚠️ **Liste ucunda GÜVENİLİR DEĞİL.** 2026-07-29 ölçümü: 300 üründe hepsi 0 geldi,
+    /// oysa detay ucu (`/products/{id}`) aynı ürün için 1.0 döndürüyordu — liste yanıtı bu
+    /// alanı doldurmuyor. Saklanıyor ama **arayüzde gösterilmemeli**: "hepsi stokta yok" gibi
+    /// yanıltıcı olur. Stok gerekiyorsa ürün başına detay ucundan çekilmeli.
+    pub stock: f64,
+    /// Şu an tanımlı canonical (boşsa yok).
+    pub canonical: String,
+}
+
+/// **Tüm kataloğu** sayfalayarak çeker.
+///
+/// Neden gerekli: XML feed bilinçli olarak sınırlı (bu mağazada 10.909 üründen 262'si).
+/// Feed dışı sayfalar Google'dan ciddi trafik alıyor ama uygulama onları hiç görmüyordu.
+/// Sayfa başına tek tek sormak 40 istek/dk sınırında ~27 dakika sürerdi; kataloğu bir kez
+/// çekmek ~110 istek.
+///
+/// ⚠️ **Yine de ~7 dakika sürüyor** — ölçüm (2026-07-29): 300 ürün 12,2 sn, yani sayfa başına
+/// ~4 sn. Arka planda çalışmalı ve ilerleme gösterilmeli; kullanıcı donmuş sanmasın.
+///
+/// `on_progress` her sayfadan sonra (çekilen, toplam) ile çağrılır — uzun süren işlemde
+/// kullanıcı ilerlemeyi görsün.
+pub async fn fetch_catalog<F>(
+    domain: &str,
+    token: &str,
+    max_items: usize,
+    mut on_progress: F,
+) -> Result<Vec<CatalogItem>, String>
+where
+    F: FnMut(usize, usize),
+{
+    const PAGE: usize = 100;
+    let base = base_url(domain)?;
+    let client = http()?;
+    let mut out: Vec<CatalogItem> = Vec::new();
+    let mut page = 1usize;
+    let mut total_hint = 0usize;
+
+    loop {
+        let resp = client
+            .get(format!("{base}/admin-api/products"))
+            .query(&[("limit", PAGE.to_string()), ("page", page.to_string())])
+            .bearer_auth(token.trim())
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|e| format!("IdeaSoft'a ulaşılamadı: {e}"))?;
+
+        // Toplam sayı yanıt başlığında geliyor — ilerleme göstergesi için.
+        if total_hint == 0 {
+            if let Some(v) = resp.headers().get("total_count").and_then(|v| v.to_str().ok()) {
+                total_hint = v.parse().unwrap_or(0);
+            }
+        }
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if status.as_u16() == 401 {
+            return Err("IdeaSoft token süresi dolmuş — Ayarlar'dan yenileyin.".into());
+        }
+        if !status.is_success() {
+            return Err(format!("IdeaSoft katalog hatası (HTTP {})", status.as_u16()));
+        }
+        let arr: Vec<serde_json::Value> =
+            serde_json::from_str(&text).map_err(|e| format!("Katalog yanıtı okunamadı: {e}"))?;
+        let got = arr.len();
+        for v in arr {
+            out.push(CatalogItem {
+                id: v.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
+                slug: v.get("slug").and_then(|x| x.as_str()).unwrap_or("").to_lowercase(),
+                name: v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                status: v.get("status").and_then(|x| x.as_i64()).unwrap_or(0),
+                stock: v.get("stockAmount").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                canonical: v
+                    .get("canonicalUrl")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            });
+        }
+        on_progress(out.len(), total_hint);
+
+        if got < PAGE || out.len() >= max_items {
+            break;
+        }
+        page += 1;
+        // Gözlemlenen hız sınırı 40 istek/dk → istekleri nazik tut.
+        tokio::time::sleep(std::time::Duration::from_millis(1600)).await;
+    }
+    out.truncate(max_items);
+    Ok(out)
+}
+
 /// (`?sku=`/`?name=` yok sayılıyor). Birden fazla sonuçta **sku'su birebir eşleşen** seçilir.
 pub async fn resolve(domain: &str, token: &str, sku: &str) -> Result<Option<Resolved>, String> {
     let base = base_url(domain)?;
@@ -417,4 +517,33 @@ mod tests {
         );
         assert_eq!(p.id, id);
     }
+    /// Katalog çekimi canlı test — sayfalama, başlıktan toplam sayı, alan eşlemesi.
+    /// `IDEASOFT_DOMAIN=... IDEASOFT_TOKEN=... cargo test catalog_real -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn catalog_real() {
+        let domain = std::env::var("IDEASOFT_DOMAIN").expect("IDEASOFT_DOMAIN yok");
+        let token = std::env::var("IDEASOFT_TOKEN").expect("IDEASOFT_TOKEN yok");
+        let cap: usize = std::env::var("IDEASOFT_CAP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(300);
+        let t0 = std::time::Instant::now();
+        let items = fetch_catalog(&domain, &token, cap, |done, total| {
+            println!("ILERLEME\t{done}/{total}");
+        })
+        .await
+        .expect("katalog çekilemedi");
+        println!("CEKILEN={} SURE_SN={:.1}", items.len(), t0.elapsed().as_secs_f64());
+        let with_slug = items.iter().filter(|i| !i.slug.is_empty()).count();
+        let active = items.iter().filter(|i| i.status == 1).count();
+        let in_stock = items.iter().filter(|i| i.stock > 0.0).count();
+        let with_canon = items.iter().filter(|i| !i.canonical.is_empty()).count();
+        println!("SLUG_DOLU={with_slug} AKTIF={active} STOKTA={in_stock} CANONICAL_TANIMLI={with_canon}");
+        for it in items.iter().take(3) {
+            println!("ORNEK\tid={} status={} stok={} slug={}", it.id, it.status, it.stock, it.slug);
+        }
+        assert!(with_slug > 0, "slug alanı boş geliyorsa eşleştirme yapılamaz");
+    }
+
 }

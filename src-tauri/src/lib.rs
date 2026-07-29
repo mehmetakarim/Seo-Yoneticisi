@@ -64,6 +64,8 @@ pub fn run() {
             commands::analyze_opportunities,
             commands::get_opportunity_cache,
             commands::suggest_eol_successor,
+            commands::sync_ideasoft_catalog,
+            commands::lookup_catalog,
             commands::get_settings,
             commands::save_settings,
             commands::set_gsc_service_account,

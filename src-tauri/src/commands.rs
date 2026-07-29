@@ -1888,6 +1888,142 @@ pub async fn suggest_eol_successor(
     })
 }
 
+#[derive(Serialize)]
+pub struct CatalogSyncResult {
+    pub fetched: usize,
+    pub synced_at: String,
+    /// EOL listesindeki kaç sayfa katalogda eşleşti.
+    pub matched_eol: usize,
+}
+
+/// IdeaSoft kataloğunu (tüm ürünler) çekip yerel tabloya yazar.
+///
+/// **Neden:** XML feed bilinçli olarak sınırlı — bu mağazada 10.909 üründen 262'si.
+/// Feed dışı sayfalar Google'dan ciddi trafik alıyor (ölçüm: ürün trafiğinin %69'u) ama
+/// uygulama onları hiç görmüyordu. Katalog bir kez çekilince EOL sayfalar slug ile
+/// eşleştirilip durumları (aktif mi, stok var mı, canonical tanımlı mı) gösterilebiliyor.
+///
+/// ⚠️ Birkaç dakika sürer: ~110 istek, 40 istek/dk sınırına saygıyla. Elle tetiklenir.
+#[tauri::command]
+pub async fn sync_ideasoft_catalog(
+    state: State<'_, AppState>,
+) -> Result<CatalogSyncResult, String> {
+    let (domain, token) = {
+        let conn = state.conn.lock().unwrap();
+        (
+            db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default(),
+            db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default(),
+        )
+    };
+    if domain.trim().is_empty() || token.trim().is_empty() {
+        return Err("IdeaSoft bağlantısı kurulmamış. Ayarlar'dan alan adı ve token girin.".into());
+    }
+
+    let items = ideasoft::fetch_catalog(&domain, &token, 50_000, |_done, _total| {}).await?;
+    let now = now_str();
+
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("İşlem başlatılamadı: {e}"))?;
+    // Tam yenileme: silinen ürünler tabloda kalmasın.
+    tx.execute("DELETE FROM ideasoft_catalog", [])
+        .map_err(|e| format!("Katalog temizlenemedi: {e}"))?;
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT OR REPLACE INTO ideasoft_catalog
+                 (slug, id, name, status, stock, canonical, synced_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )
+            .map_err(|e| format!("Katalog yazılamadı: {e}"))?;
+        for it in &items {
+            if it.slug.is_empty() {
+                continue;
+            }
+            let _ = stmt.execute(params![
+                it.slug,
+                it.id,
+                it.name,
+                it.status,
+                it.stock,
+                it.canonical,
+                now
+            ]);
+        }
+    }
+    tx.commit().map_err(|e| format!("Katalog kaydedilemedi: {e}"))?;
+
+    // Önbellekteki EOL listesiyle kaçı eşleşiyor?
+    let matched_eol = match db::get_setting(&conn, "opportunity_json")? {
+        Some(j) => match serde_json::from_str::<OpportunityReport>(&j) {
+            Ok(r) => r
+                .eol
+                .iter()
+                .filter(|e| {
+                    conn.query_row(
+                        "SELECT 1 FROM ideasoft_catalog WHERE slug = ?1",
+                        [&e.slug.to_lowercase()],
+                        |_| Ok(()),
+                    )
+                    .is_ok()
+                })
+                .count(),
+            Err(_) => 0,
+        },
+        None => 0,
+    };
+
+    Ok(CatalogSyncResult {
+        fetched: items.len(),
+        synced_at: now,
+        matched_eol,
+    })
+}
+
+/// EOL sayfanın IdeaSoft'taki karşılığı (katalog senkronu yapılmışsa).
+#[derive(Serialize)]
+pub struct CatalogMatch {
+    pub slug: String,
+    pub id: i64,
+    pub name: String,
+    pub status: i64,
+    pub stock: f64,
+    pub canonical: String,
+}
+
+/// Verilen slug'ları yerel katalog tablosunda arar — ağ çağrısı YOK.
+#[tauri::command]
+pub fn lookup_catalog(
+    state: State<'_, AppState>,
+    slugs: Vec<String>,
+) -> Result<Vec<CatalogMatch>, String> {
+    let conn = state.conn.lock().unwrap();
+    let mut out = Vec::new();
+    for slug in slugs {
+        let s = slug.to_lowercase();
+        let row = conn.query_row(
+            "SELECT slug, id, name, status, stock, COALESCE(canonical,'')
+             FROM ideasoft_catalog WHERE slug = ?1",
+            [&s],
+            |r| {
+                Ok(CatalogMatch {
+                    slug: r.get(0)?,
+                    id: r.get(1)?,
+                    name: r.get(2)?,
+                    status: r.get(3)?,
+                    stock: r.get(4)?,
+                    canonical: r.get(5)?,
+                })
+            },
+        );
+        if let Ok(m) = row {
+            out.push(m);
+        }
+    }
+    Ok(out)
+}
+
 /// Önbellekteki son analiz (API'ye gitmeden). Hiç çalıştırılmadıysa `None`.
 #[tauri::command]
 pub fn get_opportunity_cache(
