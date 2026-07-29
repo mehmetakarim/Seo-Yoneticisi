@@ -13,6 +13,11 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.6.5
+- Düzeltme: canonical ayarlamak için artık katalog senkronu beklemeniz gerekmiyor — uygulama ilgili ürünü saniyeler içinde buluyor
+- Yeni: yapay zekâ uygun halef bulamadığında hedefi kendiniz arayıp seçebilirsiniz; öneri geldiğinde de onay ekranından değiştirebilirsiniz
+- Onay ekranı artık hedef ürünün adını da gösteriyor; hedef mağazanızda bulunamazsa yazma adımına geçilmiyor
+
 ## v0.6.4
 - Yeni: satıştan kalkmış bir sayfanın canonical'ını, halef ürüne doğrudan uygulamadan yazabilirsiniz
 - Yazma öncesi onay ekranı "şu an" ve "olacak" değerini yan yana gösterir; toplu işlem yoktur, her satır tek tek onaylanır
