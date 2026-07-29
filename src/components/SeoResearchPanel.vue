@@ -84,7 +84,7 @@ watch(
 
 <template>
   <Transition name="research">
-    <div v-if="open" class="overlay" @click.self="emit('close')">
+    <div v-if="open" class="panel-overlay" @click.self="emit('close')">
       <aside class="drawer om-scroll" role="dialog" aria-label="SEO Araştır">
         <!-- Başlık -->
         <header class="head">
@@ -272,7 +272,10 @@ watch(
 </template>
 
 <style scoped>
-.overlay {
+/* ⚠️ Bilinçli olarak `.overlay` DEĞİL. Bu bir modal değil, sağa yaslı yan panel:
+   global `.overlay` ortalama (`align-items: center`) ve 24px dolgu getirir, ikisi de
+   burada yanlış olur. Ad ayrı olsun ki bir daha karışmasın. */
+.panel-overlay {
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -378,9 +381,6 @@ watch(
 .run:disabled {
   opacity: 0.7;
   cursor: default;
-}
-.spin {
-  animation: spin 0.8s linear infinite;
 }
 .skeleton {
   display: flex;

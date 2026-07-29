@@ -276,17 +276,9 @@ function removeRow(gi: number, ri: number) {
   color: var(--green);
   border-color: var(--green);
 }
+/* Yalnızca yerel fark; gerisi styles.css'teki `.warn` temelinden gelir. */
 .warn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   flex-wrap: wrap;
-  padding: 8px 10px;
-  font-size: 11.5px;
-  color: var(--warn-text);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
-  border-radius: 8px;
 }
 .preview {
   max-height: 420px;
@@ -467,8 +459,5 @@ function removeRow(gi: number, ri: number) {
 .is-push:disabled {
   opacity: 0.5;
   cursor: default;
-}
-.spin {
-  animation: spin 0.8s linear infinite;
 }
 </style>

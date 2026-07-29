@@ -87,17 +87,9 @@ function thumbState(url: string): { icon: string; color: string; text: string; s
 </template>
 
 <style scoped>
+/* Yalnızca yerel fark; gerisi styles.css'teki `.warn` temelinden gelir. */
 .warn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   margin: 12px 16px 0;
-  padding: 8px 10px;
-  font-size: 11.5px;
-  color: var(--warn-text);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
-  border-radius: 8px;
 }
 .thumbs {
   display: flex;
@@ -163,8 +155,5 @@ function thumbState(url: string): { icon: string; color: string; text: string; s
   background: transparent;
   color: var(--c-faint);
   padding: 0;
-}
-.spin {
-  animation: spin 0.8s linear infinite;
 }
 </style>

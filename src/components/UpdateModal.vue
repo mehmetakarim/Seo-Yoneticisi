@@ -104,17 +104,6 @@ const noteLines = computed<NoteLine[]>(() => {
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: var(--overlay-bg);
-  backdrop-filter: saturate(1.1) blur(3px);
-}
 .modal {
   width: 460px;
   max-width: 100%;
@@ -239,17 +228,6 @@ const noteLines = computed<NoteLine[]>(() => {
   color: var(--c-soft);
   font-variant-numeric: tabular-nums;
 }
-.warn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  font-size: 11.5px;
-  color: var(--warn-text);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
-  border-radius: 8px;
-}
 .foot {
   display: flex;
   align-items: center;
@@ -296,9 +274,6 @@ const noteLines = computed<NoteLine[]>(() => {
 .gen.busy {
   opacity: 0.75;
   cursor: default;
-}
-.spin {
-  animation: spin 0.8s linear infinite;
 }
 
 /* Diğer modallarla aynı animasyon dili */

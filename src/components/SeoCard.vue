@@ -93,16 +93,12 @@ defineProps<{
   gap: 8px;
   flex: none;
 }
+/* Global `.icon-badge` 30px; buradaki 26px BİLİNÇLİ bir sapma değil, Faz 3'te kartların
+   kompakt geometrisiyle birlikte alınmış bir karar. Yalnızca ölçü farkı kalıyor. */
 .icon-badge {
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  background: var(--accent-tint);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
 }
 .head-title {
   font-size: 13.5px;

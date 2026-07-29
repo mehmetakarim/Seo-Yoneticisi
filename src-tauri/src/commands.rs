@@ -499,45 +499,21 @@ pub fn mark_details_done(state: State<'_, AppState>, sku: String) -> Result<Stri
 /// Not: SQLite kilidi await'lerin ötesine taşınmaz (Send güvenliği için bloklarda tutulur).
 #[tauri::command]
 pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<ProductDetail, String> {
-    let (name, brand, category, main_category, target_keyword, research_json, api_key) = {
+    let (parts, target_keyword) = {
         let conn = state.conn.lock().unwrap();
-        let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
-        let row = conn
+        let parts = ctx_parts(&conn, &sku)?;
+        let kw: String = conn
             .query_row(
-                "SELECT p.name, p.brand, p.category, p.main_category,
-                        COALESCE(s.target_keyword,''), s.research_json
-                 FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
-                 WHERE p.sku = ?1",
+                "SELECT COALESCE(target_keyword,'') FROM seo_status WHERE sku = ?1",
                 [&sku],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, Option<String>>(1)?,
-                        r.get::<_, Option<String>>(2)?,
-                        r.get::<_, Option<String>>(3)?,
-                        r.get::<_, String>(4)?,
-                        r.get::<_, Option<String>>(5)?,
-                    ))
-                },
+                |r| r.get(0),
             )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
-                other => format!("Ürün okunamadı: {other}"),
-            })?;
-        (row.0, row.1, row.2, row.3, row.4, row.5, key)
+            .unwrap_or_default();
+        (parts, kw)
     };
 
-    let insights = parse_insights(research_json.as_deref());
-    let kw = target_keyword.trim();
-    let ctx = gemini::ProductContext {
-        name: &name,
-        brand: brand.as_deref(),
-        category: category.as_deref(),
-        main_category: main_category.as_deref(),
-        target_keyword: if kw.is_empty() { None } else { Some(kw) },
-        insights: insights.as_ref().filter(|i| i.has_data()),
-    };
-    let produced = gemini::generate_meta(&api_key, &ctx).await?;
+    let ctx = parts.as_context(Some(&target_keyword), true);
+    let produced = gemini::generate_meta(&parts.key, &ctx).await?;
     let (meta, model) = (produced.value, produced.model);
 
     let conn = state.conn.lock().unwrap();
@@ -574,43 +550,36 @@ pub async fn generate_details(
     state: State<'_, AppState>,
     sku: String,
 ) -> Result<ProductDetail, String> {
-    let (name, brand, category, main_category, details_html, keyword, research_json, gallery, api_key) = {
+    // Ortak bağlam `ctx_parts`'tan; galeri ve mevcut açıklama yalnızca bu komuta özel.
+    let (parts, details_html, keyword, gallery) = {
         let conn = state.conn.lock().unwrap();
-        let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
-        conn.query_row(
-            "SELECT p.name, p.brand, p.category, p.main_category,
-                    COALESCE(s.draft_details, p.details), COALESCE(s.target_keyword,''),
-                    s.research_json, p.img_url, p.picture2, p.picture3, p.picture4
-             FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
-             WHERE p.sku = ?1",
-            [&sku],
-            |r| {
-                let gallery: Vec<String> = [
-                    r.get::<_, Option<String>>(7)?,
-                    r.get::<_, Option<String>>(8)?,
-                    r.get::<_, Option<String>>(9)?,
-                    r.get::<_, Option<String>>(10)?,
-                ]
-                .into_iter()
-                .filter_map(|u| u.filter(|s| !s.trim().is_empty()))
-                .collect();
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, Option<String>>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                    r.get::<_, String>(5)?,
-                    r.get::<_, Option<String>>(6)?,
-                    gallery,
-                ))
-            },
-        )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
-            other => format!("Ürün okunamadı: {other}"),
-        })
-        .map(|t| (t.0, t.1, t.2, t.3, t.4.unwrap_or_default(), t.5, t.6, t.7, key))?
+        let parts = ctx_parts(&conn, &sku)?;
+        let own = conn
+            .query_row(
+                "SELECT COALESCE(s.draft_details, p.details), COALESCE(s.target_keyword,''),
+                        p.img_url, p.picture2, p.picture3, p.picture4
+                 FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
+                 WHERE p.sku = ?1",
+                [&sku],
+                |r| {
+                    let gallery: Vec<String> = [
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<String>>(3)?,
+                        r.get::<_, Option<String>>(4)?,
+                        r.get::<_, Option<String>>(5)?,
+                    ]
+                    .into_iter()
+                    .filter_map(|u| u.filter(|s| !s.trim().is_empty()))
+                    .collect();
+                    Ok((
+                        r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                        r.get::<_, String>(1)?,
+                        gallery,
+                    ))
+                },
+            )
+            .map_err(|e| format!("Ürün okunamadı: {e}"))?;
+        (parts, own.0, own.1, own.2)
     };
 
     // Görsel kapısı: en az 3 galeri görseli (backend savunma; UI de engeller).
@@ -621,15 +590,9 @@ pub async fn generate_details(
         ));
     }
 
-    let insights = parse_insights(research_json.as_deref());
-    let ctx = gemini::ProductContext {
-        name: &name,
-        brand: brand.as_deref(),
-        category: category.as_deref(),
-        main_category: main_category.as_deref(),
-        target_keyword: None, // details zaten `keyword` argümanını kullanır
-        insights: insights.as_ref().filter(|i| i.has_data()),
-    };
+    // `target_keyword: None` — açıklama akışı kelimeyi ayrı `keyword` argümanıyla alıyor.
+    let ctx = parts.as_context(None, true);
+    let api_key = &parts.key;
     // Açıklama akışı:
     //  1) İçerik yok / yeniden yazılabilir metin yok → sıfırdan semantik HTML (galeri görselleri).
     //  2) Düzenli yapı → OPTIMIZE: metin iyileştirilir + yapı semantikleştirilir + anlamlı alt eklenir.
@@ -637,15 +600,15 @@ pub async fn generate_details(
     let (new_html, model) = if details_html.trim().is_empty()
         || !gemini::has_rewritable_content(&details_html)
     {
-        let p = gemini::generate_details_scratch(&api_key, &ctx, &gallery, &keyword).await?;
+        let p = gemini::generate_details_scratch(api_key, &ctx, &gallery, &keyword).await?;
         (p.value, p.model)
     } else {
-        let opt = gemini::optimize_details(&api_key, &ctx, &details_html, &keyword).await?;
+        let opt = gemini::optimize_details(api_key, &ctx, &details_html, &keyword).await?;
         match opt.value {
             Some(html) => (html, opt.model),
             // Yapı beklenmedik → yapı-koruyan eski yol. Modeli o çağrıdan al.
             None => {
-                let p = gemini::generate_details(&api_key, &ctx, &details_html, &keyword).await?;
+                let p = gemini::generate_details(api_key, &ctx, &details_html, &keyword).await?;
                 (p.value, p.model)
             }
         }
@@ -1053,43 +1016,30 @@ pub async fn structure_tech_specs(
     state: State<'_, AppState>,
     sku: String,
 ) -> Result<gemini::TechSpecsResult, String> {
-    let (name, brand, category, main_category, source, prev_specs, prev_hist, api_key) = {
+    let (parts, source, prev_specs, prev_hist) = {
         let conn = state.conn.lock().unwrap();
-        let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
-        conn.query_row(
-            "SELECT p.name, p.brand, p.category, p.main_category, COALESCE(s.tech_source_text,''),
-                    s.tech_specs_json, s.tech_history_json
-             FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
-             WHERE p.sku = ?1",
-            [&sku],
-            |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, Option<String>>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, Option<String>>(5)?,
-                    r.get::<_, Option<String>>(6)?,
-                ))
-            },
-        )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
-            other => format!("Ürün okunamadı: {other}"),
-        })
-        .map(|t| (t.0, t.1, t.2, t.3, t.4, t.5, t.6, key))?
+        let parts = ctx_parts(&conn, &sku)?;
+        let own = conn
+            .query_row(
+                "SELECT COALESCE(tech_source_text,''), tech_specs_json, tech_history_json
+                 FROM seo_status WHERE sku = ?1",
+                [&sku],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .unwrap_or_default();
+        (parts, own.0, own.1, own.2)
     };
 
-    let ctx = gemini::ProductContext {
-        name: &name,
-        brand: brand.as_deref(),
-        category: category.as_deref(),
-        main_category: main_category.as_deref(),
-        target_keyword: None,
-        insights: None, // teknik tablo pazarlama verisi değil — SEO araştırması karıştırılmaz
-    };
-    let produced = gemini::structure_tech_specs(&api_key, &ctx, &source).await?;
+    // `with_insights: false` — teknik tablo pazarlama verisi değil; SEO araştırması
+    // karıştırılırsa modelin olmayan özellik uydurma riski doğar.
+    let ctx = parts.as_context(None, false);
+    let produced = gemini::structure_tech_specs(&parts.key, &ctx, &source).await?;
     let (result, model) = (produced.value, produced.model);
 
     let json = serde_json::to_string(&result.groups)
@@ -1367,6 +1317,86 @@ fn parse_insights(json: Option<&str>) -> Option<SeoInsights> {
         return None;
     }
     serde_json::from_str::<SeoInsights>(s).ok()
+}
+
+/// Üretim komutlarının ortak önsözü: Gemini anahtarı + ürünün bağlam alanları.
+///
+/// Neden var: `generate_meta`, `generate_details` ve `structure_tech_specs` aynı beş alanı
+/// (ad/marka/kategori/ana kategori/araştırma) ve aynı anahtar okumasını **üç kez** kopyalıyordu.
+/// Kopyalanan mantık bu projede zaten bir kez üretimi durdurdu: 2026-07-28'de hata
+/// sınıflandırması dört yere kopyalanmıştı ve dördü de yanlıştı (bkz. `gemini::classify_error`).
+/// Yeni bir grounding alanı eklendiğinde tek yer değişsin diye burada toplandı.
+///
+/// ⚠️ **Sahiplik:** `gemini::ProductContext` ödünç alınmış alanlar (`&str`) tutuyor, bu yüzden
+/// veri burada **sahipli** durur ve `as_context()` çağrı yerinde ödünç verir.
+struct CtxParts {
+    key: String,
+    name: String,
+    brand: Option<String>,
+    category: Option<String>,
+    main_category: Option<String>,
+    insights: Option<SeoInsights>,
+}
+
+impl CtxParts {
+    /// `target_keyword`: yalnızca meta üretiminde dolu — açıklama kendi `keyword` argümanını,
+    /// teknik tablo ise hiç kelime kullanmıyor.
+    ///
+    /// `with_insights`: teknik tabloda bilinçli olarak **kapalı** — o tablo ürünün kendi teknik
+    /// verisinden çıkar, SEO araştırması (pazarlama verisi) karıştırılırsa uydurma özellik riski
+    /// doğar. Karar burada görünür kalsın diye gizli bir varsayılan değil, açık bir parametre.
+    fn as_context<'a>(
+        &'a self,
+        target_keyword: Option<&'a str>,
+        with_insights: bool,
+    ) -> gemini::ProductContext<'a> {
+        gemini::ProductContext {
+            name: &self.name,
+            brand: self.brand.as_deref(),
+            category: self.category.as_deref(),
+            main_category: self.main_category.as_deref(),
+            target_keyword: target_keyword.map(str::trim).filter(|k| !k.is_empty()),
+            insights: if with_insights {
+                self.insights.as_ref().filter(|i| i.has_data())
+            } else {
+                None
+            },
+        }
+    }
+}
+
+/// Bağlam alanlarını tek sorguda okur. Çağıran, ürüne özel ek alanları (galeri, mevcut açıklama,
+/// teknik kaynak metni) **kendi** sorgusuyla alır — ortaklaşan yalnızca bu beş alan.
+fn ctx_parts(conn: &Connection, sku: &str) -> Result<CtxParts, String> {
+    let key = db::get_setting(conn, "gemini_api_key")?.unwrap_or_default();
+    let (name, brand, category, main_category, research_json) = conn
+        .query_row(
+            "SELECT p.name, p.brand, p.category, p.main_category, s.research_json
+             FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
+             WHERE p.sku = ?1",
+            [sku],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("Ürün bulunamadı: {sku}"),
+            other => format!("Ürün okunamadı: {other}"),
+        })?;
+    Ok(CtxParts {
+        key,
+        name,
+        brand,
+        category,
+        main_category,
+        insights: parse_insights(research_json.as_deref()),
+    })
 }
 
 /// Ürün adından tohum kelime türetir (ilk `n` anlamlı sözcük).

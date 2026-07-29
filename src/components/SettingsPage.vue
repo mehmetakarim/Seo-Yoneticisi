@@ -509,7 +509,7 @@ async function doImport() {
             <span class="country-hint">Tema → CSS dosyanıza yapıştırın</span>
           </div>
           <pre v-if="cssOpen" class="css-block om-scroll">{{ TECH_TABLE_CSS }}</pre>
-          <div class="warn">
+          <div class="hint">
             <Icon name="info" :size="13" />
             <b>caption-side: top</b> satırı kritik — Bootstrap başlığı varsayılan olarak tablonun
             <b>altına</b> koyar. Mobilde yatay kaydırma yoktur, tablo 320px'e kadar okunaklıdır.
@@ -551,7 +551,7 @@ async function doImport() {
             </div>
             <button class="ghost" @click="doImport">Dosya seç</button>
           </div>
-          <div class="warn">
+          <div class="hint">
             <Icon name="info" :size="13" />
             İçe aktarma mevcut veritabanının üzerine yazar. Önce dışa aktarım
             almanız önerilir.
@@ -781,13 +781,6 @@ async function doImport() {
   height: 34px;
   border-radius: 8px;
 }
-.warn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
-  color: var(--c-faint);
-}
 
 /* Teknik Tablo CSS bölümü */
 .css-row {
@@ -832,9 +825,6 @@ async function doImport() {
 .ver {
   font-size: 12.5px;
   color: var(--c-mid);
-}
-.spin {
-  animation: spin 0.8s linear infinite;
 }
 .opt-tag {
   font-size: 10px;
@@ -928,15 +918,11 @@ async function doImport() {
   color: var(--c-text);
   letter-spacing: -0.01em;
 }
+/* Global `.icon-badge` 30px; Ayarlar başlıkları bir tık küçük duruyor. Yalnızca ölçü farkı. */
 .icon-badge {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: var(--accent-tint);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 .close {
   width: 30px;
@@ -1019,13 +1005,12 @@ async function doImport() {
 .step-link:hover {
   border-color: var(--accent);
 }
+/* Gerçek uyarı kutusu — arka plan/kenarlık artık global `.warn`dan geliyor,
+   burada yalnızca geometri farkı kalıyor. */
 .guide-warn {
   margin-top: 18px;
   padding: 10px 12px;
   border-radius: 9px;
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
-  color: var(--warn-text);
 }
 
 /* modal animasyonu (Apple hissi: fade + hafif ölçek) */

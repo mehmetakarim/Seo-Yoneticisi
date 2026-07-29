@@ -1114,17 +1114,6 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   align-self: flex-start;
 }
 /* Onay modali — UpdateModal ile aynı dil */
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: var(--overlay-bg);
-  backdrop-filter: saturate(1.1) blur(3px);
-}
 .modal {
   width: 480px;
   max-width: 100%;
@@ -1251,16 +1240,12 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
 }
 /* Uyarı kutusu — UpdateModal'daki ile aynı dil. Canonical'ın yönlendirme
    OLMADIĞINI söylüyor; gözden kaçmaması için vurgulu. */
+/* Yalnızca yerel farklar; gerisi styles.css'teki `.warn` temelinden gelir.
+   `flex-start`: metin birkaç satıra sarıyor, ikon ortada değil ÜSTTE durmalı. */
 .warn {
-  display: flex;
   align-items: flex-start;
-  gap: 8px;
   padding: 9px 11px;
-  font-size: 11.5px;
   line-height: 1.5;
-  color: var(--warn-text);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
   border-radius: 9px;
 }
 .warn svg {
@@ -1336,8 +1321,5 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
 .inv-row .nm {
   -webkit-line-clamp: 1;
   line-clamp: 1;
-}
-.spin {
-  animation: spin 0.8s linear infinite;
 }
 </style>

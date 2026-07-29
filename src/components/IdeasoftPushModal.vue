@@ -114,17 +114,6 @@ const changedCount = computed(() => rows.value.filter(changed).length);
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: var(--overlay-bg);
-  backdrop-filter: saturate(1.1) blur(3px);
-}
 .modal {
   width: 620px;
   max-width: 100%;
@@ -257,17 +246,6 @@ const changedCount = computed(() => rows.value.filter(changed).length);
   align-items: center;
   color: var(--c-faint);
 }
-.warn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  font-size: 11.5px;
-  color: var(--warn-text);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
-  border-radius: 8px;
-}
 .foot {
   position: sticky;
   bottom: 0;
@@ -317,9 +295,6 @@ const changedCount = computed(() => rows.value.filter(changed).length);
 .gen:disabled:not(.busy) {
   opacity: 0.45;
   cursor: not-allowed;
-}
-.spin {
-  animation: spin 0.8s linear infinite;
 }
 
 /* Apple hissi: fade + hafif ölçek (GSC rehber modalıyla aynı dil) */

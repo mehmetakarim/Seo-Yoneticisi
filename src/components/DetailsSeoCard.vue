@@ -394,9 +394,6 @@ function genDetails() {
   opacity: 0.5;
   cursor: default;
 }
-.spin {
-  animation: spin 0.8s linear infinite;
-}
 .preview {
   position: relative;
 }
