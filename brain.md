@@ -11,7 +11,8 @@
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
 v0.5.6 = Fırsatlar sayfası · v0.5.7 = meta/açıklama sürüm geçmişi ·
 v0.5.8 = EOL sayfalar + filtreler · v0.5.9 = boş ekran düzeltmesi ·
-**v0.6.0 = sorgu düzeyi analizler (striking distance + kanibalizasyon)**
+v0.6.0 = sorgu düzeyi analizler ·
+**v0.6.1 = EOL halef önerisi (deterministik aday + AI karar)**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
@@ -82,6 +83,29 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
    - ⚠️ **Tuzak (yaşandı):** "satışta" kümesi ÜRÜNLERDEN kurulmalı. Bir ara `by_url`den
      (GSC sayfaları) kurmuştum — öyle kalsaydı her sayfa satışta sayılır, EOL listesi hep boş
      çıkardı ve kimse fark etmezdi.
+
+0ad. ✅ **EOL HALEF ÖNERİSİ — ölçüm tasarımı değiştirdi (v0.6.1).**
+
+   Önce deterministik eşleştirme denendi (bedava, kotasız) ve **ölçülerek elendi**:
+   - En çok trafik alan 12 EOL sayfanın yalnızca **3'ünde** güçlü eşleşme
+   - Eşik 0.45'te tıklamaların ancak **%23'ü** kapsanıyor
+   - Hatalar TEHLİKELİ: `asus-zenbook-17-fold` için en iyi aday **"Microsoft Windows 11 Pro"**
+     çıktı (yalnızca "windows" sözcüğü örtüştüğü için). Bu yöntemle gidilseydi kullanıcıya
+     güvenle yanlış 301 önerilecekti.
+
+   **Sonuç mimari:** kod ADAY üretir (262 ürün → 5), model KARAR verir.
+   - `opportunity::successor_candidates()` — IDF ağırlıklı sözcük örtüşmesi. Skor bir öneri
+     DEĞİL, sıralama ölçütü; dokümanda ve testte böyle yazılı.
+   - `gemini::suggest_successor()` — ⚠️ **"halef yok" diyebilmesi ZORUNLU.** Her EOL sayfanın
+     karşılığı yok; olmayan halefi varmış gibi göstermek gerçek SEO hasarı. Şema
+     `successor_sku`'yu opsiyonel bırakıyor, prompt "emin değilsen boş bırak" diyor.
+     Ayrıca **uydurma engeli**: dönen SKU adaylar arasında değilse "halef yok" sayılır.
+   - Canlı test (`successor_real`, gemini-3.6-flash) tam bu davranışı sabitliyor:
+     halefi olan vakada doğru ürün, olmayan vakada `None`.
+
+   **Kota tasarımı:** istek üzerine, satır bazında, önbellekli. 1.073 sayfa için toplu çağrı
+   günlük kotayı (flash 20/gün) anında tüketirdi. Trafik tepedeki sayfalarda yoğun.
+   Arayüzde "halef yok" NÖTR renkte — başarısızlık değil, geçerli cevap.
 
 0ab. ✅ **SORGU DÜZEYİ ANALİZLER ÇALIŞIYOR (v0.6.0).**
    `gsc.rs::query_page_stats` — `dimensions:["page","query"]`, `startRow` sayfalama (GSC tek
