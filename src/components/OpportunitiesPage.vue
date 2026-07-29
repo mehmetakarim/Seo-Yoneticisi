@@ -10,6 +10,8 @@ import { computed, onMounted, ref } from "vue";
 import { useStore } from "../store";
 import { workState, type Opportunity, type OpportunityReason, type WorkState } from "../types";
 import Icon from "./Icon.vue";
+import ModalShell from "./ModalShell.vue";
+import AnalysisSection from "./AnalysisSection.vue";
 
 const store = useStore();
 const report = computed(() => store.opportunity);
@@ -318,22 +320,17 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
     </div>
 
     <!-- Gerileme: düşüşteki sayfa, hiç yükselmemiş olandan daha acil -->
-    <div v-if="report?.decay?.length" class="card sec">
-      <div class="inv-head">
-        <div>
-          <div class="inv-title">
-            Düşüşte olanlar ({{ report.decay.length }})
-            <span class="eol-sum">
-              {{ Math.round(report.decay.reduce((a, d) => a + d.clicks_lost, 0)) }} tıklama kaybı
-            </span>
-          </div>
-          <div class="inv-sub">
-            Önceki {{ report.days }} güne göre gerileyen sayfalar. Burada bir şey bozulmuş —
-            müdahale edilmezse kayıp büyür. Konum değişmeden tıklama düştüyse sorun sıralamada
-            değil, arama sonucundaki görünümde olabilir.
-          </div>
-        </div>
-      </div>
+    <AnalysisSection
+      v-if="report?.decay?.length"
+      title="Düşüşte olanlar"
+      :count="report.decay.length"
+      :summary="`${Math.round(report.decay.reduce((a, d) => a + d.clicks_lost, 0))} tıklama kaybı`"
+    >
+      <template #note>
+        Önceki {{ report.days }} güne göre gerileyen sayfalar. Burada bir şey bozulmuş —
+        müdahale edilmezse kayıp büyür. Konum değişmeden tıklama düştüyse sorun sıralamada
+        değil, arama sonucundaki görünümde olabilir.
+      </template>
       <table class="tbl">
         <thead>
           <tr>
@@ -368,21 +365,18 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
           Sonraki 30'u göster ({{ report.decay.length - decayLimit }} kaldı)
         </a>
       </div>
-    </div>
+    </AnalysisSection>
 
     <!-- Striking distance: hangi SORGUDA kaçıncı sıradasınız — "ne yazmalıyım" katmanı -->
-    <div v-if="report?.striking?.length" class="card sec">
-      <div class="inv-head">
-        <div>
-          <div class="inv-title">
-            Yükselmeye yakın sorgular ({{ report.striking.length }})
-          </div>
-          <div class="inv-sub">
-            Bu aramalarda 4–20. sıradasınız — küçük bir iyileştirme ilk sıralara taşıyabilir.
-            Sorgu, o ürün için <b>hedef kelime adayıdır</b>: satıra tıklayıp ürüne gidin.
-          </div>
-        </div>
-      </div>
+    <AnalysisSection
+      v-if="report?.striking?.length"
+      title="Yükselmeye yakın sorgular"
+      :count="report.striking.length"
+    >
+      <template #note>
+        Bu aramalarda 4–20. sıradasınız — küçük bir iyileştirme ilk sıralara taşıyabilir.
+        Sorgu, o ürün için <b>hedef kelime adayıdır</b>: satıra tıklayıp ürüne gidin.
+      </template>
       <table class="tbl">
         <thead>
           <tr>
@@ -416,22 +410,19 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
           Sonraki 40'ı göster ({{ report.striking.length - sdLimit }} kaldı)
         </a>
       </div>
-    </div>
+    </AnalysisSection>
 
     <!-- Kanibalizasyon: kendi sayfalarımız birbiriyle yarışıyor -->
-    <div v-if="report?.cannibalization?.length" class="card sec">
-      <div class="inv-head">
-        <div>
-          <div class="inv-title">
-            Birbiriyle yarışan sayfalar ({{ report.cannibalization.length }})
-          </div>
-          <div class="inv-sub">
-            Aynı aramada birden çok ürün sayfanız görünüyor ve hiçbiri öne çıkamıyor.
-            <b>Otomatik birleştirme önerilmez</b> — önce hangi sayfanın o aramayı sahiplenmesi
-            gerektiğine karar verin, diğerlerini farklılaştırın.
-          </div>
-        </div>
-      </div>
+    <AnalysisSection
+      v-if="report?.cannibalization?.length"
+      title="Birbiriyle yarışan sayfalar"
+      :count="report.cannibalization.length"
+    >
+      <template #note>
+        Aynı aramada birden çok ürün sayfanız görünüyor ve hiçbiri öne çıkamıyor.
+        <b>Otomatik birleştirme önerilmez</b> — önce hangi sayfanın o aramayı sahiplenmesi
+        gerektiğine karar verin, diğerlerini farklılaştırın.
+      </template>
       <div class="cann-list">
         <div v-for="c in report.cannibalization" :key="c.query" class="cann">
           <div class="cann-q">
@@ -452,23 +443,22 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
           </div>
         </div>
       </div>
-    </div>
+    </AnalysisSection>
 
     <!-- Satışta olmayan ama trafik alan sayfalar. Ölçüm: ürün trafiğinin %69'u burada. -->
-    <div v-if="report?.eol?.length" class="card eol">
-      <div class="inv-head">
-        <div>
-          <div class="inv-title">
-            Satışta olmayan ama trafik alan sayfalar ({{ report.eol.length }})
-            <span class="eol-sum">{{ Math.round(report.eol_clicks) }} tıklama</span>
-          </div>
-          <div class="inv-sub">
-            Bu adresler kataloğunuzda yok ama Google'da hâlâ sıralanıyor — ziyaretçi geliyor,
-            ürünü satın alamıyor. Çözüm genelde güncel nesle <b>301 yönlendirme</b>; yönlendirmeyi
-            IdeaSoft panelinden tanımlamanız gerekir, uygulama bunu yapamaz.
-            Bazı sayfaları bilinçli tutuyor olabilirsiniz — liste öneridir, karar sizin.
-          </div>
-        </div>
+    <AnalysisSection
+      v-if="report?.eol?.length"
+      title="Satışta olmayan ama trafik alan sayfalar"
+      :count="report.eol.length"
+      :summary="`${Math.round(report.eol_clicks)} tıklama`"
+    >
+      <template #note>
+        Bu adresler kataloğunuzda yok ama Google'da hâlâ sıralanıyor — ziyaretçi geliyor,
+        ürünü satın alamıyor. Çözüm genelde güncel nesle <b>301 yönlendirme</b>; yönlendirmeyi
+        IdeaSoft panelinden tanımlamanız gerekir, uygulama bunu yapamaz.
+        Bazı sayfaları bilinçli tutuyor olabilirsiniz — liste öneridir, karar sizin.
+      </template>
+      <template #action>
         <button
           class="succ-btn cat-sync"
           :disabled="store.catalogBusy"
@@ -482,7 +472,7 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
           />
           {{ store.catalogBusy ? "Katalog alınıyor…" : "Katalogla eşleştir" }}
         </button>
-      </div>
+      </template>
       <table class="tbl">
         <thead>
           <tr>
@@ -545,19 +535,18 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
           Sonraki 50'yi göster ({{ report.eol.length - eolLimit }} kaldı)
         </a>
       </div>
-    </div>
+    </AnalysisSection>
 
     <!-- Google'da hiç görünmeyenler: farklı bir iş, bilinçli olarak ayrı -->
-    <div v-if="report?.invisible?.length" class="card inv">
-      <div class="inv-head">
-        <div>
-          <div class="inv-title">Google'da görünmeyenler ({{ report.invisible.length }})</div>
-          <div class="inv-sub">
-            Son {{ report.days }} günde hiç gösterim almamışlar. Bu bir meta sorunu değil —
-            indeksleme veya görünürlük işi; içerik üretmek tek başına çözmez.
-          </div>
-        </div>
-      </div>
+    <AnalysisSection
+      v-if="report?.invisible?.length"
+      title="Google'da görünmeyenler"
+      :count="report.invisible.length"
+    >
+      <template #note>
+        Son {{ report.days }} günde hiç gösterim almamışlar. Bu bir meta sorunu değil —
+        indeksleme veya görünürlük işi; içerik üretmek tek başına çözmez.
+      </template>
       <div class="inv-list">
         <div
           v-for="p in report.invisible"
@@ -569,131 +558,123 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
           <span class="sku">{{ p.sku }}</span>
         </div>
       </div>
-    </div>
+    </AnalysisSection>
 
     <!-- Hedef seçme modali: halef önerisi boş çıktığında ya da öneri değiştirilmek
          istendiğinde. Yine TEK satır için — toplu seçim yok. -->
-    <Transition name="upd">
-      <div v-if="store.canonicalPicker" class="overlay" @click.self="store.cancelCanonicalPicker()">
-        <div class="modal" role="dialog" aria-label="Canonical hedefi seç">
-          <header class="m-head">
-            <div class="m-title">Canonical hedefini seçin</div>
-            <div class="m-sub">{{ store.canonicalPicker.eolSlug }}</div>
-          </header>
-          <div class="m-body">
-            <div class="pick-row">
-              <input
-                v-model="store.canonicalQuery"
-                class="pick-in"
-                type="text"
-                placeholder="Ürün adı yazın (en az 3 harf)"
-                @keyup.enter="store.searchCanonicalTarget()"
-              />
-              <button
-                class="succ-btn"
-                :disabled="store.canonicalSearching || store.canonicalQuery.trim().length < 3"
-                @click="store.searchCanonicalTarget()"
-              >
-                <Icon
-                  :name="store.canonicalSearching ? 'loader' : 'search'"
-                  :size="11"
-                  :class="{ spin: store.canonicalSearching }"
-                />
-                {{ store.canonicalSearching ? "Aranıyor…" : "Ara" }}
-              </button>
-            </div>
-            <!-- Arama IdeaSoft'ta ÜRÜN ADINA göre çalışıyor (ölçüldü), slug'a göre değil. -->
-            <div class="pick-hint">
-              Arama mağazanızdaki ürün adlarında yapılır — feed'de olmayan ürünler de bulunur.
-            </div>
-            <div v-if="store.canonicalResults.length" class="pick-list">
-              <div
-                v-for="r in store.canonicalResults"
-                :key="r.slug"
-                class="pick-item"
-                @click="store.pickCanonicalTarget(r.slug)"
-              >
-                <span class="pi-name">{{ r.name }}</span>
-                <span class="pi-slug">{{ r.slug }}</span>
-              </div>
-            </div>
-            <div
-              v-else-if="!store.canonicalSearching && store.canonicalQuery.trim().length >= 3"
-              class="pick-hint"
-            >
-              Sonuç yok. Daha az sözcükle deneyin — arama tüm sözcüklerin geçmesini ister.
-            </div>
-          </div>
-          <footer class="m-foot">
-            <button class="ghost" :disabled="store.canonicalSearching" @click="store.cancelCanonicalPicker()">
-              Vazgeç
-            </button>
-          </footer>
+    <ModalShell
+      :open="!!store.canonicalPicker"
+      label="Canonical hedefi seç"
+      title="Canonical hedefini seçin"
+      :sub="store.canonicalPicker?.eolSlug"
+      :closable="!store.canonicalSearching"
+      @close="store.cancelCanonicalPicker()"
+    >
+      <div class="pick-row">
+        <input
+          v-model="store.canonicalQuery"
+          class="pick-in"
+          type="text"
+          placeholder="Ürün adı yazın (en az 3 harf)"
+          @keyup.enter="store.searchCanonicalTarget()"
+        />
+        <button
+          class="succ-btn"
+          :disabled="store.canonicalSearching || store.canonicalQuery.trim().length < 3"
+          @click="store.searchCanonicalTarget()"
+        >
+          <Icon
+            :name="store.canonicalSearching ? 'loader' : 'search'"
+            :size="11"
+            :class="{ spin: store.canonicalSearching }"
+          />
+          {{ store.canonicalSearching ? "Aranıyor…" : "Ara" }}
+        </button>
+      </div>
+      <!-- Arama IdeaSoft'ta ÜRÜN ADINA göre çalışıyor (ölçüldü), slug'a göre değil. -->
+      <div class="pick-hint">
+        Arama mağazanızdaki ürün adlarında yapılır — feed'de olmayan ürünler de bulunur.
+      </div>
+      <div v-if="store.canonicalResults.length" class="pick-list">
+        <div
+          v-for="r in store.canonicalResults"
+          :key="r.slug"
+          class="pick-item"
+          @click="store.pickCanonicalTarget(r.slug)"
+        >
+          <span class="pi-name">{{ r.name }}</span>
+          <span class="pi-slug">{{ r.slug }}</span>
         </div>
       </div>
-    </Transition>
+      <div
+        v-else-if="!store.canonicalSearching && store.canonicalQuery.trim().length >= 3"
+        class="pick-hint"
+      >
+        Sonuç yok. Daha az sözcükle deneyin — arama tüm sözcüklerin geçmesini ister.
+      </div>
+
+      <template #footer>
+        <button class="ghost" :disabled="store.canonicalSearching" @click="store.cancelCanonicalPicker()">
+          Vazgeç
+        </button>
+      </template>
+    </ModalShell>
 
     <!-- Canonical onay modali. Faz 9 gönderim modalinin deseni: önce fark, sonra onay. -->
-    <Transition name="upd">
-      <div
-        v-if="store.canonicalPending"
-        class="overlay"
-        @click.self="store.cancelCanonical()"
-      >
-        <div class="modal" role="dialog" aria-label="Canonical onayı">
-          <header class="m-head">
-            <div class="m-title">Canonical ayarlanacak</div>
-            <div class="m-sub">{{ store.canonicalPending.product_name }}</div>
-          </header>
-          <div class="m-body">
-            <div class="diff">
-              <div class="d-row">
-                <span class="d-lab">Şu an</span>
-                <span class="d-val muted">{{ store.canonicalPending.current || "tanımlı değil" }}</span>
-              </div>
-              <div class="d-row hi">
-                <span class="d-lab">Olacak</span>
-                <span class="d-val">{{ store.canonicalPending.proposed }}</span>
-              </div>
-              <!-- Hedefin ADI: slug'a bakarak yanlış ürünü onaylamak kolay. Bu satır
-                   yazmadan önce doğru sayfayı seçtiğinizi görmenizi sağlıyor. -->
-              <div class="d-row">
-                <span class="d-lab">Hedef</span>
-                <span class="d-val">
-                  {{ store.canonicalPending.target_name }}
-                  <a class="link chg" @click="store.changeCanonicalTarget()">değiştir</a>
-                </span>
-              </div>
-            </div>
-            <div class="warn">
-              <Icon name="info" :size="13" />
-              <span>
-                <b>Bu bir yönlendirme değildir.</b> Ziyaretçi yine eski sayfaya düşer; yalnızca
-                Google'a "asıl sayfa şu" sinyali gider. Gerçek 301 için IdeaSoft panelini
-                kullanmanız gerekir.
-                <template v-if="store.canonicalPending.will_create">
-                  Bu ürünün SEO kaydı yok, oluşturulacak.
-                </template>
-              </span>
-            </div>
-          </div>
-          <footer class="m-foot">
-            <button class="ghost" :disabled="store.canonicalBusy" @click="store.cancelCanonical()">
-              Vazgeç
-            </button>
-            <div style="flex:1"></div>
-            <button class="run" :disabled="store.canonicalBusy" @click="store.confirmCanonical()">
-              <Icon
-                :name="store.canonicalBusy ? 'loader' : 'check'"
-                :size="14"
-                :class="{ spin: store.canonicalBusy }"
-              />
-              {{ store.canonicalBusy ? "Yazılıyor…" : "Onaylıyorum, yaz" }}
-            </button>
-          </footer>
+    <ModalShell
+      :open="!!store.canonicalPending"
+      label="Canonical onayı"
+      title="Canonical ayarlanacak"
+      :sub="store.canonicalPending?.product_name"
+      :closable="!store.canonicalBusy"
+      @close="store.cancelCanonical()"
+    >
+      <div class="diff">
+        <div class="d-row">
+          <span class="d-lab">Şu an</span>
+          <span class="d-val muted">{{ store.canonicalPending?.current || "tanımlı değil" }}</span>
+        </div>
+        <div class="d-row hi">
+          <span class="d-lab">Olacak</span>
+          <span class="d-val">{{ store.canonicalPending?.proposed }}</span>
+        </div>
+        <!-- Hedefin ADI: slug'a bakarak yanlış ürünü onaylamak kolay. Bu satır
+             yazmadan önce doğru sayfayı seçtiğinizi görmenizi sağlıyor. -->
+        <div class="d-row">
+          <span class="d-lab">Hedef</span>
+          <span class="d-val">
+            {{ store.canonicalPending?.target_name }}
+            <a class="link chg" @click="store.changeCanonicalTarget()">değiştir</a>
+          </span>
         </div>
       </div>
-    </Transition>
+      <div class="warn">
+        <Icon name="info" :size="13" />
+        <span>
+          <b>Bu bir yönlendirme değildir.</b> Ziyaretçi yine eski sayfaya düşer; yalnızca
+          Google'a "asıl sayfa şu" sinyali gider. Gerçek 301 için IdeaSoft panelini
+          kullanmanız gerekir.
+          <template v-if="store.canonicalPending?.will_create">
+            Bu ürünün SEO kaydı yok, oluşturulacak.
+          </template>
+        </span>
+      </div>
+
+      <template #footer>
+        <button class="ghost" :disabled="store.canonicalBusy" @click="store.cancelCanonical()">
+          Vazgeç
+        </button>
+        <div style="flex:1"></div>
+        <button class="run" :disabled="store.canonicalBusy" @click="store.confirmCanonical()">
+          <Icon
+            :name="store.canonicalBusy ? 'loader' : 'check'"
+            :size="14"
+            :class="{ spin: store.canonicalBusy }"
+          />
+          {{ store.canonicalBusy ? "Yazılıyor…" : "Onaylıyorum, yaz" }}
+        </button>
+      </template>
+    </ModalShell>
   </div>
 </template>
 
@@ -799,30 +780,6 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   background: var(--c-card);
   overflow: hidden;
 }
-.tbl {
-  width: 100%;
-  border-collapse: collapse;
-}
-.tbl th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--c-input);
-  border-bottom: 1px solid var(--c-border-soft);
-  padding: 9px 12px;
-  font-size: 11px;
-  font-weight: 620;
-  color: var(--c-soft);
-  text-align: left;
-  white-space: nowrap;
-}
-.tbl td {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--c-border-soft);
-  font-size: 12.5px;
-  color: var(--c-text);
-  vertical-align: middle;
-}
 .tbl tr:last-child td {
   border-bottom: 0;
 }
@@ -832,30 +789,12 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
 .row:hover td {
   background: var(--c-hover);
 }
-.c-name {
-  width: 36%;
-}
 .c-work {
   white-space: nowrap;
-}
-.c-num {
-  text-align: right;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 .c-reason {
   text-align: right;
   white-space: nowrap;
-}
-.nm {
-  font-weight: 560;
-  line-height: 1.35;
-  /* uzun ürün adları satırı şişirmesin */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 .sku {
   font-size: 10.5px;
@@ -863,10 +802,6 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   margin-top: 1px;
 }
 /* Kaçırılan tıklama sıralama ölçütü — vurgulu */
-.miss {
-  font-weight: 660;
-  color: var(--c-text);
-}
 .status {
   display: inline-flex;
   align-items: center;
@@ -979,9 +914,6 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   font-weight: 560;
 }
 
-.sec {
-  margin-top: 18px;
-}
 /* Kanibalizasyon — sorgu başlığı + altında yarışan sayfalar */
 .cann-list {
   padding: 4px 0;
@@ -1040,16 +972,6 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
 /* Satışta olmayan ama trafik alan sayfalar */
 .eol {
   margin-top: 18px;
-}
-.eol-sum {
-  margin-left: 8px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--warn-bg);
-  color: var(--warn-text);
-  font-size: 11px;
-  font-weight: 640;
-  font-variant-numeric: tabular-nums;
 }
 .succ {
   margin-top: 5px;
@@ -1114,34 +1036,6 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   align-self: flex-start;
 }
 /* Onay modali — UpdateModal ile aynı dil */
-.modal {
-  width: 480px;
-  max-width: 100%;
-  background: var(--c-card);
-  border: 1px solid var(--c-border);
-  border-radius: 16px;
-  box-shadow: 0 24px 60px var(--heavy-shadow);
-}
-.m-head {
-  padding: 15px 18px;
-  border-bottom: 1px solid var(--c-border-soft);
-}
-.m-title {
-  font-size: 14.5px;
-  font-weight: 650;
-  color: var(--c-text);
-}
-.m-sub {
-  font-size: 11.5px;
-  color: var(--c-soft);
-  margin-top: 2px;
-}
-.m-body {
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
 .diff {
   border: 1px solid var(--c-border-soft);
   border-radius: 9px;
@@ -1252,13 +1146,6 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   flex: none;
   margin-top: 2px;
 }
-.m-foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 18px;
-  border-top: 1px solid var(--c-border-soft);
-}
 .ghost {
   height: 36px;
   padding: 0 14px;
@@ -1270,8 +1157,6 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   font-weight: 560;
   cursor: pointer;
 }
-.upd-enter-active, .upd-leave-active { transition: opacity .18s cubic-bezier(.32,.72,0,1); }
-.upd-enter-from, .upd-leave-to { opacity: 0; }
 
 .eol-more {
   padding: 10px 16px;
@@ -1282,22 +1167,6 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
 /* Görünmeyenler */
 .inv {
   margin-top: 18px;
-}
-.inv-head {
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--c-border-soft);
-}
-.inv-title {
-  font-size: 13.5px;
-  font-weight: 640;
-  color: var(--c-text);
-}
-.inv-sub {
-  font-size: 11.5px;
-  color: var(--c-soft);
-  margin-top: 2px;
-  line-height: 1.5;
-  max-width: 640px;
 }
 .inv-list {
   max-height: 260px;

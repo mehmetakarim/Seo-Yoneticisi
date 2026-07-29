@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
+import ModalShell from "./ModalShell.vue";
 
 const store = useStore();
 const info = computed(() => store.updateInfo);
@@ -41,127 +42,55 @@ const noteLines = computed<NoteLine[]>(() => {
 </script>
 
 <template>
-  <Transition name="upd">
-    <div v-if="info" class="overlay" @click.self="!store.updating && store.dismissUpdate()">
-      <div class="modal" role="dialog" aria-label="Güncelleme">
-        <header class="head">
-          <div class="h-left">
-            <div class="icon-badge"><Icon name="download" :size="15" /></div>
-            <div>
-              <div class="h-title">Yeni sürüm hazır</div>
-              <div class="h-sub">
-                v{{ store.appVersion }} → <b>v{{ info.version }}</b>
-              </div>
-            </div>
-          </div>
-          <button
-            v-if="!store.updating"
-            class="close"
-            title="Kapat"
-            @click="store.dismissUpdate()"
-          >
-            <Icon name="x" :size="16" :stroke-width="2.2" />
-          </button>
-        </header>
+  <!-- `closable`: indirme sürerken kapanmamalı — kilit iskelette değil BURADA, çünkü
+       "ne zaman kapanamaz" her modalde farklı bir koşul. -->
+  <ModalShell
+    :open="!!info"
+    label="Güncelleme"
+    icon="download"
+    title="Yeni sürüm hazır"
+    :closable="!store.updating"
+    :width="460"
+    @close="store.dismissUpdate()"
+  >
+    <template #sub>v{{ store.appVersion }} → <b>v{{ info?.version }}</b></template>
 
-        <div class="body">
-          <div v-if="noteLines.length" class="notes om-scroll">
-            <p v-for="(l, i) in noteLines" :key="i" :class="{ bullet: l.bullet }">{{ l.text }}</p>
-          </div>
-          <div v-else class="notes muted">Bu sürüm için not girilmemiş.</div>
-
-          <!-- İndirme durumu -->
-          <div v-if="store.updating" class="dl">
-            <div class="bar">
-              <div class="fill" :class="{ indet: !store.updateTotal }" :style="store.updateTotal ? { width: pct + '%' } : {}"></div>
-            </div>
-            <span class="dl-text">
-              {{ store.updateTotal
-                ? `İndiriliyor… %${pct} (${mb(store.updateDownloaded)} / ${mb(store.updateTotal)} MB)`
-                : "İndiriliyor…" }}
-            </span>
-          </div>
-
-          <div class="warn">
-            <Icon name="info" :size="13" />
-            Güncelleme kurulduktan sonra uygulama yeniden başlatılır. Verileriniz korunur.
-          </div>
-        </div>
-
-        <footer class="foot">
-          <button class="ghost" :disabled="store.updating" @click="store.dismissUpdate()">
-            Sonra
-          </button>
-          <div style="flex:1"></div>
-          <button class="gen" :class="{ busy: store.updating }" :disabled="store.updating" @click="store.runUpdate()">
-            <Icon :name="store.updating ? 'loader' : 'download'" :size="15" :class="{ spin: store.updating }" />
-            {{ store.updating ? "Güncelleniyor…" : "Şimdi güncelle" }}
-          </button>
-        </footer>
-      </div>
+    <div v-if="noteLines.length" class="notes om-scroll">
+      <p v-for="(l, i) in noteLines" :key="i" :class="{ bullet: l.bullet }">{{ l.text }}</p>
     </div>
-  </Transition>
+    <div v-else class="notes muted">Bu sürüm için not girilmemiş.</div>
+
+    <!-- İndirme durumu -->
+    <div v-if="store.updating" class="dl">
+      <div class="bar">
+        <div class="fill" :class="{ indet: !store.updateTotal }" :style="store.updateTotal ? { width: pct + '%' } : {}"></div>
+      </div>
+      <span class="dl-text">
+        {{ store.updateTotal
+          ? `İndiriliyor… %${pct} (${mb(store.updateDownloaded)} / ${mb(store.updateTotal)} MB)`
+          : "İndiriliyor…" }}
+      </span>
+    </div>
+
+    <div class="warn">
+      <Icon name="info" :size="13" />
+      Güncelleme kurulduktan sonra uygulama yeniden başlatılır. Verileriniz korunur.
+    </div>
+
+    <template #footer>
+      <button class="ghost" :disabled="store.updating" @click="store.dismissUpdate()">
+        Sonra
+      </button>
+      <div style="flex:1"></div>
+      <button class="gen" :class="{ busy: store.updating }" :disabled="store.updating" @click="store.runUpdate()">
+        <Icon :name="store.updating ? 'loader' : 'download'" :size="15" :class="{ spin: store.updating }" />
+        {{ store.updating ? "Güncelleniyor…" : "Şimdi güncelle" }}
+      </button>
+    </template>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal {
-  width: 460px;
-  max-width: 100%;
-  background: var(--c-card);
-  border: 1px solid var(--c-border);
-  border-radius: 16px;
-  box-shadow: 0 24px 60px var(--heavy-shadow);
-  display: flex;
-  flex-direction: column;
-}
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 15px 18px;
-  border-bottom: 1px solid var(--c-border-soft);
-}
-.h-left {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
-.h-title {
-  font-size: 14.5px;
-  font-weight: 650;
-  color: var(--c-text);
-  letter-spacing: -0.01em;
-}
-.h-sub {
-  font-size: 11.5px;
-  color: var(--c-soft);
-  margin-top: 1px;
-}
-.h-sub b {
-  color: var(--accent);
-}
-.close {
-  width: 30px;
-  height: 30px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--c-soft);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.close:hover {
-  background: var(--c-hover);
-  color: var(--c-text);
-}
-.body {
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
 .notes {
   max-height: 200px;
   overflow-y: auto;
@@ -228,13 +157,6 @@ const noteLines = computed<NoteLine[]>(() => {
   color: var(--c-soft);
   font-variant-numeric: tabular-nums;
 }
-.foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 18px;
-  border-top: 1px solid var(--c-border-soft);
-}
 .ghost {
   height: 38px;
   padding: 0 14px;
@@ -275,35 +197,6 @@ const noteLines = computed<NoteLine[]>(() => {
   opacity: 0.75;
   cursor: default;
 }
-
-/* Diğer modallarla aynı animasyon dili */
-.upd-enter-active,
-.upd-leave-active {
-  transition: opacity 0.24s ease;
-}
-.upd-enter-from,
-.upd-leave-to {
-  opacity: 0;
-}
-.upd-enter-active .modal,
-.upd-leave-active .modal {
-  transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
-}
-.upd-enter-from .modal,
-.upd-leave-to .modal {
-  transform: scale(0.96) translateY(8px);
-}
-@media (prefers-reduced-motion: reduce) {
-  .upd-enter-active .modal,
-  .upd-leave-active .modal {
-    transition: none;
-  }
-  .upd-enter-from .modal,
-  .upd-leave-to .modal {
-    transform: none;
-  }
-  .fill.indet {
-    animation: none;
-  }
-}
+/* Modal iskeleti ve animasyonu artık ModalShell.vue'da — burada yalnızca bu modale
+   özgü içerik stilleri kalıyor. */
 </style>
