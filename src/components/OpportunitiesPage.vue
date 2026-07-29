@@ -25,6 +25,8 @@ const sliceFilter = ref<string>("");
 const eolLimit = ref(25);
 
 const all = computed<Opportunity[]>(() => report.value?.opportunities ?? []);
+// Not: eski önbellekte olmayan alanlara karşı şablonda da `?.` kullanılıyor —
+// asıl koruma backend tarafında (serde default), bu ikinci savunma hattı.
 
 const filtered = computed(() =>
   all.value.filter((o) => {
@@ -133,7 +135,7 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
     <div class="top">
       <div class="sum">
         <template v-if="report">
-          <b>{{ report.opportunities.length }}</b> fırsat ·
+          <b>{{ all.length }}</b> fırsat ·
           yaklaşık <b>{{ totalMissed }}</b> tıklama kaçırılıyor
           <span class="dim">
             · son {{ report.days }} gün · {{ report.matched }}/{{ report.total_products }} ürün
@@ -304,7 +306,7 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
     </div>
 
     <!-- Satışta olmayan ama trafik alan sayfalar. Ölçüm: ürün trafiğinin %69'u burada. -->
-    <div v-if="report?.eol.length" class="card eol">
+    <div v-if="report?.eol?.length" class="card eol">
       <div class="inv-head">
         <div>
           <div class="inv-title">
@@ -345,7 +347,7 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
     </div>
 
     <!-- Google'da hiç görünmeyenler: farklı bir iş, bilinçli olarak ayrı -->
-    <div v-if="report?.invisible.length" class="card inv">
+    <div v-if="report?.invisible?.length" class="card inv">
       <div class="inv-head">
         <div>
           <div class="inv-title">Google'da görünmeyenler ({{ report.invisible.length }})</div>

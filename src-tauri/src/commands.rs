@@ -1530,14 +1530,22 @@ pub async fn research_seo(
 
 // ---- Fırsat analizi: GSC verisiyle "önce hangi ürüne bakmalıyım?" ----
 
-#[derive(Serialize)]
+#[derive(Serialize, serde::Deserialize)]
 pub struct InvisibleProduct {
     pub sku: String,
     pub name: String,
     pub url: String,
 }
 
-#[derive(Serialize)]
+/// ⚠️ **Deserialize + `serde(default)` zorunlu.** Bu yapı önbelleğe (`opportunity_json`)
+/// yazılıyor ve sonraki sürümlerde yeni alanlar ekleniyor. Önbellek eski sürümden kalmışsa
+/// yeni alanlar JSON'da YOKTUR; varsayılan verilmezse ya çözümleme başarısız olur ya da
+/// ön yüze eksik nesne gider ve arayüz çöker.
+///
+/// v0.5.8'de tam bu oldu: `eol` alanı eklendi, eski önbellekte yoktu, ön yüz
+/// `report.eol.length` deyince Fırsatlar ekranı bomboş açıldı. Alan eklerken burayı unutma.
+#[derive(Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct OpportunityReport {
     pub analyzed_at: String,
     pub days: i64,
@@ -1554,6 +1562,21 @@ pub struct OpportunityReport {
     pub eol: Vec<opportunity::EolPage>,
     /// EOL sayfaların toplam tıklaması — fırsat listesiyle kıyaslanabilsin diye.
     pub eol_clicks: f64,
+}
+
+impl Default for OpportunityReport {
+    fn default() -> Self {
+        Self {
+            analyzed_at: String::new(),
+            days: 0,
+            opportunities: Vec::new(),
+            invisible: Vec::new(),
+            total_products: 0,
+            matched: 0,
+            eol: Vec::new(),
+            eol_clicks: 0.0,
+        }
+    }
 }
 
 /// GSC'nin döndürdüğü URL ile feed'deki URL arasındaki zararsız farkları törpüler
@@ -1698,10 +1721,15 @@ pub async fn analyze_opportunities(
 
 /// Önbellekteki son analiz (API'ye gitmeden). Hiç çalıştırılmadıysa `None`.
 #[tauri::command]
-pub fn get_opportunity_cache(state: State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
+pub fn get_opportunity_cache(
+    state: State<'_, AppState>,
+) -> Result<Option<OpportunityReport>, String> {
     let conn = state.conn.lock().unwrap();
     let raw = db::get_setting(&conn, "opportunity_json")?;
-    Ok(raw.and_then(|j| serde_json::from_str(&j).ok()))
+    // Ham `serde_json::Value` DÖNDÜRME: eski sürümden kalan önbellekte yeni alanlar
+    // bulunmaz ve ön yüz eksik nesneyle çöker (v0.5.8'de yaşandı). Yapıdan geçirince
+    // `serde(default)` devreye girer, ön yüz her zaman tam bir nesne alır.
+    Ok(raw.and_then(|j| serde_json::from_str::<OpportunityReport>(&j).ok()))
 }
 
 #[tauri::command]
@@ -2035,6 +2063,26 @@ mod tests {
             }],
             source: format!("kaynak {at}"),
         }
+    }
+
+    /// Regresyon (v0.5.8): rapora `eol` alanı eklendi, eski önbellekte yoktu ve ön yüz
+    /// `report.eol.length` deyince Fırsatlar ekranı bomboş açıldı. Önbellek artık yapıdan
+    /// geçiyor; eksik alanlar varsayılanla doluyor. Rapora alan eklerken bu test korur.
+    #[test]
+    fn old_opportunity_cache_still_parses() {
+        // v0.5.6 biçimi: eol / eol_clicks YOK, fırsat satırında bağlam alanları YOK
+        let old = r#"{
+            "analyzed_at":"2026-07-28T10:00:00","days":90,"total_products":262,"matched":260,
+            "invisible":[],
+            "opportunities":[{"sku":"X","name":"Ürün","url":"u","clicks":1.0,"impressions":100.0,
+                              "ctr":0.01,"position":8.0,"missed_clicks":2.3,"reason":"low_ctr"}]
+        }"#;
+        let r: OpportunityReport =
+            serde_json::from_str(old).expect("eski önbellek çözümlenebilmeli");
+        assert_eq!(r.opportunities.len(), 1);
+        assert!(r.eol.is_empty(), "eksik alan varsayılana düşmeli, çözümleme kırılmamalı");
+        assert_eq!(r.eol_clicks, 0.0);
+        assert_eq!(r.matched, 260);
     }
 
     #[test]
