@@ -1566,6 +1566,8 @@ pub struct OpportunityReport {
     pub striking: Vec<opportunity::QueryOpportunity>,
     /// Aynı sorguda yarışan kendi sayfalarımız. Tespit var, birleştirme kararı operatörde.
     pub cannibalization: Vec<opportunity::Cannibalization>,
+    /// Önceki döneme göre gerileyen sayfalar — kaybedilen tıklamaya göre sıralı.
+    pub decay: Vec<opportunity::Decay>,
 }
 
 impl Default for OpportunityReport {
@@ -1581,6 +1583,7 @@ impl Default for OpportunityReport {
             eol_clicks: 0.0,
             striking: Vec::new(),
             cannibalization: Vec::new(),
+            decay: Vec::new(),
         }
     }
 }
@@ -1758,6 +1761,29 @@ pub async fn analyze_opportunities(
         Err(_) => (Vec::new(), Vec::new()),
     };
 
+    // Trend: önceki 90 günü de çek ve karşılaştır. Ayrı bir GSC çağrısı; başarısız olursa
+    // raporun geri kalanı yine dönsün — trend ek bilgidir.
+    let decay = match seo_data::gsc::page_stats_offset(
+        &client,
+        &gsc_json,
+        gsc_site.trim(),
+        OPPORTUNITY_DAYS,
+        OPPORTUNITY_DAYS,
+        25_000,
+    )
+    .await
+    {
+        Ok(prev) => {
+            let to_tuples = |v: &[seo_data::PageStat]| -> Vec<(String, f64, f64, f64)> {
+                v.iter()
+                    .map(|s| (norm_url(&s.page), s.clicks, s.impressions, s.position))
+                    .collect()
+            };
+            opportunity::find_decay(&to_tuples(&stats), &to_tuples(&prev), &product_index)
+        }
+        Err(_) => Vec::new(),
+    };
+
     let report = OpportunityReport {
         analyzed_at: now_str(),
         days: OPPORTUNITY_DAYS,
@@ -1769,6 +1795,7 @@ pub async fn analyze_opportunities(
         eol_clicks,
         striking,
         cannibalization,
+        decay,
     };
 
     // Önbelleğe al: GSC verisi günlük değişir, her sayfa açılışında API'ye gitmeye gerek yok.

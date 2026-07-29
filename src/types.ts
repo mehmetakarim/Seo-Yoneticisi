@@ -277,6 +277,17 @@ export interface Cannibalization {
   pages: CannibalPage[];
 }
 
+/** Önceki döneme göre gerileyen sayfa. */
+export interface Decay {
+  sku: string;
+  name: string;
+  clicks_now: number;
+  clicks_before: number;
+  position_now: number;
+  position_before: number;
+  clicks_lost: number;
+}
+
 export interface OpportunityReport {
   analyzed_at: string;
   days: number;
@@ -290,6 +301,7 @@ export interface OpportunityReport {
   eol_clicks: number;
   striking: QueryOpportunity[];
   cannibalization: Cannibalization[];
+  decay: Decay[];
 }
 
 /** EOL sayfa için halef ürün adayı (deterministik sıralama — öneri değil, aday). */

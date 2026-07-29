@@ -357,6 +357,81 @@ pub fn find_eol(
     out
 }
 
+// ---- İçerik gerilemesi (trend) ----
+
+/// Gerilemenin anlamlı sayılması için önceki dönemde en az bu kadar tıklama olmalı.
+/// 2 tıklamadan 1'e düşmek istatistiksel gürültü, 40'tan 12'ye düşmek gerçek kayıp.
+const DECAY_MIN_PREV_CLICKS: f64 = 5.0;
+/// Tıklama bu oranın altına düştüyse gerileme sayılır (%30 kayıp).
+const DECAY_CLICK_RATIO: f64 = 0.70;
+/// Ya da konum bu kadar kötüleştiyse (sıra sayısı olarak).
+const DECAY_POSITION_DROP: f64 = 3.0;
+
+/// **İçerik gerilemesi:** önceki döneme göre kaybeden sayfa.
+///
+/// Düşüşteki bir ürün, hiç yükselmemiş olandan daha aciledir: orada bir şey bozulmuş
+/// (rakip güçlenmiş, içerik bayatlamış, teknik sorun) ve müdahale edilmezse kayıp büyür.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Decay {
+    pub sku: String,
+    pub name: String,
+    pub clicks_now: f64,
+    pub clicks_before: f64,
+    pub position_now: f64,
+    pub position_before: f64,
+    /// Kaç tıklama kaybedildi (sıralama buna göre).
+    pub clicks_lost: f64,
+}
+
+/// İki dönemi karşılaştırıp gerileyen sayfaları bulur.
+///
+/// Girdiler: `(normalize_url, tıklama, gösterim, pozisyon)`. Yalnızca **her iki dönemde de**
+/// bulunan ve katalogda olan sayfalar değerlendirilir — yeni eklenen bir ürünün "önceki dönemde
+/// 0 tıklaması vardı" diye gerileme sayılması saçma olurdu.
+pub fn find_decay(
+    now: &[(String, f64, f64, f64)],
+    before: &[(String, f64, f64, f64)],
+    by_url: &std::collections::HashMap<String, (String, String)>,
+) -> Vec<Decay> {
+    use std::collections::HashMap;
+    let prev: HashMap<&str, (f64, f64)> = before
+        .iter()
+        .map(|(u, c, _, p)| (u.as_str(), (*c, *p)))
+        .collect();
+
+    let mut out: Vec<Decay> = now
+        .iter()
+        .filter_map(|(url, clicks, _imps, pos)| {
+            let (sku, name) = by_url.get(url)?;
+            let (pc, pp) = prev.get(url.as_str())?;
+            if *pc < DECAY_MIN_PREV_CLICKS {
+                return None; // küçük sayılarda dalgalanma gerileme değildir
+            }
+            let click_drop = *clicks < pc * DECAY_CLICK_RATIO;
+            // Pozisyonda BÜYÜK sayı kötüdür: 4 → 9 gerilemedir.
+            let pos_drop = *pos - pp >= DECAY_POSITION_DROP;
+            if !click_drop && !pos_drop {
+                return None;
+            }
+            Some(Decay {
+                sku: sku.clone(),
+                name: name.clone(),
+                clicks_now: *clicks,
+                clicks_before: *pc,
+                position_now: *pos,
+                position_before: *pp,
+                clicks_lost: (pc - clicks).max(0.0),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.clicks_lost
+            .partial_cmp(&a.clicks_lost)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    out
+}
+
 /// EOL sayfa için halef ürün adayı.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SuccessorCandidate {
@@ -668,6 +743,47 @@ mod tests {
         .iter()
         .map(|(s, n, u)| (s.to_string(), n.to_string(), u.to_string()))
         .collect()
+    }
+
+    #[test]
+    fn decay_needs_meaningful_previous_traffic() {
+        let by = cat(&[("p1", "A", "Ürün A")]);
+        // 3 → 1 tıklama: küçük sayılarda dalgalanma, gerileme sayılmamalı
+        let now = vec![("p1".to_string(), 1.0, 100.0, 8.0)];
+        let before = vec![("p1".to_string(), 3.0, 120.0, 7.0)];
+        assert!(find_decay(&now, &before, &by).is_empty());
+
+        // 40 → 12: gerçek kayıp
+        let now2 = vec![("p1".to_string(), 12.0, 400.0, 9.0)];
+        let before2 = vec![("p1".to_string(), 40.0, 500.0, 5.0)];
+        let d = find_decay(&now2, &before2, &by);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].clicks_lost, 28.0);
+    }
+
+    #[test]
+    fn decay_detects_position_drop_even_if_clicks_hold() {
+        let by = cat(&[("p1", "A", "A")]);
+        // Tıklama benzer ama konum 4 → 9: gerileme başlamış
+        let now = vec![("p1".to_string(), 19.0, 900.0, 9.0)];
+        let before = vec![("p1".to_string(), 20.0, 500.0, 4.0)];
+        assert_eq!(find_decay(&now, &before, &by).len(), 1);
+    }
+
+    #[test]
+    fn decay_ignores_pages_missing_in_one_period() {
+        // Yeni ürün: önceki dönemde yok → "gerilemiş" sayılmamalı
+        let by = cat(&[("p1", "A", "A")]);
+        let now = vec![("p1".to_string(), 1.0, 50.0, 12.0)];
+        assert!(find_decay(&now, &[], &by).is_empty());
+    }
+
+    #[test]
+    fn decay_ignores_improving_pages() {
+        let by = cat(&[("p1", "A", "A")]);
+        let now = vec![("p1".to_string(), 60.0, 900.0, 3.0)];
+        let before = vec![("p1".to_string(), 20.0, 500.0, 8.0)];
+        assert!(find_decay(&now, &before, &by).is_empty(), "yükselen sayfa gerileme değil");
     }
 
     #[test]

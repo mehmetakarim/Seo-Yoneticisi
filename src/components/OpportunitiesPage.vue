@@ -25,6 +25,7 @@ const sliceFilter = ref<string>("");
 const eolLimit = ref(25);
 /** Sorgu listesi de uzun olabilir — önce en değerlileri. */
 const sdLimit = ref(20);
+const decayLimit = ref(15);
 
 const all = computed<Opportunity[]>(() => report.value?.opportunities ?? []);
 // Not: eski önbellekte olmayan alanlara karşı şablonda da `?.` kullanılıyor —
@@ -305,6 +306,59 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
     <div v-else-if="report" class="clean">
       <Icon name="check" :size="16" :stroke-width="2.4" style="color: var(--green)" />
       Fırsat bulunamadı — Google'da bulunan ürünlerin tamamı konumuna göre beklenen performansta.
+    </div>
+
+    <!-- Gerileme: düşüşteki sayfa, hiç yükselmemiş olandan daha acil -->
+    <div v-if="report?.decay?.length" class="card sec">
+      <div class="inv-head">
+        <div>
+          <div class="inv-title">
+            Düşüşte olanlar ({{ report.decay.length }})
+            <span class="eol-sum">
+              {{ Math.round(report.decay.reduce((a, d) => a + d.clicks_lost, 0)) }} tıklama kaybı
+            </span>
+          </div>
+          <div class="inv-sub">
+            Önceki {{ report.days }} güne göre gerileyen sayfalar. Burada bir şey bozulmuş —
+            müdahale edilmezse kayıp büyür. Konum değişmeden tıklama düştüyse sorun sıralamada
+            değil, arama sonucundaki görünümde olabilir.
+          </div>
+        </div>
+      </div>
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th class="c-name">Ürün</th>
+            <th class="c-num">Tıklama</th>
+            <th class="c-num">Konum</th>
+            <th class="c-num">Kayıp</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="d in report.decay.slice(0, decayLimit)"
+            :key="d.sku"
+            class="row"
+            @click="store.openProduct(d.sku)"
+          >
+            <td class="c-name"><div class="nm">{{ d.name }}</div><div class="sku">{{ d.sku }}</div></td>
+            <td class="c-num">
+              <span class="was">{{ Math.round(d.clicks_before) }}</span>
+              <span class="arrow">→</span>{{ Math.round(d.clicks_now) }}
+            </td>
+            <td class="c-num">
+              <span class="was">{{ d.position_before.toFixed(1) }}</span>
+              <span class="arrow">→</span>{{ d.position_now.toFixed(1) }}
+            </td>
+            <td class="c-num miss">−{{ Math.round(d.clicks_lost) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="report.decay.length > decayLimit" class="eol-more">
+        <a class="link" @click="decayLimit += 30">
+          Sonraki 30'u göster ({{ report.decay.length - decayLimit }} kaldı)
+        </a>
+      </div>
     </div>
 
     <!-- Striking distance: hangi SORGUDA kaçıncı sıradasınız — "ne yazmalıyım" katmanı -->
@@ -890,6 +944,14 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
 .succ-why {
   color: var(--c-faint);
   line-height: 1.4;
+}
+/* Gerilemede "önce → sonra": eski değer soluk, yeni değer vurgulu */
+.was {
+  color: var(--c-faint);
+}
+.arrow {
+  color: var(--c-faint);
+  margin: 0 4px;
 }
 .eol-more {
   padding: 10px 16px;

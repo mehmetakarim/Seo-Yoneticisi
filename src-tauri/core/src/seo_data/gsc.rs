@@ -189,8 +189,24 @@ pub async fn page_stats(
     days: i64,
     limit: u32,
 ) -> Result<Vec<PageStat>, String> {
+    page_stats_offset(client, sa_json, site_url, days, 0, limit).await
+}
+
+/// `page_stats`'ın kaydırılmış dönem sürümü — **trend karşılaştırması için**.
+///
+/// `offset_days` kadar geriye kaydırılmış bir pencere döndürür: `offset_days = days` verilirse
+/// "önceki 90 gün" alınır ve mevcut dönemle kıyaslanabilir. Aynı uzunlukta iki pencere
+/// karşılaştırmak şart — farklı uzunluktaki dönemleri kıyaslamak sahte düşüş üretir.
+pub async fn page_stats_offset(
+    client: &reqwest::Client,
+    sa_json: &str,
+    site_url: &str,
+    days: i64,
+    offset_days: i64,
+    limit: u32,
+) -> Result<Vec<PageStat>, String> {
     let token = access_token(client, sa_json).await?;
-    let end = chrono::Utc::now().date_naive();
+    let end = chrono::Utc::now().date_naive() - chrono::Duration::days(offset_days);
     let start = end - chrono::Duration::days(days);
     let body = serde_json::json!({
         "startDate": start.format("%Y-%m-%d").to_string(),
@@ -554,6 +570,26 @@ mod tests {
                 }
             }
             Err(e) => panic!("query_page_stats hatası: {e}"),
+        }
+    }
+
+    /// Trend eşiklerini gerçek veriyle doğrulamak için iki dönemi de döker.
+    /// `GSC_SA_FILE=... GSC_SITE=... cargo test decay_dump -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn decay_dump() {
+        let file = std::env::var("GSC_SA_FILE").expect("GSC_SA_FILE ayarlı değil");
+        let sa_json = std::fs::read_to_string(&file).expect("SA okunamadı");
+        let site = std::env::var("GSC_SITE").expect("GSC_SITE ayarlı değil");
+        let client = reqwest::Client::builder().timeout(Duration::from_secs(120)).build().unwrap();
+        for (label, offset) in [("SIMDI", 0i64), ("ONCE", 90i64)] {
+            let rows = page_stats_offset(&client, &sa_json, &site, 90, offset, 25_000)
+                .await
+                .expect("çağrı");
+            println!("{label}_TOPLAM={}", rows.len());
+            for r in rows.iter() {
+                println!("{label}\t{}\t{:.0}\t{:.0}\t{:.1}", r.page, r.clicks, r.impressions, r.position);
+            }
         }
     }
 
