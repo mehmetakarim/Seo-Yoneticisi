@@ -13,6 +13,9 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.6.2
+- "SEO Araştır" panelindeki anahtar kelime zorluğu düzeltildi: veri gelmediğinde 0 (yani "çok kolay") görünüyordu, artık veri yoksa hiç gösterilmiyor
+
 ## v0.6.1
 - Satışta olmayan sayfalar için "Halef öner": güncel neslin hangisi olduğunu yapay zekâ önerir
 - Uygun bir halef yoksa bunu açıkça söyler — yanlış yönlendirme önerilmez
