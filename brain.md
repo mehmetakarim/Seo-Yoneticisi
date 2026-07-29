@@ -10,7 +10,8 @@
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
 v0.5.6 = Fırsatlar sayfası · v0.5.7 = meta/açıklama sürüm geçmişi ·
-**v0.5.8 = EOL sayfalar + fırsat filtreleri**
+v0.5.8 = EOL sayfalar + filtreler · v0.5.9 = boş ekran düzeltmesi ·
+**v0.6.0 = sorgu düzeyi analizler (striking distance + kanibalizasyon)**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
@@ -82,7 +83,32 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
      (GSC sayfaları) kurmuştum — öyle kalsaydı her sayfa satışta sayılır, EOL listesi hep boş
      çıkardı ve kimse fark etmezdi.
 
-0ab. ✅ **SORGU × SAYFA ALTYAPISI HAZIR (v0.5.8'de kod var, analizler henüz yok).**
+0ab. ✅ **SORGU DÜZEYİ ANALİZLER ÇALIŞIYOR (v0.6.0).**
+   `gsc.rs::query_page_stats` — `dimensions:["page","query"]`, `startRow` sayfalama (GSC tek
+   istekte en fazla 25.000 satır), `page contains <yol>` filtresi (yol ürünlerden türetilir).
+   **Ölçüm:** 24.204 satır · 4.764 sayfa · 21.634 sorgu · **2,5 saniye**, tek istekte sığdı.
+
+   İki analiz kuruldu (`opportunity.rs`, saf mantık, 8 test):
+   - **`striking_distance()`** — pozisyon 4–20, gösterim ≥30. QueryLoom'un aralığı.
+     Gerçek veride **120 sorgu / 69 ürün**. Sorgu doğrudan hedef kelime adayı →
+     **döngü kapanıyor:** GSC bulur, operatör seçer, mevcut üretim yazar.
+   - **`cannibalization()`** — bir sorguda ≥2 ürün sayfamız VE baskın pay yok (%70 eşiği;
+     tıklama yoksa gösterim payına düşer). Gerçek veride **yalnızca 3 sorgu** (21.634 içinden)
+     — gürültüsüz. ⚠️ Otomatik birleştirme ÖNERİLMİYOR (QueryLoom da önermiyor): yanlış
+     birleştirme geri alınması zor bir SEO hasarı, karar operatörde.
+
+   Doğrulanan örnekler: "çift monitör kolu" poz 6.2 / 214 gösterim / 0 tıklama ·
+   "teamviewer" 4 lisans varyantı yarışıyor / 357 gösterim / 0 tıklama ·
+   "akgi" aynı ürün adı iki URL'de → katalogda mükerrer kayıt şüphesi.
+
+   **Dayanıklılık:** sorgu çağrısı hata verirse raporun GERİ KALANI YİNE DÖNER — sorgu
+   katmanı ek bilgidir, yokluğu tüm analizi kaybettirmemeli.
+
+   **Sıradakiler:** trend (içerik gerilemesi, 2. GSC çağrısı) · iç link adayı · EOL için
+   yapay zekâ halef önerisi · Ahrefs hacim/zorluk (**istek üzerine, satır bazında,
+   önbellekli** — her CapSolver çözümü ücretli, toplu çalıştırılamaz).
+
+0ac. 📦 **ESKİ NOT — sorgu×sayfa altyapısı ilk kurulduğunda (v0.5.8'de kod var, analizler henüz yok).**
    `gsc.rs::query_page_stats` — `dimensions:["page","query"]`, `startRow` sayfalama (GSC tek
    istekte en fazla 25.000 satır), `page contains <yol>` filtresi.
    **Ölçüm:** 24.204 satır · 4.764 sayfa · 21.634 sorgu · **2,5 saniye**. Tek istekte sığdı.
