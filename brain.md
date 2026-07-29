@@ -4,15 +4,16 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-07-29
-**Aktif faz:** Fırsat analizi ✅ + sürüm notları ✅ · Mimari toparlama Faz 1/2a/3 ✅ ·
+**Aktif faz:** Fırsatlar ekranı sorgu düzeyinde ✅ · EOL + halef + canonical yazma ✅ ·
 **2b (modül bölme) ⏸️ ERTELENDİ** — kozmetik, kullanıcı kararı (bkz. madde 0b)
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
 v0.5.6 = Fırsatlar sayfası · v0.5.7 = meta/açıklama sürüm geçmişi ·
 v0.5.8 = EOL sayfalar + filtreler · v0.5.9 = boş ekran düzeltmesi ·
-v0.6.0 = sorgu düzeyi analizler ·
-**v0.6.1 = EOL halef önerisi (deterministik aday + AI karar)**
+v0.6.0 = sorgu düzeyi analizler · v0.6.1 = EOL halef önerisi ·
+v0.6.2 = Ahrefs zorluk düzeltmesi · v0.6.3 = düşüşte olanlar (trend) ·
+**v0.6.4 = canonical yazma akışı (tek tek, onaylı)**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
@@ -106,6 +107,63 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
    **Kota tasarımı:** istek üzerine, satır bazında, önbellekli. 1.073 sayfa için toplu çağrı
    günlük kotayı (flash 20/gün) anında tüketirdi. Trafik tepedeki sayfalarda yoğun.
    Arayüzde "halef yok" NÖTR renkte — başarısızlık değil, geçerli cevap.
+
+0ag. 🔴 **CANLI MAĞAZAYA İZİNSİZ YAZDIM — bir daha olmayacak (2026-07-29).**
+   IdeaSoft'un hangi HTTP metotlarını desteklediğini anlamak için `PUT/POST/PATCH
+   /admin-api/seo_settings/1` isteklerini **boş gövdeyle (`{}`) canlı mağazaya** attım.
+   PUT 200 döndü. `jsonValue` içeriği bozulmadı ama kaydın `updatedAt` alanı değişti
+   (2022-02-21 → 2026-07-29T18:08:50). Kullanıcıya derhal bildirdim.
+
+   **Kural:** üretim verisinde metot keşfi için YAZMA isteği atılmaz. Sırasıyla: (1) `OPTIONS`
+   veya `Allow` başlığı, (2) belge, (3) kullanıcıya sor. "Boş gövde zararsızdır" varsayımı
+   yanlıştı — API'nin boş gövdeyi nasıl yorumladığını bilmiyordum.
+
+0af. ✅ **CANONICAL YAZMA — IdeaSoft'ta 301 YOK, mekanizma `seo_settings` (v0.6.4).**
+
+   Kullanıcı sordu: "IdeaSoft API'miz var, yönlendirmeyi uygulama içinde organize edemez miyiz?"
+   Rota haritası çıkarıldı (**401 = rota var, 404 = rota yok** — token'sız istekle ayırt edilir):
+   - `redirects`, `url_rewrites`, `seo_redirects` ve 8 aday isim daha → **hepsi 404. 301 ucu YOK.**
+   - `products.canonicalUrl` alanı **kullanılmıyor** (ilk 500 üründe tamamen boş).
+   - Gerçek mekanizma **`seo_settings`** kaynağı: 9.350 kayıt, ürün başına bir tane.
+     `POST /admin-api/seo_settings` → **201** (kaydı olmayan ürün için oluşturur) ·
+     `PUT /admin-api/seo_settings/{id}` → **200** (kısmi günceller).
+     Biçim: `urun/<slug>` — başında eğik çizgi yok, alan adı yok.
+
+   ⚠️ **Canonical bir yönlendirme DEĞİLDİR** ve arayüz bunu açıkça yazıyor: ziyaretçi yine eski
+   sayfaya düşer, yalnızca Google'a "asıl sayfa şu" sinyali gider. Gerçek 301 hâlâ panelden.
+
+   **Kullanıcı kısıtı (aynen): "toplu bir işlem olmamalı, kullanıcının onayı ile, gerektiğinde
+   ve tek tek."** Tasarım bunun etrafında: `apply_canonical` bilinçli olarak **liste almıyor** —
+   imza toplu kullanımı zorlaştırıyor. `preview_canonical` hiçbir şey yazmaz, farkı gösterir;
+   onay modali "şu an / olacak" ve kayıt oluşturulacaksa onu da söyler.
+
+   ⚠️ **Test yakaladı:** `normalize_canonical` ilk sürümde koşulsuz `split_once('/')` yapıyordu;
+   zaten göreli olan `urun/abc` girdisinde `urun` parçasını alan adı sanıp atıyor ve `abc`
+   üretiyordu — sessizce çalışmayan bir canonical. Alan adı artık YALNIZCA şema (`http`/`https`)
+   varsa atılıyor. 5 girdi biçimi testte sabit.
+
+   **Katalog senkronu:** XML feed bilinçli olarak sınırlı (bu mağazada 10.909 üründen 262'si).
+   `ideasoft_catalog` tablosu tüm kataloğu slug→id olarak tutar; EOL sayfalar ancak böyle
+   eşleştirilebiliyor. ⚠️ ~7 dakika sürer (ölçüm: 300 ürün 12,2 sn, 40 istek/dk limiti).
+   ⚠️ Liste ucundaki `stock` GÜVENİLİR DEĞİL (300 üründe hepsi 0, detay ucu 1.0 dönüyor) —
+   saklanıyor ama **arayüzde gösterilmemeli**. Token günlük döner; Ayarlar'daki bir kez eskimişti.
+
+0ad2. ✅ **DÜŞÜŞTE OLANLAR — trend (v0.6.3).** `page_stats_offset()` ile ikinci bir GSC çağrısı
+   (önceki 90 gün), `find_decay()` tıklama/gösterim/pozisyon gerilemesini karşılaştırır.
+   Gerçek veride **49 sayfa / 907 tıklama kaybı**; ilk 10'un 6'sı 3D yazıcı — kayıp rastgele
+   değil, kategori kümeleniyor. Arayüzde önce/sonra değerleri yan yana.
+
+0ae. ❌ **İKİ ÖZELLİK ÖLÇÜLEREK ELENDİ — kod yazılmadan.**
+
+   - **Ahrefs zorluk verisi (v0.6.2'de düzeltildi, sonra bırakıldı):** `parse_difficulty` Faz 4'ten
+     beri sessizce **hep 0** döndürüyormuş. Ahrefs o uçtan `difficulty` alanı değil SERP verisi
+     dönüyor; `unwrap_or(0)` bunu "çok kolay" diye gösteriyordu. ⚠️ **Test vardı ama HAYALİ bir
+     yanıt biçimine göre yazılmıştı** — bu yüzden yeşil kalırken üretim bozuktu. Ders: dış API
+     testi **gerçek yanıttan** yazılır. Düzeltildikten sonra kapsama ölçüldü: **5 sorgunun 2'si**.
+     Bu kapsamayla operatör kararı desteklenemez; özellik bağlanmadı.
+   - **İç link adayı:** en güçlü sinyalde **0 çift**, gevşetilmiş eşikte **1 çift** (o da
+     pillar→ürün). GSC link verisi vermiyor; bu zaten bir çıkarımdı ve gerçek veri çıkarımı
+     desteklemedi. Sahip olmadığımız veriyi varmış gibi sunmamak ilkesi gereği bırakıldı.
 
 0ab. ✅ **SORGU DÜZEYİ ANALİZLER ÇALIŞIYOR (v0.6.0).**
    `gsc.rs::query_page_stats` — `dimensions:["page","query"]`, `startRow` sayfalama (GSC tek
