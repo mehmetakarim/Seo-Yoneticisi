@@ -13,6 +13,10 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.6.3
+- Yeni: "Düşüşte olanlar" — önceki döneme göre trafik veya sıra kaybeden ürünleri gösterir
+- Tıklama ve konumun önce/sonra değerleri yan yana; nerede ne kadar kaybettiğiniz tek bakışta görünür
+
 ## v0.6.2
 - "SEO Araştır" panelindeki anahtar kelime zorluğu düzeltildi: veri gelmediğinde 0 (yani "çok kolay") görünüyordu, artık veri yoksa hiç gösterilmiyor
 
