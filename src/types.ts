@@ -249,6 +249,34 @@ export interface EolPage {
   position: number;
 }
 
+/** Bir ürünün BELİRLİ BİR SORGUDAKİ fırsatı — "ne yazmalıyım" katmanı. */
+export interface QueryOpportunity {
+  sku: string;
+  name: string;
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  missed_clicks: number;
+}
+
+export interface CannibalPage {
+  sku: string;
+  name: string;
+  clicks: number;
+  impressions: number;
+  position: number;
+}
+
+/** Aynı sorguda yarışan kendi sayfalarımız. Tespit; birleştirme kararı operatörde. */
+export interface Cannibalization {
+  query: string;
+  clicks: number;
+  impressions: number;
+  pages: CannibalPage[];
+}
+
 export interface OpportunityReport {
   analyzed_at: string;
   days: number;
@@ -260,4 +288,6 @@ export interface OpportunityReport {
   /** En çok tıklama alan başta. */
   eol: EolPage[];
   eol_clicks: number;
+  striking: QueryOpportunity[];
+  cannibalization: Cannibalization[];
 }

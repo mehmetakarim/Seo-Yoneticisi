@@ -1562,6 +1562,10 @@ pub struct OpportunityReport {
     pub eol: Vec<opportunity::EolPage>,
     /// EOL sayfaların toplam tıklaması — fırsat listesiyle kıyaslanabilsin diye.
     pub eol_clicks: f64,
+    /// 4–20. sıradaki sorgular — "ne yazmalıyım" katmanı. Kaçırılan tıklamaya göre sıralı.
+    pub striking: Vec<opportunity::QueryOpportunity>,
+    /// Aynı sorguda yarışan kendi sayfalarımız. Tespit var, birleştirme kararı operatörde.
+    pub cannibalization: Vec<opportunity::Cannibalization>,
 }
 
 impl Default for OpportunityReport {
@@ -1575,6 +1579,8 @@ impl Default for OpportunityReport {
             matched: 0,
             eol: Vec::new(),
             eol_clicks: 0.0,
+            striking: Vec::new(),
+            cannibalization: Vec::new(),
         }
     }
 }
@@ -1649,6 +1655,13 @@ pub async fn analyze_opportunities(
         stats.iter().map(|s| (norm_url(&s.page), s)).collect();
     // Yol öneki türetmek için ham (normalize edilmemiş) ürün URL'leri
     let product_urls: Vec<String> = products.iter().map(|p| p.2.clone()).collect();
+    // Sorgu analizi için TÜM ürünler — sayfa düzeyinde sorunsuz görünen bir ürün de
+    // belirli bir sorguda 12. sırada olabilir.
+    let product_index: std::collections::HashMap<String, (String, String)> = products
+        .iter()
+        .map(|p| (norm_url(&p.2), (p.0.clone(), p.1.clone())))
+        .collect();
+    let path_prefix = opportunity::common_path_prefix(&product_urls);
 
     let total_products = products.len();
     let mut opportunities = Vec::new();
@@ -1692,13 +1705,58 @@ pub async fn analyze_opportunities(
     // ÜRÜNLERDEN kurulmalı — yoksa her sayfa "satışta" sayılır ve EOL listesi hep boş çıkar.
     let live: std::collections::HashSet<String> =
         product_urls.iter().map(|u| norm_url(u)).collect();
-    let path_prefix = opportunity::common_path_prefix(&product_urls);
     let page_tuples: Vec<(String, f64, f64, f64)> = stats
         .iter()
         .map(|s| (s.page.clone(), s.clicks, s.impressions, s.position))
         .collect();
     let eol = opportunity::find_eol(&page_tuples, &live, path_prefix.as_deref());
     let eol_clicks = eol.iter().map(|e| e.clicks).sum();
+
+    // Sorgu düzeyi veri: ikinci bir GSC çağrısı (ölçüm: 24.204 satır, ~2,5 sn).
+    // Yol öneki ürünlerden türetiliyor; blog/kategori sayfaları hiç gelmesin diye.
+    // Bu çağrı başarısız olursa analizin GERİ KALANI YİNE DÖNSÜN — sorgu katmanı
+    // ek bilgidir, onun yokluğu tüm raporu kaybettirmemeli.
+    let (striking, cannibalization) = match seo_data::gsc::query_page_stats(
+        &client,
+        &gsc_json,
+        gsc_site.trim(),
+        OPPORTUNITY_DAYS,
+        path_prefix.as_deref(),
+        60_000,
+    )
+    .await
+    {
+        Ok(qp) => {
+            let by_page: std::collections::HashMap<String, (String, String)> = opportunities
+                .iter()
+                .map(|o| (norm_url(&o.url), (o.sku.clone(), o.name.clone())))
+                .chain(
+                    // Fırsat listesinde olmayan ürünler de sorgu analizine girsin:
+                    // bir ürün sayfa düzeyinde sorunsuz görünüp belirli bir sorguda
+                    // 12. sırada olabilir.
+                    product_index.iter().map(|(u, v)| (u.clone(), v.clone())),
+                )
+                .collect();
+            let rows: Vec<(String, String, f64, f64, f64, f64)> = qp
+                .iter()
+                .map(|r| {
+                    (
+                        norm_url(&r.page),
+                        r.query.clone(),
+                        r.clicks,
+                        r.impressions,
+                        r.ctr,
+                        r.position,
+                    )
+                })
+                .collect();
+            (
+                opportunity::striking_distance(&rows, &by_page),
+                opportunity::cannibalization(&rows, &by_page),
+            )
+        }
+        Err(_) => (Vec::new(), Vec::new()),
+    };
 
     let report = OpportunityReport {
         analyzed_at: now_str(),
@@ -1709,6 +1767,8 @@ pub async fn analyze_opportunities(
         matched,
         eol,
         eol_clicks,
+        striking,
+        cannibalization,
     };
 
     // Önbelleğe al: GSC verisi günlük değişir, her sayfa açılışında API'ye gitmeye gerek yok.

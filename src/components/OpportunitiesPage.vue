@@ -23,6 +23,8 @@ const sliceFilter = ref<string>("");
 
 /** EOL listesi uzun olabilir (bu sitede ~970 sayfa) — önce en değerlileri göster. */
 const eolLimit = ref(25);
+/** Sorgu listesi de uzun olabilir — önce en değerlileri. */
+const sdLimit = ref(20);
 
 const all = computed<Opportunity[]>(() => report.value?.opportunities ?? []);
 // Not: eski önbellekte olmayan alanlara karşı şablonda da `?.` kullanılıyor —
@@ -303,6 +305,90 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
     <div v-else-if="report" class="clean">
       <Icon name="check" :size="16" :stroke-width="2.4" style="color: var(--green)" />
       Fırsat bulunamadı — Google'da bulunan ürünlerin tamamı konumuna göre beklenen performansta.
+    </div>
+
+    <!-- Striking distance: hangi SORGUDA kaçıncı sıradasınız — "ne yazmalıyım" katmanı -->
+    <div v-if="report?.striking?.length" class="card sec">
+      <div class="inv-head">
+        <div>
+          <div class="inv-title">
+            Yükselmeye yakın sorgular ({{ report.striking.length }})
+          </div>
+          <div class="inv-sub">
+            Bu aramalarda 4–20. sıradasınız — küçük bir iyileştirme ilk sıralara taşıyabilir.
+            Sorgu, o ürün için <b>hedef kelime adayıdır</b>: satıra tıklayıp ürüne gidin.
+          </div>
+        </div>
+      </div>
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th class="c-name">Sorgu / Ürün</th>
+            <th class="c-num">Gösterim</th>
+            <th class="c-num">Tıklama</th>
+            <th class="c-num">Konum</th>
+            <th class="c-num">Kaçırılan</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="q in report.striking.slice(0, sdLimit)"
+            :key="q.sku + q.query"
+            class="row"
+            @click="store.openProduct(q.sku)"
+          >
+            <td class="c-name">
+              <div class="nm">{{ q.query }}</div>
+              <div class="sku">{{ q.name }}</div>
+            </td>
+            <td class="c-num">{{ Math.round(q.impressions) }}</td>
+            <td class="c-num">{{ Math.round(q.clicks) }}</td>
+            <td class="c-num">{{ q.position.toFixed(1) }}</td>
+            <td class="c-num miss">{{ Math.round(q.missed_clicks) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="report.striking.length > sdLimit" class="eol-more">
+        <a class="link" @click="sdLimit += 40">
+          Sonraki 40'ı göster ({{ report.striking.length - sdLimit }} kaldı)
+        </a>
+      </div>
+    </div>
+
+    <!-- Kanibalizasyon: kendi sayfalarımız birbiriyle yarışıyor -->
+    <div v-if="report?.cannibalization?.length" class="card sec">
+      <div class="inv-head">
+        <div>
+          <div class="inv-title">
+            Birbiriyle yarışan sayfalar ({{ report.cannibalization.length }})
+          </div>
+          <div class="inv-sub">
+            Aynı aramada birden çok ürün sayfanız görünüyor ve hiçbiri öne çıkamıyor.
+            <b>Otomatik birleştirme önerilmez</b> — önce hangi sayfanın o aramayı sahiplenmesi
+            gerektiğine karar verin, diğerlerini farklılaştırın.
+          </div>
+        </div>
+      </div>
+      <div class="cann-list">
+        <div v-for="c in report.cannibalization" :key="c.query" class="cann">
+          <div class="cann-q">
+            <span class="q">{{ c.query }}</span>
+            <span class="cann-m">
+              {{ Math.round(c.impressions) }} gösterim · {{ Math.round(c.clicks) }} tıklama
+            </span>
+          </div>
+          <div
+            v-for="pg in c.pages"
+            :key="pg.sku"
+            class="cann-p"
+            @click="store.openProduct(pg.sku)"
+          >
+            <span class="cann-pos">{{ pg.position.toFixed(1) }}.</span>
+            <span class="nm">{{ pg.name }}</span>
+            <span class="cann-c">{{ Math.round(pg.clicks) }} tık</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Satışta olmayan ama trafik alan sayfalar. Ölçüm: ürün trafiğinin %69'u burada. -->
@@ -652,6 +738,64 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   color: var(--accent);
   cursor: pointer;
   font-weight: 560;
+}
+
+.sec {
+  margin-top: 18px;
+}
+/* Kanibalizasyon — sorgu başlığı + altında yarışan sayfalar */
+.cann-list {
+  padding: 4px 0;
+}
+.cann {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+.cann:last-child {
+  border-bottom: 0;
+}
+.cann-q {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.cann-q .q {
+  font-size: 13px;
+  font-weight: 640;
+  color: var(--c-text);
+}
+.cann-m {
+  font-size: 11px;
+  color: var(--c-soft);
+  font-variant-numeric: tabular-nums;
+}
+.cann-p {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 4px 0 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.cann-p:hover {
+  background: var(--c-hover);
+}
+.cann-pos {
+  width: 34px;
+  flex: none;
+  text-align: right;
+  color: var(--c-soft);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.cann-c {
+  margin-left: auto;
+  flex: none;
+  color: var(--c-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Satışta olmayan ama trafik alan sayfalar */

@@ -126,6 +126,163 @@ pub fn work_state(meta_status: &str, details_status: &str) -> WorkState {
     }
 }
 
+// ====================== Sorgu düzeyi analizler ======================
+//
+// Sayfa düzeyi "bu sayfa sorunlu" der; sorgu düzeyi "şu kelimede 12. sıradasın" der.
+// Aradaki fark, operatörün NE YAZACAĞINI bilmesi.
+//
+// Referans: kullanıcının paylaştığı QueryLoom kural dosyası. Aralıklar oradan alındı,
+// eşikler bu katalogda ölçülerek seçildi.
+
+/// Striking distance aralığı — QueryLoom: "positions 4–20 … may move with focused content".
+/// 1-3 zaten iyi konumda; 20+ için "küçük bir itme" yetmez.
+const SD_MIN_POSITION: f64 = 4.0;
+const SD_MAX_POSITION: f64 = 20.0;
+/// Bu gösterimin altındaki sorgular istatistiksel gürültü.
+const SD_MIN_IMPRESSIONS: f64 = 30.0;
+
+/// Kanibalizasyon: bir sorguda en iyi sayfamızın payı bunun ÜSTÜNDEYSE sorun yok —
+/// Google zaten hangi sayfayı tercih ettiğine karar vermiş demektir.
+/// QueryLoom: "No single URL has a clear dominant share".
+const CANNIBAL_DOMINANT_SHARE: f64 = 0.70;
+/// Kanibalizasyon sayılması için sorgunun en az bu kadar gösterim alması gerekir.
+const CANNIBAL_MIN_IMPRESSIONS: f64 = 30.0;
+
+/// Bir ürün sayfasının BELİRLİ BİR SORGUDAKİ fırsatı.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QueryOpportunity {
+    pub sku: String,
+    pub name: String,
+    pub query: String,
+    pub clicks: f64,
+    pub impressions: f64,
+    pub ctr: f64,
+    pub position: f64,
+    pub missed_clicks: f64,
+}
+
+/// Aynı sorguda yarışan kendi sayfalarımızdan biri.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CannibalPage {
+    pub sku: String,
+    pub name: String,
+    pub clicks: f64,
+    pub impressions: f64,
+    pub position: f64,
+}
+
+/// **Kanibalizasyon:** bir sorguda birden çok ürün sayfamız görünüyor ve hiçbiri baskın değil.
+///
+/// QueryLoom otomatik birleştirme ÖNERMİYOR, elle inceleme diyor — aynı temkin korunuyor:
+/// burada yalnızca tespit var, "şunları birleştir" kararı operatörün.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Cannibalization {
+    pub query: String,
+    pub clicks: f64,
+    pub impressions: f64,
+    /// En iyi konumdaki başta.
+    pub pages: Vec<CannibalPage>,
+}
+
+/// Striking distance: 4–20. sıradaki sorgular. Küçük bir iyileştirme ilk sıralara taşıyabilir.
+///
+/// `rows`: (sayfa, sorgu, tıklama, gösterim, ctr, pozisyon) — normalize edilmiş sayfa URL'si.
+/// `by_page`: normalize URL → (sku, ad). Katalogda olmayan sayfalar atlanır (onlar EOL analizi).
+pub fn striking_distance(
+    rows: &[(String, String, f64, f64, f64, f64)],
+    by_page: &std::collections::HashMap<String, (String, String)>,
+) -> Vec<QueryOpportunity> {
+    let mut out: Vec<QueryOpportunity> = rows
+        .iter()
+        .filter(|(_, _, _, imps, _, pos)| {
+            *pos >= SD_MIN_POSITION && *pos <= SD_MAX_POSITION && *imps >= SD_MIN_IMPRESSIONS
+        })
+        .filter_map(|(page, query, clicks, imps, ctr, pos)| {
+            let (sku, name) = by_page.get(page)?;
+            Some(QueryOpportunity {
+                sku: sku.clone(),
+                name: name.clone(),
+                query: query.clone(),
+                clicks: *clicks,
+                impressions: *imps,
+                ctr: *ctr,
+                position: *pos,
+                missed_clicks: (imps * (expected_ctr(*pos) - ctr)).max(0.0),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.missed_clicks
+            .partial_cmp(&a.missed_clicks)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    out
+}
+
+/// Kanibalizasyon tespiti. Yalnızca **kendi ürün sayfalarımız** sayılır.
+pub fn cannibalization(
+    rows: &[(String, String, f64, f64, f64, f64)],
+    by_page: &std::collections::HashMap<String, (String, String)>,
+) -> Vec<Cannibalization> {
+    use std::collections::HashMap;
+    let mut by_query: HashMap<&str, Vec<(&str, &(String, String), f64, f64, f64)>> = HashMap::new();
+    for (page, query, clicks, imps, _ctr, pos) in rows {
+        if let Some(info) = by_page.get(page) {
+            by_query
+                .entry(query.as_str())
+                .or_default()
+                .push((page.as_str(), info, *clicks, *imps, *pos));
+        }
+    }
+
+    let mut out: Vec<Cannibalization> = by_query
+        .into_iter()
+        .filter_map(|(query, mut entries)| {
+            if entries.len() < 2 {
+                return None; // tek sayfa = kanibalizasyon değil
+            }
+            let total_clicks: f64 = entries.iter().map(|e| e.2).sum();
+            let total_imps: f64 = entries.iter().map(|e| e.3).sum();
+            if total_imps < CANNIBAL_MIN_IMPRESSIONS {
+                return None;
+            }
+            // Baskınlık: tıklama varsa tıklama payına, yoksa gösterim payına bak.
+            let (best, total) = if total_clicks > 0.0 {
+                (entries.iter().map(|e| e.2).fold(0.0, f64::max), total_clicks)
+            } else {
+                (entries.iter().map(|e| e.3).fold(0.0, f64::max), total_imps)
+            };
+            if total > 0.0 && best / total >= CANNIBAL_DOMINANT_SHARE {
+                return None; // Google zaten bir sayfayı seçmiş — sorun yok
+            }
+            // En iyi konumdaki başta
+            entries.sort_by(|a, b| a.4.partial_cmp(&b.4).unwrap_or(std::cmp::Ordering::Equal));
+            Some(Cannibalization {
+                query: query.to_string(),
+                clicks: total_clicks,
+                impressions: total_imps,
+                pages: entries
+                    .into_iter()
+                    .map(|(_, (sku, name), clicks, imps, pos)| CannibalPage {
+                        sku: sku.clone(),
+                        name: name.clone(),
+                        clicks,
+                        impressions: imps,
+                        position: pos,
+                    })
+                    .collect(),
+            })
+        })
+        .collect();
+    // En çok gösterim alan çakışma en önemlisi
+    out.sort_by(|a, b| {
+        b.impressions
+            .partial_cmp(&a.impressions)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    out
+}
+
 /// EOL sayfanın listeye girmesi için gereken en az tıklama.
 /// Ölçüm (2026-07-29): 4.523 EOL sayfanın yalnızca 967'si en az 1 tıklama alıyor —
 /// gerisi tamamen gürültü. Tıklama alanlar toplam kaybın %100'ünü kapsıyor.
@@ -342,6 +499,78 @@ mod tests {
 
     fn urls(v: &[&str]) -> std::collections::HashSet<String> {
         v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn cat(pairs: &[(&str, &str, &str)]) -> std::collections::HashMap<String, (String, String)> {
+        pairs
+            .iter()
+            .map(|(u, sku, n)| (u.to_string(), (sku.to_string(), n.to_string())))
+            .collect()
+    }
+
+    #[test]
+    fn striking_distance_respects_position_range() {
+        let by_page = cat(&[("p1", "SKU1", "Ürün")]);
+        let mk = |pos: f64| vec![("p1".into(), "sorgu".into(), 0.0, 500.0, 0.0, pos)];
+        // 4-20 arası → fırsat
+        assert_eq!(striking_distance(&mk(4.0), &by_page).len(), 1);
+        assert_eq!(striking_distance(&mk(20.0), &by_page).len(), 1);
+        // dışı → değil (1-3 zaten iyi, 20+ küçük itmeyle çıkılmaz)
+        assert!(striking_distance(&mk(3.9), &by_page).is_empty());
+        assert!(striking_distance(&mk(20.1), &by_page).is_empty());
+    }
+
+    #[test]
+    fn striking_distance_skips_pages_outside_catalog() {
+        // Katalogda olmayan sayfa buraya değil, EOL analizine ait.
+        let by_page = cat(&[("p1", "SKU1", "Ürün")]);
+        let rows = vec![("bilinmeyen".to_string(), "s".to_string(), 0.0, 900.0, 0.0, 8.0)];
+        assert!(striking_distance(&rows, &by_page).is_empty());
+    }
+
+    #[test]
+    fn cannibalization_needs_two_pages_without_a_dominant_one() {
+        let by_page = cat(&[("p1", "A", "Ürün A"), ("p2", "B", "Ürün B")]);
+
+        // Tek sayfa → kanibalizasyon değil
+        let one = vec![("p1".to_string(), "q".to_string(), 10.0, 200.0, 0.05, 3.0)];
+        assert!(cannibalization(&one, &by_page).is_empty());
+
+        // İki sayfa ama biri baskın (%90 tıklama) → Google zaten seçmiş, sorun yok
+        let dominant = vec![
+            ("p1".to_string(), "q".to_string(), 90.0, 500.0, 0.18, 2.0),
+            ("p2".to_string(), "q".to_string(), 10.0, 300.0, 0.03, 9.0),
+        ];
+        assert!(cannibalization(&dominant, &by_page).is_empty());
+
+        // İki sayfa, pay dengeli → kanibalizasyon
+        let split = vec![
+            ("p1".to_string(), "q".to_string(), 50.0, 500.0, 0.10, 6.0),
+            ("p2".to_string(), "q".to_string(), 45.0, 400.0, 0.11, 4.0),
+        ];
+        let c = cannibalization(&split, &by_page);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].pages.len(), 2);
+        // En iyi konumdaki başta olmalı (4.0 < 6.0)
+        assert_eq!(c[0].pages[0].sku, "B");
+    }
+
+    #[test]
+    fn cannibalization_uses_impression_share_when_no_clicks() {
+        // Hiç tıklama yoksa tıklama payı hesaplanamaz → gösterim payına düşmeli
+        let by_page = cat(&[("p1", "A", "A"), ("p2", "B", "B")]);
+        let rows = vec![
+            ("p1".to_string(), "q".to_string(), 0.0, 500.0, 0.0, 12.0),
+            ("p2".to_string(), "q".to_string(), 0.0, 450.0, 0.0, 14.0),
+        ];
+        assert_eq!(cannibalization(&rows, &by_page).len(), 1, "dengeli gösterim payı = çakışma");
+
+        // Gösterimde baskınlık varsa işaretlenmemeli
+        let dom = vec![
+            ("p1".to_string(), "q".to_string(), 0.0, 950.0, 0.0, 3.0),
+            ("p2".to_string(), "q".to_string(), 0.0, 50.0, 0.0, 30.0),
+        ];
+        assert!(cannibalization(&dom, &by_page).is_empty());
     }
 
     #[test]
