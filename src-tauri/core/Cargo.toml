@@ -1,6 +1,6 @@
 [package]
 name = "seo-core"
-version = "0.5.9"
+version = "0.6.0"
 description = "SEO Yöneticisi çekirdeği — feed, veritabanı, Gemini, SEO araştırma, IdeaSoft"
 edition = "2021"
 

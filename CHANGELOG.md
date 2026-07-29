@@ -13,6 +13,11 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.6.0
+- Yeni: "Yükselmeye yakın sorgular" — hangi aramada kaçıncı sırada olduğunuzu gösterir, o arama doğrudan hedef kelime adayıdır
+- Yeni: "Birbiriyle yarışan sayfalar" — aynı aramada çakışan kendi ürünlerinizi bulur
+- Fırsatlar ekranını yenilediğinizde bu bölümler dolar
+
 ## v0.5.9
 - Fırsatlar ekranının boş açılmasına yol açan hata giderildi
 - Yeni bölümleri görmek için Fırsatlar ekranında "Yenile" deyip analizi bir kez çalıştırın
