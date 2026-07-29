@@ -331,7 +331,19 @@ export interface CatalogSyncResult {
 export interface CanonicalPreview {
   product_id: number;
   product_name: string;
+  /** Canonical'ın işaret edeceği ürünün adı. */
+  target_name: string;
   current: string;
   proposed: string;
   will_create: boolean;
+}
+
+/** IdeaSoft'ta bulunan ürün — canonical hedefi seçerken listelenir. */
+export interface CatalogMatch {
+  slug: string;
+  id: number;
+  name: string;
+  status: number;
+  stock: number;
+  canonical: string;
 }

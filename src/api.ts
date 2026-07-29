@@ -12,6 +12,7 @@ import type {
   OpportunityReport,
   SuccessorSuggestion,
   CatalogSyncResult,
+  CatalogMatch,
   CanonicalPreview,
 } from "./types";
 
@@ -52,6 +53,7 @@ export const api = {
   suggestEolSuccessor: (url: string) =>
     invoke<SuccessorSuggestion>("suggest_eol_successor", { url }),
   syncIdeasoftCatalog: () => invoke<CatalogSyncResult>("sync_ideasoft_catalog"),
+  searchCatalog: (term: string) => invoke<CatalogMatch[]>("search_catalog", { term }),
   previewCanonical: (eolSlug: string, targetSlug: string) =>
     invoke<CanonicalPreview>("preview_canonical", { eolSlug, targetSlug }),
   applyCanonical: (eolSlug: string, targetSlug: string) =>

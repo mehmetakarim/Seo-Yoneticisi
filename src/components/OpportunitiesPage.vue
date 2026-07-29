@@ -131,6 +131,12 @@ const totalMissed = computed(() => Math.round(filtered.value.reduce((s, o) => s 
 /** Tam URL'den son yol parçası — canonical hedefi olarak gönderilir. */
 const slugOf = (u: string) => u.trim().replace(/\/$/, "").split("/").pop() ?? "";
 
+/** Bu EOL sayfası için önerilen hedef slug; öneri yoksa boş (kullanıcı kendisi seçer). */
+const targetOf = (eolUrl: string) => {
+  const s = store.successors[eolUrl];
+  return s?.sku && s.url ? slugOf(s.url) : "";
+};
+
 const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
 const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
 </script>
@@ -466,7 +472,7 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
         <button
           class="succ-btn cat-sync"
           :disabled="store.catalogBusy"
-          data-tip="IdeaSoft kataloğunu çeker (~7 dk). Sayfaları ürünlerle eşleştirir; canonical ayarlamak için gerekli."
+          data-tip="Tüm kataloğu bir kez çeker (~7 dk). Canonical için GEREKMEZ — uygulama tek satırı anında bulur. Bu yalnızca listenin tamamını hızlandırır."
           @click="store.syncCatalog()"
         >
           <Icon
@@ -512,17 +518,17 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
                       <Icon name="check" :size="11" :stroke-width="2.6" />
                       {{ store.successors[e.url].name }}
                     </span>
-                    <!-- Canonical yazma: her satır için ayrı, onaylı. Toplu işlem YOK. -->
+                    <span v-else class="succ-none">Uygun halef bulunamadı</span>
+                    <!-- Canonical yazma: her satır için ayrı, onaylı. Toplu işlem YOK.
+                         Halef bulunmasa da buton görünür — hedefi kullanıcı seçebilir. -->
                     <button
-                      v-if="store.successors[e.url].sku && store.successors[e.url].url"
                       class="succ-btn"
                       :disabled="store.canonicalBusy"
-                      @click="store.askCanonical(e.slug, slugOf(store.successors[e.url].url!))"
+                      @click="store.startCanonical(e.slug, targetOf(e.url))"
                     >
                       <Icon name="upload" :size="11" />
-                      Canonical ayarla
+                      {{ targetOf(e.url) ? "Canonical ayarla" : "Hedef seç ve ayarla" }}
                     </button>
-                    <span v-else class="succ-none">Uygun halef bulunamadı</span>
                     <span class="succ-why">{{ store.successors[e.url].reason }}</span>
                   </template>
                 </div>
@@ -565,6 +571,68 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
       </div>
     </div>
 
+    <!-- Hedef seçme modali: halef önerisi boş çıktığında ya da öneri değiştirilmek
+         istendiğinde. Yine TEK satır için — toplu seçim yok. -->
+    <Transition name="upd">
+      <div v-if="store.canonicalPicker" class="overlay" @click.self="store.cancelCanonicalPicker()">
+        <div class="modal" role="dialog" aria-label="Canonical hedefi seç">
+          <header class="m-head">
+            <div class="m-title">Canonical hedefini seçin</div>
+            <div class="m-sub">{{ store.canonicalPicker.eolSlug }}</div>
+          </header>
+          <div class="m-body">
+            <div class="pick-row">
+              <input
+                v-model="store.canonicalQuery"
+                class="pick-in"
+                type="text"
+                placeholder="Ürün adı yazın (en az 3 harf)"
+                @keyup.enter="store.searchCanonicalTarget()"
+              />
+              <button
+                class="succ-btn"
+                :disabled="store.canonicalSearching || store.canonicalQuery.trim().length < 3"
+                @click="store.searchCanonicalTarget()"
+              >
+                <Icon
+                  :name="store.canonicalSearching ? 'loader' : 'search'"
+                  :size="11"
+                  :class="{ spin: store.canonicalSearching }"
+                />
+                {{ store.canonicalSearching ? "Aranıyor…" : "Ara" }}
+              </button>
+            </div>
+            <!-- Arama IdeaSoft'ta ÜRÜN ADINA göre çalışıyor (ölçüldü), slug'a göre değil. -->
+            <div class="pick-hint">
+              Arama mağazanızdaki ürün adlarında yapılır — feed'de olmayan ürünler de bulunur.
+            </div>
+            <div v-if="store.canonicalResults.length" class="pick-list">
+              <div
+                v-for="r in store.canonicalResults"
+                :key="r.slug"
+                class="pick-item"
+                @click="store.pickCanonicalTarget(r.slug)"
+              >
+                <span class="pi-name">{{ r.name }}</span>
+                <span class="pi-slug">{{ r.slug }}</span>
+              </div>
+            </div>
+            <div
+              v-else-if="!store.canonicalSearching && store.canonicalQuery.trim().length >= 3"
+              class="pick-hint"
+            >
+              Sonuç yok. Daha az sözcükle deneyin — arama tüm sözcüklerin geçmesini ister.
+            </div>
+          </div>
+          <footer class="m-foot">
+            <button class="ghost" :disabled="store.canonicalSearching" @click="store.cancelCanonicalPicker()">
+              Vazgeç
+            </button>
+          </footer>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Canonical onay modali. Faz 9 gönderim modalinin deseni: önce fark, sonra onay. -->
     <Transition name="upd">
       <div
@@ -583,9 +651,18 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
                 <span class="d-lab">Şu an</span>
                 <span class="d-val muted">{{ store.canonicalPending.current || "tanımlı değil" }}</span>
               </div>
-              <div class="d-row">
+              <div class="d-row hi">
                 <span class="d-lab">Olacak</span>
                 <span class="d-val">{{ store.canonicalPending.proposed }}</span>
+              </div>
+              <!-- Hedefin ADI: slug'a bakarak yanlış ürünü onaylamak kolay. Bu satır
+                   yazmadan önce doğru sayfayı seçtiğinizi görmenizi sağlıyor. -->
+              <div class="d-row">
+                <span class="d-lab">Hedef</span>
+                <span class="d-val">
+                  {{ store.canonicalPending.target_name }}
+                  <a class="link chg" @click="store.changeCanonicalTarget()">değiştir</a>
+                </span>
               </div>
             </div>
             <div class="warn">
@@ -1090,7 +1167,75 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
 }
 .d-row:last-child {
   border-bottom: 0;
+}
+/* Vurgu YAZILACAK satırda — son satırda değil. Hedef adı satırı eklendiğinde
+   `:last-child` vurguyu ona kaydırıyordu; asıl değişen değer "Olacak". */
+.d-row.hi {
   background: var(--ok-soft-bg);
+}
+.chg {
+  margin-left: 8px;
+  font-size: 11px;
+}
+
+/* Hedef seçme: arama satırı + sonuç listesi */
+.pick-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pick-in {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-input);
+  color: var(--c-text);
+  font-size: 12px;
+  font-family: inherit;
+}
+.pick-in:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.pick-hint {
+  margin-top: 8px;
+  color: var(--c-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.pick-list {
+  margin-top: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--c-border-soft);
+  border-radius: 9px;
+}
+.pick-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--c-border-soft);
+  cursor: pointer;
+  transition: background 0.12s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.pick-item:last-child {
+  border-bottom: 0;
+}
+.pick-item:hover {
+  background: var(--c-hover);
+}
+.pi-name {
+  color: var(--c-text);
+  font-size: 12px;
+  font-weight: 560;
+}
+.pi-slug {
+  color: var(--c-soft);
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 .d-lab {
   width: 52px;

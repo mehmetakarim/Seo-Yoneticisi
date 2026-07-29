@@ -13,6 +13,7 @@ import type {
   OpportunityReport,
   SuccessorSuggestion,
   CanonicalPreview,
+  CatalogMatch,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -50,6 +51,12 @@ interface State {
    *  kullanıcı kararı: toplu değil, gerektiğinde ve tek tek. */
   canonicalPending: (CanonicalPreview & { eolSlug: string; targetSlug: string }) | null;
   canonicalBusy: boolean;
+  /** Hedef seçme adımı: yapay zekâ halef bulamadığında (ya da öneriyi değiştirmek
+   *  istediğinde) kullanıcı hedefi kendisi arar. Yine tek satır için. */
+  canonicalPicker: { eolSlug: string; suggested: string } | null;
+  canonicalQuery: string;
+  canonicalResults: CatalogMatch[];
+  canonicalSearching: boolean;
   techStructuring: boolean;
   techDropped: string[];
   ideasoftBusy: boolean;
@@ -94,6 +101,10 @@ export const useStore = defineStore("app", {
     catalogBusy: false,
     canonicalPending: null,
     canonicalBusy: false,
+    canonicalPicker: null,
+    canonicalQuery: "",
+    canonicalResults: [],
+    canonicalSearching: false,
     techStructuring: false,
     techDropped: [],
     ideasoftBusy: false,
@@ -335,6 +346,58 @@ export const useStore = defineStore("app", {
       } finally {
         this.catalogBusy = false;
       }
+    },
+
+    /**
+     * Canonical akışını başlatır. Hedef biliniyorsa doğrudan önizlemeye, bilinmiyorsa
+     * hedef seçme adımına gider.
+     *
+     * ⚠️ Kullanıcı geri bildirimi (2026-07-30): halef önerisi boş çıktığında buton hiç
+     * görünmüyordu ve sayfa için hiçbir şey yapılamıyordu. Yapay zekânın halef bulamaması
+     * "hedef yok" demek değil — karar zaten operatörde.
+     */
+    async startCanonical(eolSlug: string, suggested = "") {
+      if (this.canonicalBusy) return;
+      if (suggested) return this.askCanonical(eolSlug, suggested);
+      this.canonicalPicker = { eolSlug, suggested };
+      this.canonicalQuery = "";
+      this.canonicalResults = [];
+    },
+
+    /** Hedef ararken IdeaSoft'ta ürün arar (ad üzerinden). */
+    async searchCanonicalTarget() {
+      const term = this.canonicalQuery.trim();
+      if (term.length < 3 || this.canonicalSearching) return;
+      this.canonicalSearching = true;
+      try {
+        this.canonicalResults = await api.searchCatalog(term);
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.canonicalSearching = false;
+      }
+    },
+
+    /** Listeden hedef seçildi → önizlemeye geç. */
+    async pickCanonicalTarget(targetSlug: string) {
+      const p = this.canonicalPicker;
+      if (!p) return;
+      this.canonicalPicker = null;
+      await this.askCanonical(p.eolSlug, targetSlug);
+    },
+
+    /** Önizlemeden hedef seçmeye dön — yanlış halef önerisini düzeltebilmek için. */
+    changeCanonicalTarget() {
+      const p = this.canonicalPending;
+      if (!p || this.canonicalBusy) return;
+      this.canonicalPending = null;
+      this.canonicalPicker = { eolSlug: p.eolSlug, suggested: "" };
+      this.canonicalQuery = "";
+      this.canonicalResults = [];
+    },
+
+    cancelCanonicalPicker() {
+      if (!this.canonicalSearching) this.canonicalPicker = null;
     },
 
     /** Canonical önizlemesi aç — YAZMAZ, yalnızca ne olacağını gösterir. */

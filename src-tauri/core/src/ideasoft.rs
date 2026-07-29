@@ -273,6 +273,125 @@ pub struct CatalogItem {
     pub canonical: String,
 }
 
+fn parse_item(v: &serde_json::Value) -> CatalogItem {
+    CatalogItem {
+        id: v.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
+        slug: v.get("slug").and_then(|x| x.as_str()).unwrap_or("").to_lowercase(),
+        name: v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        status: v.get("status").and_then(|x| x.as_i64()).unwrap_or(0),
+        stock: v.get("stockAmount").and_then(|x| x.as_f64()).unwrap_or(0.0),
+        canonical: v
+            .get("canonicalUrl")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+    }
+}
+
+/// Bir slug'ı bulmak için denenecek arama terimleri — **ağsız, test edilebilir.**
+///
+/// ⚠️ **`?s=` araması ADA göre çalışır, slug'a göre DEĞİL.** Ölçüldü (gerçek mağaza,
+/// 2026-07-30): `s=ergotron-lx-desk-monitor-arm` → 0 sonuç, `s=Ergotron LX Desk Monitor Arm`
+/// → aynı ürün. Bu yüzden slug tirelerden ayrılıp sözcük olarak aranıyor.
+///
+/// İkinci kısıt: arama **tüm** sözcüklerin geçmesini istiyor. Uzun slug'larda ad ile slug tam
+/// örtüşmediğinden tam terim boş dönebiliyor (ör. `lenovo-thinkpad-e15-g4-i7-1255u-32gb-...`
+/// 13 sözcükle 0 sonuç, 3 sözcükle 1. sırada doğru ürün). Merdiven bu yüzden var:
+/// tam → 6 → 4 → 3 sözcük. Çağıran ilk **birebir slug eşleşmesinde** durur.
+///
+/// Ölçüm (25 EOL sayfası, gerçek mağaza): **25/25 çözüldü, 1,44 istek/satır.**
+/// Kısa terimler geniş sonuç döndürdüğü için `limit` yüksek tutulmalı.
+fn search_terms(slug: &str) -> Vec<String> {
+    let toks: Vec<&str> = slug.split('-').filter(|t| !t.is_empty()).collect();
+    if toks.is_empty() {
+        return Vec::new();
+    }
+    let mut lens: Vec<usize> = Vec::new();
+    for n in [toks.len(), 6, 4, 3] {
+        let n = n.min(toks.len());
+        if !lens.contains(&n) {
+            lens.push(n);
+        }
+    }
+    lens.iter().map(|n| toks[..*n].join(" ")).collect()
+}
+
+/// Arama sonucundan slug'u **birebir** eşleşeni seçer.
+///
+/// ⚠️ Yaklaşık eşleşme bilinçli olarak YOK. Yanlış ürüne canonical yazmak geri alınması zor
+/// bir SEO hatası; "bulamadım" demek her zaman daha güvenli.
+fn pick_exact_slug(arr: &[serde_json::Value], slug: &str) -> Option<CatalogItem> {
+    let want = slug.trim().trim_matches('/').to_lowercase();
+    arr.iter()
+        .map(parse_item)
+        .find(|it| it.slug == want && it.id > 0)
+}
+
+async fn search_raw(
+    domain: &str,
+    token: &str,
+    term: &str,
+    limit: usize,
+) -> Result<Vec<serde_json::Value>, String> {
+    let base = base_url(domain)?;
+    let resp = http()?
+        .get(format!("{base}/admin-api/products"))
+        .query(&[("s", term), ("limit", &limit.to_string())])
+        .bearer_auth(token.trim())
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("IdeaSoft'a ulaşılamadı: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(map_status(status.as_u16(), &text));
+    }
+    // Kısa terimlerde API kısıt hatası dönebiliyor; bu bir arama sonucu yokluğudur, hata değil.
+    Ok(serde_json::from_str(&text).unwrap_or_default())
+}
+
+/// Slug'dan ürünü bulur — **katalog senkronuna gerek yok.**
+///
+/// Neden var: canonical akışı önce yalnızca yerel `ideasoft_catalog` tablosuna bakıyordu ve
+/// tablo boşsa kullanıcıyı 7 dakikalık tam senkrona zorluyordu (saha hatası, v0.6.4).
+/// Tek satır için tek arama yeter.
+pub async fn resolve_slug(
+    domain: &str,
+    token: &str,
+    slug: &str,
+) -> Result<Option<CatalogItem>, String> {
+    for term in search_terms(slug) {
+        let arr = search_raw(domain, token, &term, 40).await?;
+        if let Some(hit) = pick_exact_slug(&arr, slug) {
+            return Ok(Some(hit));
+        }
+    }
+    Ok(None)
+}
+
+/// Serbest metinle ürün arar — canonical hedefini elle seçmek için.
+///
+/// Yapay zekâ halef bulamadığında kullanıcı hedefi kendisi seçebilmeli (kullanıcı geri
+/// bildirimi, 2026-07-30): "uygun halef bulunamasa bile canonical ayarlama imkânı sunulmalı."
+pub async fn search_products(
+    domain: &str,
+    token: &str,
+    term: &str,
+    limit: usize,
+) -> Result<Vec<CatalogItem>, String> {
+    let term = term.trim();
+    if term.len() < 3 {
+        return Ok(Vec::new());
+    }
+    let arr = search_raw(domain, token, term, limit).await?;
+    Ok(arr
+        .iter()
+        .map(parse_item)
+        .filter(|it| it.id > 0 && !it.slug.is_empty())
+        .collect())
+}
+
 /// **Tüm kataloğu** sayfalayarak çeker.
 ///
 /// Neden gerekli: XML feed bilinçli olarak sınırlı (bu mağazada 10.909 üründen 262'si).
@@ -328,19 +447,8 @@ where
         let arr: Vec<serde_json::Value> =
             serde_json::from_str(&text).map_err(|e| format!("Katalog yanıtı okunamadı: {e}"))?;
         let got = arr.len();
-        for v in arr {
-            out.push(CatalogItem {
-                id: v.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
-                slug: v.get("slug").and_then(|x| x.as_str()).unwrap_or("").to_lowercase(),
-                name: v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                status: v.get("status").and_then(|x| x.as_i64()).unwrap_or(0),
-                stock: v.get("stockAmount").and_then(|x| x.as_f64()).unwrap_or(0.0),
-                canonical: v
-                    .get("canonicalUrl")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-            });
+        for v in &arr {
+            out.push(parse_item(v));
         }
         on_progress(out.len(), total_hint);
 
@@ -700,4 +808,73 @@ mod tests {
         assert!(with_slug > 0, "slug alanı boş geliyorsa eşleştirme yapılamaz");
     }
 
+    #[test]
+    fn search_terms_kisadan_uzuna_degil_uzundan_kisaya_daralir() {
+        // En belirleyici (en uzun) terim önce denenir; boş dönerse kademeli gevşetilir.
+        let t = search_terms("lenovo-thinkpad-e15-g4-i7-1255u-32gb-1tb-15-6-freedos");
+        assert_eq!(t.len(), 4, "merdiven tam → 6 → 4 → 3 olmalı: {t:?}");
+        assert_eq!(t[0], "lenovo thinkpad e15 g4 i7 1255u 32gb 1tb 15 6 freedos");
+        assert_eq!(t[1], "lenovo thinkpad e15 g4 i7 1255u");
+        assert_eq!(t[2], "lenovo thinkpad e15 g4");
+        assert_eq!(t[3], "lenovo thinkpad e15");
+    }
+
+    #[test]
+    fn search_terms_kisa_slugda_tekrar_uretmez() {
+        // 3 sözcüklü slug'da tam terim ile merdivenin son basamağı aynı — iki kez istek atmayalım.
+        assert_eq!(search_terms("ergotron-lx-arm"), vec!["ergotron lx arm"]);
+        assert_eq!(
+            search_terms("ergotron-lx-desk-monitor-arm"),
+            vec![
+                "ergotron lx desk monitor arm",
+                "ergotron lx desk monitor",
+                "ergotron lx desk",
+            ]
+        );
+        assert!(search_terms("").is_empty());
+    }
+
+    #[test]
+    fn pick_exact_slug_yaklasik_esleseni_secmez() {
+        // ⚠️ Bu testin koruduğu şey: yanlış ürüne canonical yazmamak. Arama "lenovo thinkpad e15"
+        // için 20 sonuç döndürüyor; hiçbiri birebir değilse cevap "bulamadım" olmalı.
+        let arr: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+              {"id": 1, "slug": "lenovo-thinkpad-e15-g4-21e6006ytx", "name": "A", "status": 1},
+              {"id": 2, "slug": "lenovo-thinkpad-e15-g4-i7-1255u", "name": "B", "status": 1}
+            ]"#,
+        )
+        .unwrap();
+        assert!(pick_exact_slug(&arr, "lenovo-thinkpad-e15-g4").is_none());
+        assert!(pick_exact_slug(&arr, "lenovo-thinkpad-e15-g4-i7-1255u-32gb").is_none());
+        let hit = pick_exact_slug(&arr, "LENOVO-ThinkPad-E15-G4-I7-1255U").expect("birebir eşleşme");
+        assert_eq!(hit.id, 2, "büyük/küçük harf ve baştaki eğik çizgi eşleşmeyi bozmamalı");
+        assert_eq!(pick_exact_slug(&arr, "/lenovo-thinkpad-e15-g4-21e6006ytx/").map(|i| i.id), Some(1));
+    }
+
+    #[test]
+    fn pick_exact_slug_idsiz_kaydi_atlar() {
+        // id olmadan canonical yazılamaz; böyle bir kayıt eşleşme sayılmamalı.
+        let arr: Vec<serde_json::Value> =
+            serde_json::from_str(r#"[{"slug": "abc", "name": "A"}]"#).unwrap();
+        assert!(pick_exact_slug(&arr, "abc").is_none());
+    }
+
+    /// Gerçek mağazada slug çözümlemesi — senkron gerekmediğini doğrular.
+    /// `IDEASOFT_DOMAIN=… IDEASOFT_TOKEN=… IDEASOFT_SLUG=… cargo test -p seo-core resolve_slug_real -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn resolve_slug_real() {
+        let domain = std::env::var("IDEASOFT_DOMAIN").expect("IDEASOFT_DOMAIN yok");
+        let token = std::env::var("IDEASOFT_TOKEN").expect("IDEASOFT_TOKEN yok");
+        let slug = std::env::var("IDEASOFT_SLUG").expect("IDEASOFT_SLUG yok");
+        let t0 = std::time::Instant::now();
+        let hit = resolve_slug(&domain, &token, &slug).await.expect("arama hatası");
+        println!(
+            "SLUG={slug} SONUC={:?} SURE_SN={:.1}",
+            hit.as_ref().map(|h| (h.id, h.status)),
+            t0.elapsed().as_secs_f64()
+        );
+        assert!(hit.is_some(), "slug çözülemedi — arama merdiveni yetersiz olabilir");
+    }
 }

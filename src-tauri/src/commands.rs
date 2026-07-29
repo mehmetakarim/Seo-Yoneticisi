@@ -2024,10 +2024,102 @@ pub fn lookup_catalog(
     Ok(out)
 }
 
+/// IdeaSoft bağlantı ayarları — kilidi await'ten önce bırakmak için ayrı okunur.
+fn ideasoft_creds(state: &State<'_, AppState>) -> Result<(String, String), String> {
+    let conn = state.conn.lock().unwrap();
+    let d = db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default();
+    let t = db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default();
+    if d.trim().is_empty() || t.trim().is_empty() {
+        return Err("IdeaSoft bağlantısı kurulmamış. Ayarlar'dan alan adı ve token girin.".into());
+    }
+    Ok((d, t))
+}
+
+/// Slug → (id, ad). Önce yerel katalog (ağsız, bedava), yoksa IdeaSoft aramasıyla tek satır çözer.
+///
+/// ⚠️ **Saha hatası (v0.6.4):** bu çözümleme eskiden YALNIZCA yerel `ideasoft_catalog` tablosuna
+/// bakıyordu. Tablo boşken kullanıcı "Canonical ayarla"ya bastığında
+/// *"Bu sayfa IdeaSoft kataloğunda bulunamadı, önce katalog senkronunu çalıştırın"* uyarısı
+/// alıyordu — yani tek bir satırı yazmak için ~7 dakikalık tam senkron ön koşuldu. Ölçüm bunun
+/// gereksiz olduğunu gösterdi: `resolve_slug` satır başına **1,44 istek** ile 25/25 çözüyor.
+/// Senkron artık yalnızca bir hızlandırma; ön koşul değil.
+async fn resolve_slug_cached(
+    state: &State<'_, AppState>,
+    domain: &str,
+    token: &str,
+    slug: &str,
+) -> Result<(i64, String), String> {
+    let key = slug.trim().trim_matches('/').to_lowercase();
+    if key.is_empty() {
+        return Err("Ürün adresi boş.".into());
+    }
+    // 1) Yerel katalog
+    {
+        let conn = state.conn.lock().unwrap();
+        if let Ok(hit) = conn.query_row(
+            "SELECT id, name FROM ideasoft_catalog WHERE slug = ?1",
+            [&key],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+        ) {
+            return Ok(hit);
+        }
+    }
+    // 2) IdeaSoft araması
+    let found = ideasoft::resolve_slug(domain, token, &key).await?.ok_or_else(|| {
+        format!("\"{key}\" IdeaSoft'ta bulunamadı. Ürün silinmiş olabilir; bu durumda canonical yazılamaz.")
+    })?;
+    // Bir sonraki çağrı bedava olsun.
+    {
+        let conn = state.conn.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO ideasoft_catalog
+             (slug, id, name, status, stock, canonical, synced_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                found.slug,
+                found.id,
+                found.name,
+                found.status,
+                found.stock,
+                found.canonical,
+                now_str()
+            ],
+        );
+    }
+    Ok((found.id, found.name))
+}
+
+/// Serbest metinle ürün arar — canonical hedefini **elle** seçmek için.
+///
+/// Kullanıcı geri bildirimi (2026-07-30): *"Uygun halef bulunamasa bile kullanıcıya canonical
+/// ayarla imkânı sunulmalı."* Yapay zekânın halef bulamaması hedefin olmadığı anlamına gelmiyor;
+/// karar zaten operatörde.
+#[tauri::command]
+pub async fn search_catalog(
+    state: State<'_, AppState>,
+    term: String,
+) -> Result<Vec<CatalogMatch>, String> {
+    let (domain, token) = ideasoft_creds(&state)?;
+    let items = ideasoft::search_products(&domain, &token, &term, 25).await?;
+    Ok(items
+        .into_iter()
+        .map(|i| CatalogMatch {
+            slug: i.slug,
+            id: i.id,
+            name: i.name,
+            status: i.status,
+            stock: i.stock,
+            canonical: i.canonical,
+        })
+        .collect())
+}
+
 #[derive(Serialize)]
 pub struct CanonicalPreview {
     pub product_id: i64,
     pub product_name: String,
+    /// Canonical'ın işaret edeceği ürünün adı — kullanıcı doğru hedefi seçtiğini görsün.
+    pub target_name: String,
     /// Şu an tanımlı canonical (boşsa yok).
     pub current: String,
     /// Yazılacak değer (`urun/<slug>` biçiminde).
@@ -2045,30 +2137,19 @@ pub async fn preview_canonical(
     eol_slug: String,
     target_slug: String,
 ) -> Result<CanonicalPreview, String> {
-    let (domain, token, product) = {
-        let conn = state.conn.lock().unwrap();
-        let d = db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default();
-        let t = db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default();
-        let row = conn.query_row(
-            "SELECT id, name FROM ideasoft_catalog WHERE slug = ?1",
-            [&eol_slug.to_lowercase()],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
-        );
-        (d, t, row)
-    };
-    if domain.trim().is_empty() || token.trim().is_empty() {
-        return Err("IdeaSoft bağlantısı kurulmamış. Ayarlar'dan girin.".into());
-    }
-    let (product_id, product_name) = product.map_err(|_| {
-        "Bu sayfa IdeaSoft kataloğunda bulunamadı. Önce katalog senkronunu çalıştırın.".to_string()
-    })?;
+    let (domain, token) = ideasoft_creds(&state)?;
+    let (product_id, product_name) = resolve_slug_cached(&state, &domain, &token, &eol_slug).await?;
+    // ⚠️ HEDEF de doğrulanır. Var olmayan bir sayfaya canonical yazmak, hiç yazmamaktan kötüdür:
+    // Google'a "asıl sayfa şu" der ve o sayfa 404'tür. Bulunamazsa yazma adımına geçilmez.
+    let (_, target_name) = resolve_slug_cached(&state, &domain, &token, &target_slug).await?;
 
     let cur = ideasoft::get_seo_setting(&domain, &token, product_id).await?;
     Ok(CanonicalPreview {
         product_id,
         product_name,
+        target_name,
         current: cur.canonical,
-        proposed: format!("urun/{}", target_slug.trim().trim_start_matches('/')),
+        proposed: format!("urun/{}", target_slug.trim().trim_matches('/').to_lowercase()),
         will_create: cur.setting_id.is_none(),
     })
 }
@@ -2087,26 +2168,16 @@ pub async fn apply_canonical(
     eol_slug: String,
     target_slug: String,
 ) -> Result<String, String> {
-    let (domain, token, product_id) = {
-        let conn = state.conn.lock().unwrap();
-        let d = db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default();
-        let t = db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default();
-        let id = conn
-            .query_row(
-                "SELECT id FROM ideasoft_catalog WHERE slug = ?1",
-                [&eol_slug.to_lowercase()],
-                |r| r.get::<_, i64>(0),
-            )
-            .map_err(|_| "Sayfa IdeaSoft kataloğunda yok — katalog senkronunu çalıştırın.".to_string())?;
-        (d, t, id)
-    };
-    if domain.trim().is_empty() || token.trim().is_empty() {
-        return Err("IdeaSoft bağlantısı kurulmamış.".into());
-    }
+    let (domain, token) = ideasoft_creds(&state)?;
+    let (product_id, _) = resolve_slug_cached(&state, &domain, &token, &eol_slug).await?;
+    // Önizlemede doğrulanmış olsa da burada tekrar bakılıyor: bu komut canlı mağazayı değiştiriyor
+    // ve var olmayan bir hedefe canonical yazmamalı. Önizleme sonrası önbellekten geldiği için
+    // ek istek yok.
+    resolve_slug_cached(&state, &domain, &token, &target_slug).await?;
 
     // Mevcut kaydı oku: index/follow korunmalı, yalnızca canonical değişmeli.
     let cur = ideasoft::get_seo_setting(&domain, &token, product_id).await?;
-    let target = format!("urun/{}", target_slug.trim().trim_start_matches('/'));
+    let target = format!("urun/{}", target_slug.trim().trim_matches('/').to_lowercase());
     ideasoft::set_canonical(&domain, &token, product_id, &target, &cur).await?;
 
     // Yerel katalogda da güncelle ki arayüz yeniden senkron beklemeden doğruyu göstersin.

@@ -66,6 +66,7 @@ pub fn run() {
             commands::suggest_eol_successor,
             commands::sync_ideasoft_catalog,
             commands::lookup_catalog,
+            commands::search_catalog,
             commands::preview_canonical,
             commands::apply_canonical,
             commands::get_settings,
