@@ -40,6 +40,25 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
    - Kota gerçeği: ücretsiz katmanda her modelin AYRI havuzu var; zincirdeki nesil çeşitliliği
      bu yüzden bilinçli. 2.0/2.5-flash kotası dolduğunda 3.x hâlâ çalışıyordu.
 
+0z. ⚠️ **ÖNBELLEĞE YAZILAN YAPIYA ALAN EKLERKEN DİKKAT (v0.5.9 saha hatası).**
+   `opportunity_json` gibi DB'ye serialize edilen bir yapıya yeni alan eklemek, ESKİ
+   ÖNBELLEĞİ olan kurulumlarda ekranı komple düşürebilir.
+
+   **Yaşanan:** v0.5.8'de rapora `eol` eklendi. `get_opportunity_cache` önbelleği ham
+   `serde_json::Value` döndürüyordu — yani Rust yapısından GEÇMİYORDU, dolayısıyla
+   `serde(default)` korumaları hiç devreye girmiyordu. Ön yüz `report.eol.length` deyince
+   `undefined.length` attı ve Vue **tüm sayfayı** düşürdü; koşulsuz render edilen buton bile
+   görünmedi. Kullanıcı "ekran bomboş" diye bildirdi.
+
+   **Kural:** önbellekten okunan her yapı **Deserialize + `#[serde(default)]`** taşımalı ve
+   komut ham JSON değil **yapının kendisini** döndürmeli. Ön yüzde `?.` ikinci savunma hattıdır,
+   birincisi değil.
+
+   ⚠️ **Neden testler yakalayamadı:** `vite dev`'de Tauri yok → önbellek yok → `report` null
+   kalır ve boş durum sorunsuz açılır. Hata YALNIZCA eski önbelleği olan kurulumda çıkar.
+   Harness tabanlı görsel doğrulama da bu senaryoyu görmez. Alan eklerken önbellek uyumu
+   ayrıca düşünülmeli; regresyon testi `old_opportunity_cache_still_parses`.
+
 0aa. 🔴 **EN BÜYÜK SEO FIRSATI: SATIŞTA OLMAYAN AMA TRAFİK ALAN SAYFALAR (v0.5.8).**
    Kullanıcının notundan çıktı ("feed'de satıştaki ürünler var, EOL nesillerin linkleri de
    indekste") ve ölçünce planlananın ~10 KATI çıktı.
