@@ -3,13 +3,14 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-07-28
+**Son güncelleme:** 2026-07-29
 **Aktif faz:** Fırsat analizi ✅ + sürüm notları ✅ · Mimari toparlama Faz 1/2a/3 ✅ ·
 **2b (modül bölme) ⏸️ ERTELENDİ** — kozmetik, kullanıcı kararı (bkz. madde 0b)
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
-**v0.5.6 = Fırsatlar sayfası + gerçek sürüm notları**
+v0.5.6 = Fırsatlar sayfası · v0.5.7 = meta/açıklama sürüm geçmişi ·
+**v0.5.8 = EOL sayfalar + fırsat filtreleri**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
@@ -38,6 +39,38 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
      geçmiş değiştiricisi sanar, URL bozulur ve **her model sahte 404 verir** (bir tur kaybettirdi).
    - Kota gerçeği: ücretsiz katmanda her modelin AYRI havuzu var; zincirdeki nesil çeşitliliği
      bu yüzden bilinçli. 2.0/2.5-flash kotası dolduğunda 3.x hâlâ çalışıyordu.
+
+0aa. 🔴 **EN BÜYÜK SEO FIRSATI: SATIŞTA OLMAYAN AMA TRAFİK ALAN SAYFALAR (v0.5.8).**
+   Kullanıcının notundan çıktı ("feed'de satıştaki ürünler var, EOL nesillerin linkleri de
+   indekste") ve ölçünce planlananın ~10 KATI çıktı.
+
+   **Ölçüm (2026-07-29, kurumsalit.com, son 90 gün, GSC):**
+   | | sayfa | tıklama | gösterim |
+   |---|---|---|---|
+   | satıştaki (feed'de) | 237 | 1.728 | 24.358 |
+   | **feed'de olmayan (EOL)** | **4.527** | **3.840** | **157.768** |
+
+   → Ürün trafiğinin **%69'u**, gösterimlerin **%87'si** satın alınamayan sayfalara gidiyor.
+   Kıyas: optimize ettiğimiz 60 fırsatın toplam kaybı yalnızca 374 tıklama.
+
+   - Sayfalar **HTTP 200 dönüyor** (curl ile doğrulandı) — ölü değiller, Google'da sıralanıyorlar;
+     ziyaretçi geliyor, ürünü satın alamıyor. Çözüm: güncel nesle 301.
+   - **Uygulama yönlendirme YAPAMAZ** — IdeaSoft panelinden tanımlanır. Ekranda açıkça yazılı.
+   - Eşik ölçümle seçildi: 4.523 EOL sayfanın yalnızca **967'si ≥1 tıklama** alıyor, gerisi gürültü.
+   - ⚠️ **Yol öneki zorunlu** (`common_path_prefix`, ürünlerden türetilir): olmadan blog ve
+     kategori sayfaları "satışta olmayan ürün" sanılır.
+   - ⚠️ **Tuzak (yaşandı):** "satışta" kümesi ÜRÜNLERDEN kurulmalı. Bir ara `by_url`den
+     (GSC sayfaları) kurmuştum — öyle kalsaydı her sayfa satışta sayılır, EOL listesi hep boş
+     çıkardı ve kimse fark etmezdi.
+
+0ab. ✅ **SORGU × SAYFA ALTYAPISI HAZIR (v0.5.8'de kod var, analizler henüz yok).**
+   `gsc.rs::query_page_stats` — `dimensions:["page","query"]`, `startRow` sayfalama (GSC tek
+   istekte en fazla 25.000 satır), `page contains <yol>` filtresi.
+   **Ölçüm:** 24.204 satır · 4.764 sayfa · 21.634 sorgu · **2,5 saniye**. Tek istekte sığdı.
+   Sıradaki: striking distance (poz 4–20, sorgu bazlı), kanibalizasyon (bir sorgu birden çok
+   sayfamızda, baskın pay yok), trend, iç link adayı. Referans: QueryLoom kural dosyası
+   (kullanıcı araştırması). Ahrefs hacim/zorluk verisi **istek üzerine, satır bazında, önbellekli**
+   bağlanacak — her CapSolver çözümü ücretli, toplu çalıştırılamaz.
 
 0a. ✅ **MODEL ZİNCİRİ LİMİTLERE GÖRE SIRALANDI + KULLANILAN MODEL GÖRÜNÜYOR (v0.5.4).**
    Konsoldan doğrulanan gerçek limitler (ücretsiz katman, 2026-07-28) sıralamayı değiştirdi —
