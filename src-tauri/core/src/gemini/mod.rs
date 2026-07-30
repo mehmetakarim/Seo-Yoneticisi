@@ -10,6 +10,7 @@ use crate::seo_data::SeoInsights;
 use crate::validation::{grapheme_len, MetaBadge, MetaInput};
 use serde::{Deserialize, Serialize};
 
+mod chat;
 mod details;
 mod meta;
 mod successor;
@@ -17,6 +18,7 @@ mod tech;
 
 // Dış yüzey bölmeden ÖNCEKİYLE aynı: çağıranlar hâlâ `gemini::X` yazıyor, hangi alt
 // modülde durduğunu bilmek zorunda değiller.
+pub use chat::{assistant_system_prompt, chat_stream, ChatEvent, ChatMessage, CHAT_CHAIN};
 pub use details::{generate_details, generate_details_scratch, has_rewritable_content, optimize_details};
 pub use meta::{generate_meta, GeneratedMeta};
 pub use successor::suggest_successor;

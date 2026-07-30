@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
 
+mod assistant;
 mod generation;
 mod ideasoft_cmd;
 mod opportunities;
@@ -21,6 +22,7 @@ mod versions;
 
 // Komut adları DEĞİŞMEDİ: `lib.rs`'teki `invoke_handler` listesi ve ön yüzdeki `invoke`
 // çağrıları aynen çalışıyor. Değişen tek şey komutların hangi dosyada durduğu.
+pub use assistant::*;
 pub use generation::*;
 pub use ideasoft_cmd::*;
 pub use opportunities::*;

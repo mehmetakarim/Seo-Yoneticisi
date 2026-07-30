@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   ImageCheck,
   ProductDetail,
@@ -14,6 +14,8 @@ import type {
   CatalogSyncResult,
   CatalogMatch,
   CanonicalPreview,
+  ChatMessage,
+  AssistantEvent,
 } from "./types";
 
 export const api = {
@@ -54,6 +56,19 @@ export const api = {
     invoke<SuccessorSuggestion>("suggest_eol_successor", { url }),
   syncIdeasoftCatalog: () => invoke<CatalogSyncResult>("sync_ideasoft_catalog"),
   searchCatalog: (term: string) => invoke<CatalogMatch[]>("search_catalog", { term }),
+  /**
+   * Asistan turu. Yanıt `onEvent` ile parça parça gelir; söz verilen değer kullanılan
+   * modelin adı. Uygulamada Tauri kanalının ilk kullanımı.
+   */
+  assistantAsk: (
+    history: ChatMessage[],
+    context: string,
+    onEvent: (e: AssistantEvent) => void,
+  ) => {
+    const ch = new Channel<AssistantEvent>();
+    ch.onmessage = onEvent;
+    return invoke<string>("assistant_ask", { history, context, onEvent: ch });
+  },
   previewCanonical: (eolSlug: string, targetSlug: string) =>
     invoke<CanonicalPreview>("preview_canonical", { eolSlug, targetSlug }),
   applyCanonical: (eolSlug: string, targetSlug: string) =>

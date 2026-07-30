@@ -12,6 +12,7 @@ serde_json = { workspace = true }
 rusqlite = { workspace = true }
 quick-xml = { workspace = true }
 reqwest = { workspace = true }
+futures-util = { workspace = true }
 unicode-segmentation = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }

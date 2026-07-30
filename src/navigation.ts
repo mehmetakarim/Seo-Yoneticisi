@@ -87,6 +87,15 @@ export const NAV = [
     group: "SEO Araçları",
   },
 
+  {
+    key: "assistant",
+    label: "Yapay Zekâ Asistanı",
+    icon: "message",
+    title: "Yapay Zekâ Asistanı",
+    sub: "Analiz verinizi konuşarak sorgulayın — asistan hiçbir değişiklik yapmaz",
+    group: "Asistan",
+  },
+
   { key: "settings", label: "Ayarlar", icon: "settings", title: "Ayarlar", group: "Sistem" },
 ] as const satisfies readonly NavItem[];
 
@@ -108,6 +117,18 @@ export function subOf(page: Page): string {
   const item = NAV.find((n) => n.key === page);
   return item && "sub" in item ? item.sub : "";
 }
+
+/**
+ * Analiz verisi gösteren araç ekranları. Asistan "hangi ekranın verisiyle konuşuyorum"
+ * sorusunu buradan cevaplıyor; Genel Bakış listede YOK çünkü orada satır verisi değil özet var.
+ */
+export const TOOL_PAGES: readonly Page[] = [
+  "opportunities",
+  "striking",
+  "cannibal",
+  "decay",
+  "eol",
+];
 
 /** Kenar çubuğu için: boş grup çizilmesin diye yalnızca öğesi olanlar döner. */
 export function groupedNav(): { group: Group; items: NavEntry[] }[] {

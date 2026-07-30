@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, type Component } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch, type Component } from "vue";
 import { useStore } from "./store";
-import { subOf, titleOf, type Page } from "./navigation";
+import { subOf, titleOf, TOOL_PAGES, type Page } from "./navigation";
 import Sidebar from "./components/Sidebar.vue";
 import ProductsPage from "./components/ProductsPage.vue";
 import SettingsPage from "./components/SettingsPage.vue";
@@ -13,6 +13,7 @@ import StrikingPage from "./components/tools/StrikingPage.vue";
 import CannibalPage from "./components/tools/CannibalPage.vue";
 import DecayPage from "./components/tools/DecayPage.vue";
 import EolPage from "./components/tools/EolPage.vue";
+import AssistantPage from "./components/tools/AssistantPage.vue";
 import UpdateModal from "./components/UpdateModal.vue";
 import Icon from "./components/Icon.vue";
 
@@ -33,6 +34,7 @@ const PAGES: Record<Page, Component> = {
   cannibal: CannibalPage,
   decay: DecayPage,
   eol: EolPage,
+  assistant: AssistantPage,
   settings: SettingsPage,
 };
 
@@ -92,6 +94,20 @@ function onKey(e: KeyboardEvent) {
     if (store.selectedSku) store.toggleMetaDone();
   }
 }
+
+/**
+ * Asistan hangi ekranın verisiyle konuşacağını bilmeli; `store.page` asistana geçince
+ * değiştiği için son ARAÇ ekranı ayrıca tutuluyor. Buradan izlenmesi bilinçli: `store.page`
+ * birçok yerden doğrudan atanıyor, tek bir aksiyona bağlamak hepsini elden geçirmeyi
+ * gerektirirdi.
+ */
+watch(
+  () => store.page,
+  (p) => {
+    if (TOOL_PAGES.includes(p)) store.lastToolPage = p;
+  },
+  { immediate: true },
+);
 
 onMounted(() => {
   store.init();

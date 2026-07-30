@@ -347,3 +347,15 @@ export interface CatalogMatch {
   stock: number;
   canonical: string;
 }
+
+/** Asistan sohbetindeki tek mesaj. `role` Gemini'nin beklediği adlandırma. */
+export interface ChatMessage {
+  role: "user" | "model";
+  text: string;
+}
+
+/**
+ * Akış olayı. `thinking` gerçek bir sinyal: Gemma akışta iç muhakemesini de yayınlıyor,
+ * onu filtreliyoruz ama "model çalışıyor" bilgisini arayüze taşıyoruz.
+ */
+export type AssistantEvent = { kind: "thinking" } | { kind: "chunk"; text: string };

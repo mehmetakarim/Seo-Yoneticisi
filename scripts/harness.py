@@ -114,14 +114,46 @@ def main():
     # `?empty=1` → analiz hiç çalıştırılmamış gibi davranır. Boş durumları elle test etmek
     # mümkün değil: sayfalar açılırken önbelleği yeniden yüklüyor, store'u dışarıdan
     # sıfırlamak yetmiyor. Bu senaryo önemli — v0.5.9'da boş ekran bir saha hatasıydı.
+    # Asistan akışı taklidi: gerçek Gemini çağrısı yapmadan arayüzü doğrulamak için.
+    # Önce "düşünüyor" olayları, sonra parça parça cevap — canlı ölçümdeki sıranın aynısı
+    # (Gemma önce muhakemesini yayınlıyor, cevap sonda geliyor).
+    fake_answer = (
+        "Bu ekrandaki veriye göre en çok tıklama kaçıran üç sayfa şunlar:\n"
+        "- **Ergotron WorkFit-T 33-397-062** — 474 gösterim, 2 tıklama, konum 4.1. "
+        "Konum iyi ama `CTR` çok düşük; sorun sıralamada değil başlıkta.\n"
+        "- **Lenovo ThinkPad E16 G3** — 850 gösterim, 33 tıklama.\n"
+        "- **Logitech M280** — 1207 gösterim, 3 tıklama.\n\n"
+        "Önce ilkine bakın: konumu ilk sayfada olduğu için başlık ve açıklama düzeltmesi "
+        "doğrudan tıklamaya dönüşür. Bunu **Ürünler** ekranından üretebilirsiniz."
+    )
+
     stub = (
         "<script>\n"
         "// Tauri IPC taklidi — yalnızca harness için. Uygulama bundle'ı gerçek.\n"
         "window.__TAURI_INTERNALS__ = {\n"
-        "  invoke: (cmd) => {\n"
+        "  invoke: (cmd, args) => {\n"
         f"    const H = {json.dumps(handlers, ensure_ascii=False)};\n"
         "    if (new URLSearchParams(location.search).has('empty')\n"
         "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
+        "    if (cmd === 'assistant_ask') {\n"
+        f"      const ANS = {json.dumps(fake_answer, ensure_ascii=False)};\n"
+        "      const ch = args && args.onEvent;\n"
+        "      return new Promise((resolve) => {\n"
+        "        let i = 0;\n"
+        "        const think = setInterval(() => {\n"
+        "          if (ch && ch.onmessage) ch.onmessage({ kind: 'thinking' });\n"
+        "          if (++i >= 6) {\n"
+        "            clearInterval(think);\n"
+        "            const parts = ANS.match(/[\\s\\S]{1,28}/g) || [];\n"
+        "            let j = 0;\n"
+        "            const feed = setInterval(() => {\n"
+        "              if (ch && ch.onmessage) ch.onmessage({ kind: 'chunk', text: parts[j] });\n"
+        "              if (++j >= parts.length) { clearInterval(feed); resolve('gemma-4-31b-it'); }\n"
+        "            }, 30);\n"
+        "          }\n"
+        "        }, 140);\n"
+        "      });\n"
+        "    }\n"
         "    return Promise.resolve(cmd in H ? H[cmd] : null);\n"
         "  },\n"
         "  transformCallback: (cb) => { const id = Math.random(); window[id] = cb; return id; },\n"

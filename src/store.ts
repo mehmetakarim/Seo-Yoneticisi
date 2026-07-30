@@ -14,6 +14,7 @@ import type {
   SuccessorSuggestion,
   CanonicalPreview,
   CatalogMatch,
+  ChatMessage,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -57,6 +58,18 @@ interface State {
   canonicalQuery: string;
   canonicalResults: CatalogMatch[];
   canonicalSearching: boolean;
+  /** Asistan sohbeti. Bellekte, oturumla sınırlı — DB'ye yazmak yeni tablo + temizleme
+   *  politikası demek; ilk sürümde kapsam dışı. */
+  /** Asistanın bağlam kaynağı: kullanıcı asistana geçmeden ÖNCE hangi araç ekranındaydı.
+   *  `page` asistana geçince değiştiği için ayrı tutuluyor. App.vue güncelliyor. */
+  lastToolPage: Page | "";
+  chat: ChatMessage[];
+  chatBusy: boolean;
+  /** Model düşünüyor ama henüz cevap parçası gelmedi (Gemma akışta muhakemesini de
+   *  yayınlıyor, onu filtreliyoruz). Kör döner ikon yerine gerçek sinyal. */
+  chatThinking: boolean;
+  /** Son turu hangi model cevapladı — rozet olarak gösteriliyor. */
+  chatModel: string;
   techStructuring: boolean;
   techDropped: string[];
   ideasoftBusy: boolean;
@@ -105,6 +118,11 @@ export const useStore = defineStore("app", {
     canonicalQuery: "",
     canonicalResults: [],
     canonicalSearching: false,
+    lastToolPage: "",
+    chat: [],
+    chatBusy: false,
+    chatThinking: false,
+    chatModel: "",
     techStructuring: false,
     techDropped: [],
     ideasoftBusy: false,
@@ -332,6 +350,121 @@ export const useStore = defineStore("app", {
       } finally {
         this.successorBusy = "";
       }
+    },
+
+    /**
+     * Asistanın göreceği bağlam: kullanıcının O AN baktığı ekranın satırları + rapor özeti.
+     *
+     * ⚠️ Kullanıcı kararı buydu — tüm raporu (2.190 EOL satırı dahil) her mesajda göndermek
+     * gecikmeyi artırır ve uzun bağlamda model detayı karıştırmaya daha yatkın olur.
+     * Satır sayısı bilinçli olarak sınırlı; asistan "listenin tamamı" iddiasında bulunmasın
+     * diye kaç satır gördüğü de bağlama yazılıyor.
+     */
+    assistantContext(): string {
+      const r = this.opportunity;
+      if (!r) return "Henüz analiz çalıştırılmamış — elimizde Search Console verisi yok.";
+      const N = 50;
+      const n = (x: number) => Math.round(x);
+      const lines: string[] = [
+        `Analiz tarihi: ${r.analyzed_at} · son ${r.days} gün`,
+        `Katalog: ${r.total_products} ürün, ${r.matched} tanesi Google'da bulundu`,
+        `Fırsat: ${r.opportunities?.length ?? 0} · Satışta olmayan sayfa: ${r.eol?.length ?? 0} ` +
+          `(${n(r.eol_clicks ?? 0)} tıklama) · Yükselmeye yakın sorgu: ${r.striking?.length ?? 0} ` +
+          `· Yarışan arama: ${r.cannibalization?.length ?? 0} · Düşüşte: ${r.decay?.length ?? 0}`,
+        "",
+      ];
+
+      const take = <T>(a: T[] | undefined) => (a ?? []).slice(0, N);
+      const more = (a: unknown[] | undefined) =>
+        (a?.length ?? 0) > N ? ` (ilk ${N} satır; toplam ${a!.length})` : "";
+
+      // Aktif ekranın verisi ayrıntılı, diğerleri yalnızca yukarıdaki özet satırında.
+      switch (this.lastToolPage) {
+        case "opportunities":
+          lines.push(`FIRSATLAR${more(r.opportunities)}:`);
+          for (const o of take(r.opportunities))
+            lines.push(
+              `- ${o.name} [${o.sku}] gösterim=${n(o.impressions)} tıklama=${n(o.clicks)} ` +
+                `konum=${o.position.toFixed(1)} kaçırılan=${n(o.missed_clicks)} sebep=${o.reason} ` +
+                `kategori=${o.category || "-"} marka=${o.brand || "-"}`,
+            );
+          break;
+        case "eol":
+          lines.push(`SATIŞTA OLMAYAN AMA TRAFİK ALAN SAYFALAR${more(r.eol)}:`);
+          for (const e of take(r.eol))
+            lines.push(
+              `- ${e.slug} tıklama=${n(e.clicks)} gösterim=${n(e.impressions)} konum=${e.position.toFixed(1)}`,
+            );
+          break;
+        case "striking":
+          lines.push(`YÜKSELMEYE YAKIN SORGULAR${more(r.striking)}:`);
+          for (const q of take(r.striking))
+            lines.push(
+              `- "${q.query}" → ${q.name} gösterim=${n(q.impressions)} tıklama=${n(q.clicks)} ` +
+                `konum=${q.position.toFixed(1)} kaçırılan=${n(q.missed_clicks)}`,
+            );
+          break;
+        case "cannibal":
+          lines.push("BİRBİRİYLE YARIŞAN SAYFALAR:");
+          for (const c of take(r.cannibalization)) {
+            lines.push(`- "${c.query}" gösterim=${n(c.impressions)} tıklama=${n(c.clicks)}`);
+            for (const pg of c.pages)
+              lines.push(`    · ${pg.name} konum=${pg.position.toFixed(1)} tıklama=${n(pg.clicks)}`);
+          }
+          break;
+        case "decay":
+          lines.push(`DÜŞÜŞTE OLANLAR${more(r.decay)}:`);
+          for (const d of take(r.decay))
+            lines.push(
+              `- ${d.name} [${d.sku}] tıklama ${n(d.clicks_before)}→${n(d.clicks_now)} ` +
+                `konum ${d.position_before.toFixed(1)}→${d.position_now.toFixed(1)} kayıp=${n(d.clicks_lost)}`,
+            );
+          break;
+        default:
+          lines.push(
+            "Kullanıcı şu an bir araç ekranında değil; yalnızca yukarıdaki özet elimizde.",
+          );
+      }
+      return lines.join("\n");
+    },
+
+    /** Asistana bir soru gönderir; yanıt akarken `chat`teki son mesaj büyür. */
+    async askAssistant(question: string) {
+      const q = question.trim();
+      if (!q || this.chatBusy) return;
+      this.chat.push({ role: "user", text: q });
+      // Cevap balonu ÖNCEDEN eklenir ve parçalar ona akar; böylece kullanıcı yazının
+      // gerçek zamanlı büyüdüğünü görür.
+      this.chat.push({ role: "model", text: "" });
+      const slot = this.chat.length - 1;
+      this.chatBusy = true;
+      this.chatThinking = true;
+      this.chatModel = "";
+      try {
+        // Boş cevap balonu geçmişe gönderilmez — model onu kendi turu sanır.
+        const history = this.chat.slice(0, -1);
+        const model = await api.assistantAsk(history, this.assistantContext(), (e) => {
+          if (e.kind === "thinking") return;
+          this.chatThinking = false;
+          this.chat[slot].text += e.text;
+        });
+        this.chatModel = model;
+        if (!this.chat[slot].text.trim()) {
+          this.chat[slot].text = "Yanıt alınamadı, tekrar deneyin.";
+        }
+      } catch (e) {
+        // Hata balonun İÇİNDE gösterilir: toast kaybolur ve kullanıcı boş balonla kalırdı.
+        this.chat[slot].text = String(e);
+      } finally {
+        this.chatBusy = false;
+        this.chatThinking = false;
+      }
+    },
+
+    clearChat() {
+      if (this.chatBusy) return;
+      this.chat = [];
+      this.chatModel = "";
     },
 
     /** IdeaSoft kataloğunu çeker (~7 dk, 10.909 ürün). Elle tetiklenir. */
