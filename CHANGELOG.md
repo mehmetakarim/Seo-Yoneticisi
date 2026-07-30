@@ -13,6 +13,9 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.7.1
+- Düzeltme: kenar çubuğunda asistan sekmesi "AI Asistanı" olarak kısaldı — uzun ad iki satıra kırılıp menü hizasını bozuyordu
+
 ## v0.7.0
 - Yeni: her SEO aracı artık kendi ekranında — Fırsatlar, Yükselmeye yakın, Yarışan sayfalar, Düşüşte olanlar, Satışta olmayanlar
 - Yeni: "Genel Bakış" ekranı — analizi buradan çalıştırın, hangi araçta ne kadar kayıp olduğunu tek bakışta görün
