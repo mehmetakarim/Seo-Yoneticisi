@@ -1,0 +1,321 @@
+//! Ayarlar, bağlantı testleri ve yedekleme (dışa/içe aktarma).
+
+use super::*;
+
+#[tauri::command]
+pub async fn test_capsolver_key(key: String) -> Result<String, String> {
+    seo_data::ahrefs::test_key(&key).await
+}
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
+    let conn = state.conn.lock().unwrap();
+    Ok(Settings {
+        feed_url: db::feed_url(&conn)?,
+        gemini_api_key: db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default(),
+        capsolver_api_key: db::get_setting(&conn, "capsolver_api_key")?.unwrap_or_default(),
+        seo_country: db::get_setting(&conn, "seo_country")?.unwrap_or_else(|| "tr".to_string()),
+        gsc_site_url: db::get_setting(&conn, "gsc_site_url")?.unwrap_or_default(),
+        gsc_client_email: db::get_setting(&conn, "gsc_service_account_json")?
+            .as_deref()
+            .and_then(seo_data::gsc::client_email_of)
+            .unwrap_or_default(),
+        ideasoft_domain: db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default(),
+        ideasoft_token: db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default(),
+        ideasoft_active: !db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default().trim().is_empty()
+            && !db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default().trim().is_empty(),
+        theme: db::get_setting(&conn, "theme")?,
+        last_backup_at: db::get_setting(&conn, "last_backup_at")?,
+    })
+}
+
+#[tauri::command]
+pub fn save_settings(
+    state: State<'_, AppState>,
+    feed_url: String,
+    gemini_api_key: String,
+    capsolver_api_key: String,
+    seo_country: String,
+    gsc_site_url: String,
+    ideasoft_domain: String,
+    ideasoft_token: String,
+) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    let url = feed_url.trim();
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Geçerli bir URL girin (http/https).".to_string());
+    }
+    db::set_setting(&conn, "feed_url", url)?;
+    db::set_setting(&conn, "gemini_api_key", gemini_api_key.trim())?;
+    db::set_setting(&conn, "capsolver_api_key", capsolver_api_key.trim())?;
+    let country = seo_country.trim().to_lowercase();
+    let country = if country.is_empty() { "tr".to_string() } else { country };
+    db::set_setting(&conn, "seo_country", &country)?;
+    db::set_setting(&conn, "gsc_site_url", gsc_site_url.trim())?;
+    db::set_setting(&conn, "ideasoft_domain", ideasoft_domain.trim())?;
+    db::set_setting(&conn, "ideasoft_token", ideasoft_token.trim())?;
+    Ok(())
+}
+
+/// Faz 5: seçilen service-account JSON dosyasını okur, doğrular + saklar. UI'ya client_email döner.
+#[tauri::command]
+pub fn set_gsc_service_account(state: State<'_, AppState>, path: String) -> Result<String, String> {
+    let json = std::fs::read_to_string(&path).map_err(|e| format!("Dosya okunamadı: {e}"))?;
+    let email = seo_data::gsc::validate_json(&json)?;
+    let conn = state.conn.lock().unwrap();
+    db::set_setting(&conn, "gsc_service_account_json", json.trim())?;
+    Ok(email)
+}
+
+/// Faz 5: yüklü SA'yı kaldırır (GSC'yi devre dışı bırakır).
+#[tauri::command]
+pub fn clear_gsc_service_account(state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    db::set_setting(&conn, "gsc_service_account_json", "")?;
+    Ok(())
+}
+
+/// Faz 5: Ayarlarda "Bağlantıyı test et" — token al + mülk erişimini doğrula.
+#[tauri::command]
+pub async fn test_gsc_credentials(state: State<'_, AppState>) -> Result<String, String> {
+    let (json, site) = {
+        let conn = state.conn.lock().unwrap();
+        (
+            db::get_setting(&conn, "gsc_service_account_json")?.unwrap_or_default(),
+            db::get_setting(&conn, "gsc_site_url")?.unwrap_or_default(),
+        )
+    };
+    if json.trim().is_empty() {
+        return Err("Önce bir service-account JSON dosyası yükleyin.".to_string());
+    }
+    seo_data::gsc::test(&json, &site).await
+}
+
+#[tauri::command]
+pub fn set_theme(state: State<'_, AppState>, theme: String) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    db::set_setting(&conn, "theme", &theme)
+}
+
+#[tauri::command]
+pub async fn test_feed_url(url: String) -> Result<i64, String> {
+    let u = url.trim();
+    if !u.starts_with("http://") && !u.starts_with("https://") {
+        return Err("Geçerli bir URL girin (http/https).".to_string());
+    }
+    let items = feed::fetch_and_parse(u).await?;
+    Ok(items.len() as i64)
+}
+
+#[tauri::command]
+pub async fn test_gemini_key(key: String) -> Result<String, String> {
+    gemini::test_key(&key).await
+}
+
+#[tauri::command]
+pub fn export_db(state: State<'_, AppState>, path: String, format: String) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    match format.as_str() {
+        "db" => {
+            let mut dest = Connection::open(&path)
+                .map_err(|e| format!("Hedef dosya açılamadı: {e}"))?;
+            let backup = rusqlite::backup::Backup::new(&conn, &mut dest)
+                .map_err(|e| format!("Yedekleme başlatılamadı: {e}"))?;
+            backup
+                .run_to_completion(100, std::time::Duration::from_millis(5), None)
+                .map_err(|e| format!("Yedekleme tamamlanamadı: {e}"))?;
+        }
+        "json" => {
+            let json = export_json(&conn)?;
+            std::fs::write(&path, json).map_err(|e| format!("Dosya yazılamadı: {e}"))?;
+        }
+        other => return Err(format!("Bilinmeyen format: {other}")),
+    }
+    db::set_setting(&conn, "last_backup_at", &now_str())?;
+    Ok(())
+}
+
+fn export_json(conn: &Connection) -> Result<String, String> {
+    use serde_json::{json, Value};
+    fn dump(conn: &Connection, table: &str, cols: &[&str]) -> Result<Vec<Value>, String> {
+        let sql = format!("SELECT {} FROM {}", cols.join(", "), table);
+        let mut stmt = conn.prepare(&sql).map_err(|e| format!("{table} okunamadı: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                let mut obj = serde_json::Map::new();
+                for (i, col) in cols.iter().enumerate() {
+                    let v: Option<rusqlite::types::Value> = row.get(i)?;
+                    let jv = match v {
+                        Some(rusqlite::types::Value::Text(s)) => Value::String(s),
+                        Some(rusqlite::types::Value::Integer(n)) => Value::from(n),
+                        Some(rusqlite::types::Value::Real(f)) => Value::from(f),
+                        _ => Value::Null,
+                    };
+                    obj.insert((*col).to_string(), jv);
+                }
+                Ok(Value::Object(obj))
+            })
+            .map_err(|e| format!("{table} okunamadı: {e}"))?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+    let products = dump(
+        conn,
+        "products",
+        &[
+            "sku", "id", "name", "brand", "main_category", "category", "quantity", "url",
+            "img_url", "title", "descriptions", "keywords", "search_keywords", "details",
+            "last_synced_at", "picture2", "picture3", "picture4",
+        ],
+    )?;
+    // Not: draft_details/research_json/tech_* alanları da yedeklenir. Teknik tablo feed'de YOK,
+    // yani yedekte yoksa geri getirilemez (gerçek emek kaybı).
+    let seo = dump(
+        conn,
+        "seo_status",
+        &[
+            "sku", "meta_status", "details_status", "target_keyword", "draft_title",
+            "draft_descriptions", "draft_keywords", "draft_search_keywords", "updated_at",
+            "draft_details", "research_json", "image_check_json", "image_check_fp",
+            "tech_source_text", "tech_specs_json", "tech_status", "tech_history_json",
+            "ideasoft_product_id", "ideasoft_pushed_at", "ideasoft_seo_rule",
+            "meta_model", "details_model", "tech_model",
+            "meta_history_json", "details_history_json",
+        ],
+    )?;
+    let log = dump(
+        conn,
+        "sync_log",
+        &["run_at", "active", "added", "updated", "deleted", "duplicate_skipped"],
+    )?;
+    let settings = dump(conn, "settings", &["key", "value"])?;
+    let root = json!({
+        "app": "seo-yoneticisi",
+        "exported_at": now_str(),
+        "products": products,
+        "seo_status": seo,
+        "sync_log": log,
+        "settings": settings,
+    });
+    serde_json::to_string_pretty(&root).map_err(|e| format!("JSON oluşturulamadı: {e}"))
+}
+
+#[tauri::command]
+pub fn import_db(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let mut conn = state.conn.lock().unwrap();
+    let lower = path.to_lowercase();
+    if lower.ends_with(".json") {
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("Dosya okunamadı: {e}"))?;
+        import_json(&mut conn, &text)
+    } else {
+        // .db: kaynak dosyadan mevcut bağlantının üzerine geri yükle
+        let src = Connection::open(&path).map_err(|e| format!("Yedek dosyası açılamadı: {e}"))?;
+        src.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name='products'", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .ok()
+        .filter(|n| *n > 0)
+        .ok_or("Bu dosya geçerli bir SEO Yöneticisi yedeği değil.")?;
+        {
+            let backup = rusqlite::backup::Backup::new(&src, &mut conn)
+                .map_err(|e| format!("Geri yükleme başlatılamadı: {e}"))?;
+            backup
+                .run_to_completion(100, std::time::Duration::from_millis(5), None)
+                .map_err(|e| format!("Geri yükleme tamamlanamadı: {e}"))?;
+        }
+        db::init(&conn)?; // eksik tablo/pragma varsa tamamla
+        Ok(())
+    }
+}
+
+fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
+    use serde_json::Value;
+    let root: Value = serde_json::from_str(text).map_err(|e| format!("JSON çözümlenemedi: {e}"))?;
+    let obj = root.as_object().ok_or("Beklenmeyen JSON biçimi.")?;
+    if !obj.contains_key("products") {
+        return Err("Bu dosya geçerli bir SEO Yöneticisi yedeği değil.".to_string());
+    }
+    let tx = conn.transaction().map_err(|e| format!("İşlem başlatılamadı: {e}"))?;
+    tx.execute_batch(
+        "DELETE FROM seo_status; DELETE FROM products; DELETE FROM sync_log; DELETE FROM settings;",
+    )
+    .map_err(|e| format!("Mevcut veriler temizlenemedi: {e}"))?;
+
+    fn s(v: &Value, key: &str) -> Option<String> {
+        v.get(key).and_then(|x| x.as_str()).map(String::from)
+    }
+    fn i(v: &Value, key: &str) -> Option<i64> {
+        v.get(key).and_then(|x| x.as_i64())
+    }
+    let arr = |key: &str| -> Vec<Value> {
+        obj.get(key).and_then(|x| x.as_array()).cloned().unwrap_or_default()
+    };
+
+    for p in arr("products") {
+        tx.execute(
+            "INSERT OR REPLACE INTO products (sku, id, name, brand, main_category, category,
+               quantity, url, img_url, title, descriptions, keywords, search_keywords, details, last_synced_at,
+               picture2, picture3, picture4)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
+            params![
+                s(&p, "sku"), s(&p, "id"), s(&p, "name").unwrap_or_default(), s(&p, "brand"),
+                s(&p, "main_category"), s(&p, "category"), i(&p, "quantity"), s(&p, "url"),
+                s(&p, "img_url"), s(&p, "title"), s(&p, "descriptions"), s(&p, "keywords"),
+                s(&p, "search_keywords"), s(&p, "details"), s(&p, "last_synced_at"),
+                s(&p, "picture2"), s(&p, "picture3"), s(&p, "picture4"),
+            ],
+        )
+        .map_err(|e| format!("Ürün geri yüklenemedi: {e}"))?;
+    }
+    for r in arr("seo_status") {
+        tx.execute(
+            "INSERT OR REPLACE INTO seo_status (sku, meta_status, details_status, target_keyword,
+               draft_title, draft_descriptions, draft_keywords, draft_search_keywords, updated_at,
+               draft_details, research_json, image_check_json, image_check_fp,
+               tech_source_text, tech_specs_json, tech_status, tech_history_json,
+               ideasoft_product_id, ideasoft_pushed_at, ideasoft_seo_rule,
+               meta_model, details_model, tech_model,
+               meta_history_json, details_history_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
+                     ?21,?22,?23,?24,?25)",
+            params![
+                s(&r, "sku"),
+                s(&r, "meta_status").unwrap_or_else(|| "pending".into()),
+                s(&r, "details_status").unwrap_or_else(|| "pending".into()),
+                s(&r, "target_keyword"), s(&r, "draft_title"), s(&r, "draft_descriptions"),
+                s(&r, "draft_keywords"), s(&r, "draft_search_keywords"), s(&r, "updated_at"),
+                s(&r, "draft_details"), s(&r, "research_json"), s(&r, "image_check_json"),
+                s(&r, "image_check_fp"), s(&r, "tech_source_text"), s(&r, "tech_specs_json"),
+                s(&r, "tech_status").unwrap_or_else(|| "pending".into()),
+                s(&r, "tech_history_json"), i(&r, "ideasoft_product_id"),
+                s(&r, "ideasoft_pushed_at"), i(&r, "ideasoft_seo_rule"),
+                s(&r, "meta_model"), s(&r, "details_model"), s(&r, "tech_model"),
+                s(&r, "meta_history_json"), s(&r, "details_history_json"),
+            ],
+        )
+        .map_err(|e| format!("SEO durumu geri yüklenemedi: {e}"))?;
+    }
+    for l in arr("sync_log") {
+        tx.execute(
+            "INSERT INTO sync_log (run_at, active, added, updated, deleted, duplicate_skipped)
+             VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                s(&l, "run_at"), i(&l, "active"), i(&l, "added"), i(&l, "updated"),
+                i(&l, "deleted"), i(&l, "duplicate_skipped"),
+            ],
+        )
+        .map_err(|e| format!("Senkron geçmişi geri yüklenemedi: {e}"))?;
+    }
+    for kv in arr("settings") {
+        if let (Some(k), Some(v)) = (s(&kv, "key"), s(&kv, "value")) {
+            tx.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                params![k, v],
+            )
+            .map_err(|e| format!("Ayar geri yüklenemedi: {e}"))?;
+        }
+    }
+    tx.commit().map_err(|e| format!("İşlem tamamlanamadı: {e}"))?;
+    Ok(())
+}
