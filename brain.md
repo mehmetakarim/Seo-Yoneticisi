@@ -4,8 +4,8 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-07-30
-**Aktif faz:** Fırsatlar ekranı sorgu düzeyinde ✅ · EOL + halef + canonical yazma ✅ ·
-**2b (modül bölme) ⏸️ ERTELENDİ** — kozmetik, kullanıcı kararı (bkz. madde 0b)
+**Aktif faz:** v0.7.0 çıktı — her SEO aracı kendi ekranında, gruplu navigasyon,
+Yapay Zekâ Asistanı. **Faz 2b (modül bölme) ✅ TAMAMLANDI** (kalem 4).
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -13,8 +13,8 @@ v0.5.6 = Fırsatlar sayfası · v0.5.7 = meta/açıklama sürüm geçmişi ·
 v0.5.8 = EOL sayfalar + filtreler · v0.5.9 = boş ekran düzeltmesi ·
 v0.6.0 = sorgu düzeyi analizler · v0.6.1 = EOL halef önerisi ·
 v0.6.2 = Ahrefs zorluk düzeltmesi · v0.6.3 = düşüşte olanlar (trend) ·
-v0.6.4 = canonical yazma akışı ·
-**v0.6.5 = canonical: senkron ön koşulu kaldırıldı, hedef elle seçilebiliyor**
+v0.6.4 = canonical yazma akışı · v0.6.5 = canonical senkron ön koşulu kaldırıldı ·
+**v0.7.0 = araç ekranları + gruplu navigasyon + Yapay Zekâ Asistanı**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
@@ -108,6 +108,88 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
    **Kota tasarımı:** istek üzerine, satır bazında, önbellekli. 1.073 sayfa için toplu çağrı
    günlük kotayı (flash 20/gün) anında tüketirdi. Trafik tepedeki sayfalarda yoğun.
    Arayüzde "halef yok" NÖTR renkte — başarısızlık değil, geçerli cevap.
+
+0ai. ✅ **v0.7.0 — HER ARAÇ KENDİ EKRANINDA + ASİSTAN (5 kalemlik toparlama).**
+
+   Kullanıcı tespiti aynen: Fırsatlar ekranı *"inanılmaz uzun ve dağınık"*. 1343 satırlık tek
+   sayfada 9 bölüm + 2 modal vardı. Desen kullanıcının kendi geliştirdiği
+   [QueryGSC](https://github.com/mehmetakarim/QueryGSC)'den: her analiz kendi ekranında.
+
+   **Kalem 1 — tekrar temizliği (`449ea7b`).** `ProductContext` kurulumu 3 yerden 1'e
+   (`ctx_parts` + `CtxParts::as_context`). Teknik tablonun bilinçli "araştırma verisi alma"
+   kararı artık `with_insights: false` ile çağrı yerinde GÖRÜNÜR. CSS'te `.spin` (9 dosyada
+   birebir aynı), `.warn` (5), `.overlay` (3), `.icon-badge` (3) global'e alındı.
+   ⚠️ **İki adlandırma tuzağı çıktı:** Ayarlar'daki `.warn` aslında uyarı değil soluk ipuçtu
+   (global temeli miras alsaydı üç bilgi satırı uyarı rengine bürünürdü) → `.hint`.
+   `SeoResearchPanel`'in `.overlay`'ı modal değil YAN PANEL; global kural ona
+   `align-items:center` ve 24px dolgu enjekte ederdi → `.panel-overlay`.
+   **Ders:** scoped kural yalnızca KENDİ BİLDİRDİĞİ özellikleri geçersiz kılar; global bir
+   temel eklerken "bu sınıfı kim daha kullanıyor" sorusu sorulmalı.
+
+   **Kalem 2 — ortak iskeletler (`969ae6c`).** `ModalShell.vue` + `AnalysisSection.vue`.
+   Ölçülen sapma: aynı animasyon İKİ AYRI ADLA kopyalanmış (`upd` ve `push`), üçüncüsü zayıf
+   varyant; z-index 60/70/70; kapat düğmesi ikisinde yok. ⚠️ Meşguliyet kilidi bilinçli
+   olarak iskelete GÖMÜLMEDİ — "ne zaman kapanamaz" her modalde farklı koşul.
+
+   **Kalem 3 — araç ekranları (`b235414`).** `navigation.ts`'e `group`; kenar çubuğu
+   Katalog / SEO Araçları / Asistan / Sistem. ⚠️ Grup adı "SEO Ayarları" DEĞİL "SEO Araçları"
+   ("Ayarlar" zaten sayfa). Altı ekran: Genel Bakış (giriş noktası, araç kartları kayba göre
+   okunur) + 5 analiz. ⚠️ **Veri akışı DEĞİŞMEDİ**: tek `analyze_opportunities`, tek
+   `opportunity_json`; ekranlar dilimleri okuyor.
+
+   **Kalem 4 — modül bölme (`cc5284b`).** `gemini.rs` (2119) → 5 dosya, `commands.rs` (2619)
+   → 7 dosya. Yöntem: 0b'deki tuzağa karşı ayrıştırma değil **satır aralığı**, ve betikte
+   güvenlik ağı — her dolu satırın TAM OLARAK BİR sahibi olmalı. Bağımsız doğrulama: her iki
+   bölmede de **KAYIP=0**. ⚠️ İki ad çakışması: `commands/history.rs` ↔ `seo_core::history`
+   → `versions.rs`; `commands/ideasoft.rs` ↔ `seo_core::ideasoft` → `ideasoft_cmd.rs`.
+
+   **Kalem 5 — Yapay Zekâ Asistanı (`0dba016`).** Aşağıda 0aj'de.
+
+0aj. 🔴 **ASİSTAN: GEMMA AKIŞTA İÇ MUHAKEMESİNİ DE YAYINLIYOR (v0.7.0).**
+
+   **Ölçüm (2026-07-30, `gemma-4-31b-it`, tek cümlelik soru): 19 `"thought": true` parçasına
+   karşılık 3 cevap parçası.** Filtrelenmeseydi kullanıcı Türkçe cevap yerine İngilizce
+   düşünce zinciri görürdü — naif bir akış uygulaması TAMAMEN BOZUK görünürdü.
+   `gemini/chat.rs::parse_sse_line` bu ayrımı yapıyor, üç birim testi sabitliyor.
+   İkincil sonuç: akışın ~%86'sı atıldığı için "token token yazma" hissi zayıf → düşünce
+   parçaları da (içeriksiz) arayüze bildiriliyor, "düşünüyor…" göstergesi çiziliyor.
+
+   ⚠️ **Sohbet kendi zincirini kullanıyor (`CHAT_CHAIN`), `MODEL_CHAIN`'i DEĞİL.** Flash'ın
+   günlük 20 istek kotası uygulamanın ASIL işine ait; birkaç sohbet turu onu bitirirdi.
+   Zincir `gemma-4-31b-it` ile başlıyor (14.400/gün). Bir test bu sıralamayı koruyor.
+
+   **Halüsinasyon sınırı hem birim hem CANLI testli:** `assistant_system_prompt` üç kural
+   koyuyor (yalnızca verilen veriye dayan / veride yoksa söyle / sayı uydurma) ve canlı test
+   "geçen yılın cirosu" sorusuna modelin *"Bu bilgi paylaşılan **veride yok**."* dediğini
+   doğruluyor. Prompt'un doğru yazılmış olması yetmez, modelin UYDUĞU görülmeli.
+
+   ⚠️ **Asistan HİÇBİR ŞEY YAZMAZ** — canonical/meta/gönderim kendi onaylı akışlarında.
+   ⚠️ **`v-html` YOK** (`MarkdownText.vue`): metin doğrudan modelden geliyor. Tarayıcıda
+   doğrulandı — `<img onerror=...>` ve `<script>` metin olarak görünüyor, DOM'a düğüm
+   eklenmiyor. `marked` gibi bağımlılık eklenmedi.
+
+   **Altyapı:** Tauri `ipc::Channel` uygulamada İLK KEZ; reqwest'e `stream` özelliği,
+   `futures-util` doğrudan bağımlılık (zaten Cargo.lock'taydı).
+
+   **Doğrulamada iki gerçek hata çıktı:** (1) mesaj satırları `:class="m.role"` ile `model`
+   sınıfı alıyordu ve model rozetinin `.model` kuralına takılıyordu — **sınıf adı veriden
+   türetilmemeli**; (2) asistan ekranı önbelleği kendisi yüklemiyordu.
+
+0ak. 🧪 **GÖRSEL DOĞRULAMA YÖNTEMİ DEĞİŞTİ — `scripts/harness.py`.**
+   Önceden her doğrulamada elle statik HTML yazılıyordu. İki kusuru vardı: (1) işaretleme
+   elle yazıldığı için gerçek bileşenden sapabiliyordu — harness "geçer" derken uygulama
+   bozuk olabilirdi; (2) scoped stiller yüzünden her parçaya `data-v-<hash>` eklemek
+   gerekiyordu ve hash her derlemede değişiyordu.
+   Artık `dist/index.html`in başına Tauri IPC taklidi ekleniyor: **uygulamanın KENDİ
+   bundle'ı** yerel veritabanındaki gerçek veriyle çalışıyor. Kullanım:
+   ```
+   npm run build && python3 scripts/harness.py && npx vite preview --port 4173
+   # http://localhost:4173/harness.html          → gerçek veriyle
+   # http://localhost:4173/harness.html?empty=1  → "analiz hiç çalışmadı" durumu
+   ```
+   ⚠️ `?empty=1` kipi bir yanlış-pozitiften doğdu: boş durumu store'u dışarıdan sıfırlayarak
+   test ettim ve BEŞ EKRAN DA "boş" göründü — ama test geçersizdi, sayfalar açılırken
+   önbelleği yeniden yüklüyor. Doğru kiple altısı da doğru mesajı gösteriyor.
 
 0ag. 🔴 **CANLI MAĞAZAYA İZİNSİZ YAZDIM — bir daha olmayacak (2026-07-29).**
    IdeaSoft'un hangi HTTP metotlarını desteklediğini anlamak için `PUT/POST/PATCH
