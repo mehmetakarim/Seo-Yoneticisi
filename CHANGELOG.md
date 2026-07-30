@@ -13,6 +13,13 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.7.0
+- Yeni: her SEO aracı artık kendi ekranında — Fırsatlar, Yükselmeye yakın, Yarışan sayfalar, Düşüşte olanlar, Satışta olmayanlar
+- Yeni: "Genel Bakış" ekranı — analizi buradan çalıştırın, hangi araçta ne kadar kayıp olduğunu tek bakışta görün
+- Yeni: kenar çubuğu gruplandı (Katalog · SEO Araçları · Asistan · Sistem); tek uzun kaydırma yerine her iş kendi yerinde
+- Yeni: Yapay Zekâ Asistanı — bulunduğunuz ekranın verisini konuşarak sorgulayın, yanıt yazılırken akar
+- Asistan yalnızca ekrandaki veriye bakar; veride olmayan bir şey sorulursa bilmediğini söyler ve hiçbir değişiklik yapmaz
+
 ## v0.6.5
 - Düzeltme: canonical ayarlamak için artık katalog senkronu beklemeniz gerekmiyor — uygulama ilgili ürünü saniyeler içinde buluyor
 - Yeni: yapay zekâ uygun halef bulamadığında hedefi kendiniz arayıp seçebilirsiniz; öneri geldiğinde de onay ekranından değiştirebilirsiniz
