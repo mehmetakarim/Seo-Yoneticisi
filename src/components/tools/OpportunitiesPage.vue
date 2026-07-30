@@ -11,7 +11,7 @@
  * edecek kadar büyük değil. Yine de ayrı bir bölüm, çünkü çözümü farklı: bu bir meta işi
  * değil, indeksleme işi.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import { useStore } from "../../store";
 import { workState, type Opportunity, type OpportunityReason, type WorkState } from "../../types";
 import Icon from "../Icon.vue";
@@ -21,10 +21,6 @@ import ToolShell from "./ToolShell.vue";
 const store = useStore();
 const report = computed(() => store.opportunity);
 const all = computed<Opportunity[]>(() => report.value?.opportunities ?? []);
-
-onMounted(() => {
-  if (!store.opportunity) void store.loadOpportunityCache();
-});
 
 // --- Filtreler ---
 // Tamamen istemcide: 60 satır için sunucuya gitmek gereksiz gecikme olurdu.

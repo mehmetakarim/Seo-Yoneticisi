@@ -13,6 +13,12 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.7.2
+- Yeni: AI Asistanı sohbetleri artık kaydediliyor — uygulamayı kapatıp açtığınızda geçmiş sohbetlerinize dönebilirsiniz
+- Yeni: geçmiş sohbetler tek tek veya toplu olarak silinebiliyor; silme öncesi onay isteniyor
+- Düzeltme: canonical hedefi araması artık yalnızca **satıştaki** ürünleri listeliyor — daha önce satıştan kalkmış ürünler de çıkıyordu ve ölü bir sayfa başka bir ölü sayfaya yönlendirilebiliyordu
+- Düzeltme: Yükselmeye yakın, Yarışan sayfalar, Düşüşte olanlar ve Satışta olmayanlar ekranlarına doğrudan girildiğinde analiz verisi görünmüyordu
+
 ## v0.7.1
 - Düzeltme: kenar çubuğunda asistan sekmesi "AI Asistanı" olarak kısaldı — uzun ad iki satıra kırılıp menü hizasını bozuyordu
 

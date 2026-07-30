@@ -110,6 +110,23 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         [],
     )
     .map_err(|e| format!("ideasoft_catalog tablosu oluşturulamadı: {e}"))?;
+    // AI Asistanı sohbet geçmişi. Kullanıcı geri bildirimi (2026-07-30): uygulama kapanınca
+    // sohbet kayboluyordu; meta/açıklama/teknik tabloda olduğu gibi geçmişe erişilebilmeli.
+    // ⚠️ Mesajlar JSON sütunda: projenin mevcut geçmiş idiomu bu (`*_history_json`) ve
+    // sohbet her zaman bir bütün olarak okunup yazılıyor — satır bazlı sorgu ihtiyacı yok.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS chat_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            tool_page TEXT,
+            messages_json TEXT NOT NULL,
+            model TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| format!("chat_sessions tablosu oluşturulamadı: {e}"))?;
     // Sürüm geçmişi: yeniden üretmeden önceki hâl saklanır (bkz. core/src/history.rs).
     // Teknik tabloda zaten vardı; meta ve açıklamada içerik geri dönüşsüz kayboluyordu.
     add_column_if_missing(conn, "seo_status", "meta_history_json", "TEXT")?;

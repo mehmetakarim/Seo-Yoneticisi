@@ -160,9 +160,12 @@ const targetOf = (eolUrl: string) => {
           {{ store.canonicalSearching ? "Aranıyor…" : "Ara" }}
         </button>
       </div>
-      <!-- Arama IdeaSoft'ta ÜRÜN ADINA göre çalışıyor (ölçüldü), slug'a göre değil. -->
+      <!-- 🔴 Arama YALNIZCA satıştaki (feed'deki) ürünlerde. İlk sürüm IdeaSoft'un tam
+           kataloğunda arıyordu ve satıştan kalkmış ürünleri de listeliyordu; ölü bir sayfayı
+           başka bir ölü sayfaya işaret ettirmek sorunu taşımak olurdu (saha hatası). -->
       <div class="pick-hint">
-        Arama mağazanızdaki ürün adlarında yapılır — feed'de olmayan ürünler de bulunur.
+        Yalnızca <b>satıştaki</b> ürünlerde aranır — canonical, ziyaretçinin satın alabileceği
+        bir sayfayı işaret etmeli.
       </div>
       <div v-if="store.canonicalResults.length" class="pick-list">
         <div
@@ -179,7 +182,8 @@ const targetOf = (eolUrl: string) => {
         v-else-if="!store.canonicalSearching && store.canonicalQuery.trim().length >= 3"
         class="pick-hint"
       >
-        Sonuç yok. Daha az sözcükle deneyin — arama tüm sözcüklerin geçmesini ister.
+        Satıştaki ürünler arasında eşleşme yok. Farklı bir sözcük deneyin; ürün gerçekten
+        satışta değilse canonical hedefi olamaz.
       </div>
 
       <template #footer>

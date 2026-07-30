@@ -16,6 +16,7 @@ import type {
   CanonicalPreview,
   ChatMessage,
   AssistantEvent,
+  ChatSessionMeta,
 } from "./types";
 
 export const api = {
@@ -55,7 +56,9 @@ export const api = {
   suggestEolSuccessor: (url: string) =>
     invoke<SuccessorSuggestion>("suggest_eol_successor", { url }),
   syncIdeasoftCatalog: () => invoke<CatalogSyncResult>("sync_ideasoft_catalog"),
-  searchCatalog: (term: string) => invoke<CatalogMatch[]>("search_catalog", { term }),
+  /** ⚠️ Yalnızca SATIŞTAKİ (feed) ürünlerde arar — bkz. search_live_products. */
+  searchLiveProducts: (term: string) =>
+    invoke<CatalogMatch[]>("search_live_products", { term }),
   /**
    * Asistan turu. Yanıt `onEvent` ile parça parça gelir; söz verilen değer kullanılan
    * modelin adı. Uygulamada Tauri kanalının ilk kullanımı.
@@ -69,6 +72,16 @@ export const api = {
     ch.onmessage = onEvent;
     return invoke<string>("assistant_ask", { history, context, onEvent: ch });
   },
+  listChatSessions: () => invoke<ChatSessionMeta[]>("list_chat_sessions"),
+  getChatSession: (id: number) => invoke<ChatMessage[]>("get_chat_session", { id }),
+  saveChatSession: (
+    id: number | null,
+    messages: ChatMessage[],
+    toolPage: string,
+    model: string,
+  ) => invoke<number>("save_chat_session", { id, messages, toolPage, model }),
+  deleteChatSession: (id: number) => invoke<void>("delete_chat_session", { id }),
+  deleteAllChatSessions: () => invoke<void>("delete_all_chat_sessions"),
   previewCanonical: (eolSlug: string, targetSlug: string) =>
     invoke<CanonicalPreview>("preview_canonical", { eolSlug, targetSlug }),
   applyCanonical: (eolSlug: string, targetSlug: string) =>

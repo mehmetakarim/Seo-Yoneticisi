@@ -7,6 +7,7 @@
  * kopya olurdu; üstelik en kritik olanı (analiz yok) yanlış yazmak boş ekran demek — bu
  * uygulamada v0.5.9'da yaşanmış bir saha hatası (kullanıcı "ekran bomboş" diye bildirdi).
  */
+import { onMounted } from "vue";
 import { useStore } from "../../store";
 import Icon from "../Icon.vue";
 
@@ -18,6 +19,19 @@ defineProps<{
 }>();
 
 const store = useStore();
+
+/**
+ * ⚠️ Önbellek yüklemesi KABUKTA, tek yerde.
+ *
+ * Önce yalnızca Fırsatlar ekranında vardı; Yükselmeye yakın / Yarışan sayfalar / Düşüşte
+ * olanlar / Satışta olmayanlar ekranlarında YOKTU. Uygulamayı açıp doğrudan o ekranlardan
+ * birine giden kullanıcı "Henüz analiz çalıştırılmadı" görüyordu — oysa analiz veritabanında
+ * duruyordu. (Aynı hata asistan ekranında da çıkmıştı; oraya ayrı yazmak yerine buraya
+ * koymak beşini birden çözüyor.)
+ */
+onMounted(() => {
+  if (!store.opportunity) void store.loadOpportunityCache();
+});
 </script>
 
 <template>

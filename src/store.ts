@@ -15,6 +15,7 @@ import type {
   CanonicalPreview,
   CatalogMatch,
   ChatMessage,
+  ChatSessionMeta,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -70,6 +71,10 @@ interface State {
   chatThinking: boolean;
   /** Son turu hangi model cevapladı — rozet olarak gösteriliyor. */
   chatModel: string;
+  /** Açık sohbetin veritabanı kimliği; yeni sohbette null. İlk yanıt kaydedilince dolar. */
+  chatId: number | null;
+  /** Kaydedilmiş sohbetlerin listesi (yalnızca üstveri). */
+  chatSessions: ChatSessionMeta[];
   techStructuring: boolean;
   techDropped: string[];
   ideasoftBusy: boolean;
@@ -123,6 +128,8 @@ export const useStore = defineStore("app", {
     chatBusy: false,
     chatThinking: false,
     chatModel: "",
+    chatId: null,
+    chatSessions: [],
     techStructuring: false,
     techDropped: [],
     ideasoftBusy: false,
@@ -458,13 +465,83 @@ export const useStore = defineStore("app", {
       } finally {
         this.chatBusy = false;
         this.chatThinking = false;
+        // Her turdan sonra kaydet — hata alan tur da dahil. Kullanıcı uygulamayı kapatıp
+        // açtığında ne sorduğunu ve ne cevap geldiğini (hatayı da) görebilmeli.
+        await this.persistChat();
       }
     },
 
-    clearChat() {
+    /** Açık sohbeti veritabanına yazar; yeni sohbetse kimliğini alır. */
+    async persistChat() {
+      if (!this.chat.length) return;
+      try {
+        this.chatId = await api.saveChatSession(
+          this.chatId,
+          this.chat,
+          this.lastToolPage || "",
+          this.chatModel,
+        );
+        await this.loadChatSessions();
+      } catch (e) {
+        // Kaydedilememesi sohbeti bozmasın; kullanıcı yine de cevabını görüyor.
+        this.toast(`Sohbet kaydedilemedi: ${e}`, "error");
+      }
+    },
+
+    /** Kaydedilmiş sohbetleri tazeler. */
+    async loadChatSessions() {
+      try {
+        this.chatSessions = await api.listChatSessions();
+      } catch (e) {
+        // Geçmiş yardımcı bir özellik; okunamaması sohbeti engellememeli.
+        this.chatSessions = [];
+      }
+    },
+
+    /** Geçmişten bir sohbeti açar; devam edilen mesajlar aynı kayda yazılır. */
+    async openChatSession(id: number) {
+      if (this.chatBusy) return;
+      try {
+        this.chat = await api.getChatSession(id);
+        this.chatId = id;
+        this.chatModel = this.chatSessions.find((s) => s.id === id)?.model ?? "";
+      } catch (e) {
+        this.toast(String(e), "error");
+        await this.loadChatSessions();
+      }
+    },
+
+    /**
+     * Yeni sohbet başlatır. ⚠️ Eskisini SİLMEZ — kaydedilmişse geçmişte duruyor.
+     * (Eskiden bu "temizle" idi ve sohbet gerçekten kayboluyordu.)
+     */
+    newChat() {
       if (this.chatBusy) return;
       this.chat = [];
       this.chatModel = "";
+      this.chatId = null;
+    },
+
+    /** Tek bir sohbeti siler — kullanıcı eylemi. */
+    async deleteChatSession(id: number) {
+      try {
+        await api.deleteChatSession(id);
+        if (this.chatId === id) this.newChat();
+        await this.loadChatSessions();
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    /** Tüm geçmişi siler — arayüz açık onayla çağırıyor. */
+    async deleteAllChatSessions() {
+      try {
+        await api.deleteAllChatSessions();
+        this.newChat();
+        await this.loadChatSessions();
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
     },
 
     /** IdeaSoft kataloğunu çeker (~7 dk, 10.909 ürün). Elle tetiklenir. */
@@ -503,7 +580,7 @@ export const useStore = defineStore("app", {
       if (term.length < 3 || this.canonicalSearching) return;
       this.canonicalSearching = true;
       try {
-        this.canonicalResults = await api.searchCatalog(term);
+        this.canonicalResults = await api.searchLiveProducts(term);
       } catch (e) {
         this.toast(String(e), "error");
       } finally {

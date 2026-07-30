@@ -60,6 +60,29 @@ Biçim: düz metin. Vurgu için **kalın**, listeler için satır başına \"- \
     )
 }
 
+/// Kaydedilen sohbetin listede görünecek başlığı — **ağsız, test edilebilir.**
+///
+/// İlk kullanıcı sorusundan türetiliyor. ⚠️ Başlık için modele ayrı bir çağrı yapılmıyor:
+/// her sohbet bir tur fazladan kota harcardı ve başlık, sohbetin kendisinden daha değerli
+/// değil. İlk soru zaten kullanıcının kendi kelimeleriyle "bu sohbet neydi" cevabı.
+pub fn session_title(first_question: &str) -> String {
+    const MAX: usize = 60;
+    let t: String = first_question.split_whitespace().collect::<Vec<_>>().join(" ");
+    if t.is_empty() {
+        return "(başlıksız sohbet)".to_string();
+    }
+    // Grafem değil karakter sınırı yeterli: başlık yalnızca listede gösteriliyor.
+    if t.chars().count() <= MAX {
+        return t;
+    }
+    let cut: String = t.chars().take(MAX).collect();
+    // Sözcük ortasında kesme: son boşluğa kadar geri sar (çok kısalmıyorsa).
+    match cut.rfind(' ') {
+        Some(i) if i > MAX / 2 => format!("{}…", &cut[..i]),
+        _ => format!("{cut}…"),
+    }
+}
+
 /// Sohbet turundaki tek bir mesaj.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -272,6 +295,24 @@ mod tests {
         // Bağlam prompt'un İÇİNDE olmalı; ayrı mesaj olarak gönderilirse model onu
         // kullanıcı isteği sanıp yönergeymiş gibi davranabilir.
         assert!(p.ends_with("sayfa=urun/abc tiklama=36"));
+    }
+
+    #[test]
+    fn baslik_ilk_sorudan_turuyor_ve_sozcuk_ortasinda_kesmiyor() {
+        assert_eq!(session_title("En acil üç iş ne?"), "En acil üç iş ne?");
+        // Satır sonları ve fazla boşluklar tek boşluğa iner (liste tek satır gösteriyor).
+        assert_eq!(session_title("  iki   satır\nlı  soru "), "iki satır lı soru");
+        // Boş girdi listede boş satır bırakmamalı.
+        assert_eq!(session_title("   "), "(başlıksız sohbet)");
+
+        let uzun = "Bu listede en çok tıklama kaçıran sayfaları önceliklendirir misin ve neden";
+        let k = session_title(uzun);
+        assert!(k.ends_with('…'), "kısaltma işareti yok: {k}");
+        assert!(k.chars().count() <= 61, "fazla uzun: {k}");
+        assert!(uzun.starts_with(k.trim_end_matches('…')), "başlangıç bozuldu: {k}");
+        // Sözcük ortasından kesilmemeli.
+        assert!(!k.trim_end_matches('…').ends_with(' '));
+        assert!(uzun[k.trim_end_matches('…').len()..].starts_with(' '));
     }
 
     #[test]

@@ -14,11 +14,46 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useStore } from "../../store";
 import { NAV } from "../../navigation";
 import Icon from "../Icon.vue";
+import ModalShell from "../ModalShell.vue";
 import MarkdownText from "../MarkdownText.vue";
 
 const store = useStore();
 const draft = ref("");
 const scroller = ref<HTMLElement | null>(null);
+
+// --- Geçmiş sohbetler ---
+const histOpen = ref(false);
+/** Silme onayı bekleyen sohbet; `confirmAll` ise tüm geçmiş. */
+const pendingDelete = ref<number | null>(null);
+const confirmAll = ref(false);
+
+const deletingTitle = computed(
+  () => store.chatSessions.find((s) => s.id === pendingDelete.value)?.title ?? "",
+);
+
+const toolLabel = (key: string) => NAV.find((n) => n.key === key)?.label ?? "";
+const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
+
+async function openSession(id: number) {
+  await store.openChatSession(id);
+  histOpen.value = false;
+  await nextTick();
+  scrollDown();
+}
+
+function askDelete(id: number) {
+  pendingDelete.value = id;
+}
+function cancelDelete() {
+  pendingDelete.value = null;
+  confirmAll.value = false;
+}
+async function doDelete() {
+  if (confirmAll.value) await store.deleteAllChatSessions();
+  else if (pendingDelete.value !== null) await store.deleteChatSession(pendingDelete.value);
+  cancelDelete();
+  if (!store.chatSessions.length) histOpen.value = false;
+}
 
 /** Bağlamın hangi ekrandan geldiği. Araç ekranı değilse asistanın eli boş. */
 const source = computed(() => {
@@ -34,6 +69,8 @@ const hasReport = computed(() => !!store.opportunity);
  */
 onMounted(() => {
   if (!store.opportunity) void store.loadOpportunityCache();
+  // Geçmiş her açılışta tazelenir — uygulama yeniden başlatıldığında sohbetler burada olmalı.
+  void store.loadChatSessions();
 });
 
 const SUGGESTIONS = [
@@ -86,10 +123,67 @@ watch(
       <span v-else>Genel özet verisiyle konuşuyorsunuz.</span>
       <div style="flex: 1"></div>
       <span v-if="store.chatModel" class="model-tag">{{ store.chatModel }}</span>
-      <button v-if="store.chat.length" class="clear" :disabled="store.chatBusy" @click="store.clearChat()">
-        Sohbeti temizle
+      <a
+        v-if="store.chatSessions.length"
+        class="link"
+        @click="histOpen = !histOpen"
+      >
+        geçmiş sohbetler ({{ store.chatSessions.length }})
+      </a>
+      <button v-if="store.chat.length" class="clear" :disabled="store.chatBusy" @click="store.newChat()">
+        Yeni sohbet
       </button>
     </div>
+
+    <!-- Geçmiş listesi: kart geçmişindeki `hist-line` deseninin aynısı — açılır, yer kaplamaz. -->
+    <div v-if="histOpen && store.chatSessions.length" class="hist">
+      <div
+        v-for="s in store.chatSessions"
+        :key="s.id"
+        class="h-row"
+        :class="{ on: store.chatId === s.id }"
+        @click="openSession(s.id)"
+      >
+        <div class="h-main">
+          <div class="h-title">{{ s.title }}</div>
+          <div class="h-meta">
+            {{ fmtDate(s.updated_at) }} · {{ s.messages }} mesaj
+            <template v-if="toolLabel(s.tool_page)"> · {{ toolLabel(s.tool_page) }}</template>
+            <template v-if="s.model"> · {{ s.model }}</template>
+          </div>
+        </div>
+        <!-- Silme kullanıcı insiyatifinde; satırı açmasın diye tıklama durduruluyor. -->
+        <button class="h-del" title="Bu sohbeti sil" @click.stop="askDelete(s.id)">
+          <Icon name="x" :size="13" :stroke-width="2.2" />
+        </button>
+      </div>
+      <div class="h-foot">
+        <a class="link danger" @click="confirmAll = true">Tüm geçmişi sil</a>
+      </div>
+    </div>
+
+    <!-- Silme onayı: geçmiş geri getirilemez, sessizce silinmemeli. -->
+    <ModalShell
+      :open="pendingDelete !== null || confirmAll"
+      label="Sohbet silme onayı"
+      icon="alert"
+      :title="confirmAll ? 'Tüm sohbet geçmişi silinecek' : 'Bu sohbet silinecek'"
+      :sub="confirmAll ? `${store.chatSessions.length} sohbet` : deletingTitle"
+      :width="420"
+      @close="cancelDelete()"
+    >
+      <div class="warn">
+        <Icon name="info" :size="13" />
+        <span>Silinen sohbet geri getirilemez. Analiz verileriniz etkilenmez.</span>
+      </div>
+      <template #footer>
+        <button class="ghost" @click="cancelDelete()">Vazgeç</button>
+        <div style="flex: 1"></div>
+        <button class="danger-btn" @click="doDelete()">
+          <Icon name="x" :size="14" :stroke-width="2.4" /> Sil
+        </button>
+      </template>
+    </ModalShell>
 
     <div ref="scroller" class="thread om-scroll">
       <!-- Boş durum: asistanın ne işe yaradığını anlatmanın en kısa yolu örnek sorular. -->
@@ -190,6 +284,110 @@ watch(
 .clear:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Geçmiş sohbet listesi */
+.hist {
+  flex: none;
+  margin-bottom: 12px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--c-border-soft);
+  border-radius: 10px;
+  background: var(--c-card);
+}
+.h-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--c-border-soft);
+  cursor: pointer;
+}
+.h-row:last-of-type {
+  border-bottom: 0;
+}
+.h-row:hover {
+  background: var(--c-hover);
+}
+/* Açık olan sohbet: hangi konuşmanın ekranda olduğu listeden de görünsün. */
+.h-row.on {
+  background: var(--accent-tint);
+}
+.h-main {
+  flex: 1;
+  min-width: 0;
+}
+.h-title {
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.h-meta {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--c-faint);
+}
+.h-del {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--c-faint);
+  cursor: pointer;
+}
+.h-del:hover {
+  background: var(--badge-eksik-bg);
+  color: var(--badge-eksik-c);
+}
+.h-foot {
+  padding: 8px 12px;
+  border-top: 1px solid var(--c-border-soft);
+  font-size: 11.5px;
+}
+.link.danger {
+  color: var(--badge-eksik-c);
+}
+.ghost {
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-input);
+  color: var(--c-mid);
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ghost:hover {
+  background: var(--c-hover);
+}
+.danger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 9px;
+  background: var(--badge-eksik-c);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 590;
+  cursor: pointer;
+  font-family: inherit;
+}
+.danger-btn:hover {
+  filter: brightness(1.06);
 }
 
 .thread {

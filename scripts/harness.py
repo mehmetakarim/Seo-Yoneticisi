@@ -60,6 +60,24 @@ def load_report(conn):
     return rep
 
 
+def load_live_products(conn):
+    """Canonical hedefi araması için SATIŞTAKİ ürünler (feed).
+
+    ⚠️ IdeaSoft'un tam kataloğu DEĞİL: canonical yalnızca satıştaki bir ürüne verilebilir,
+    yoksa ölü sayfa başka bir ölü sayfayı işaret eder (saha hatası, 2026-07-30).
+    """
+    rows = conn.execute(
+        "SELECT sku, name, url FROM products WHERE url IS NOT NULL AND url <> '' LIMIT 400"
+    ).fetchall()
+    out = []
+    for sku, name, url in rows:
+        slug = url.rstrip("/").rsplit("/", 1)[-1].lower()
+        if slug:
+            out.append({"slug": slug, "id": 0, "name": name, "status": 1,
+                        "stock": 0.0, "canonical": sku})
+    return out
+
+
 def load_product(conn):
     """Ürün ekranı ve gönderim modali için tek gerçek ürün."""
     row = conn.execute(
@@ -100,6 +118,7 @@ def main():
     conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
     report = load_report(conn)
     listing, detail = load_product(conn)
+    live = load_live_products(conn)
     conn.close()
 
     handlers = {
@@ -110,6 +129,8 @@ def main():
         "get_product": detail,
         "app_version": "harness",
     }
+    # Canonical hedefi araması: gerçek feed ürünleri üzerinde, terimle süzülerek.
+    live_json = json.dumps(live, ensure_ascii=False)
 
     # `?empty=1` → analiz hiç çalıştırılmamış gibi davranır. Boş durumları elle test etmek
     # mümkün değil: sayfalar açılırken önbelleği yeniden yüklüyor, store'u dışarıdan
@@ -153,6 +174,42 @@ def main():
         "          }\n"
         "        }, 140);\n"
         "      });\n"
+        "    }\n"
+        # Sohbet geçmişi: bellekte tutulan minik bir taklit tablo. Kaydet → listele → aç →
+        # sil akışının tamamı gerçek Gemini/SQLite'a dokunmadan doğrulanabiliyor.
+        "    if (cmd === 'search_live_products') {\n"
+        f"      const LIVE = {live_json};\n"
+        "      const q = (args.term || '').trim().toLowerCase();\n"
+        "      if (q.length < 3) return Promise.resolve([]);\n"
+        "      return Promise.resolve(LIVE.filter(p =>\n"
+        "        p.name.toLowerCase().includes(q) || p.canonical.toLowerCase().includes(q)\n"
+        "      ).slice(0, 25));\n"
+        "    }\n"
+        "    if (cmd.endsWith('chat_session') || cmd.endsWith('chat_sessions')) {\n"
+        "      const S = (window.__CHATS__ = window.__CHATS__ || { seq: 0, rows: [] });\n"
+        "      const now = new Date().toISOString().slice(0, 16);\n"
+        "      if (cmd === 'list_chat_sessions')\n"
+        "        return Promise.resolve(S.rows.map(r => ({ id: r.id, title: r.title,\n"
+        "          tool_page: r.tool_page, messages: r.messages.length, model: r.model,\n"
+        "          updated_at: r.updated_at })).sort((a,b) => b.id - a.id));\n"
+        "      if (cmd === 'get_chat_session') {\n"
+        "        const r = S.rows.find(x => x.id === args.id);\n"
+        "        return r ? Promise.resolve(r.messages) : Promise.reject('Bu sohbet artık yok.');\n"
+        "      }\n"
+        "      if (cmd === 'save_chat_session') {\n"
+        "        let r = S.rows.find(x => x.id === args.id);\n"
+        "        if (!r) {\n"
+        "          const first = (args.messages.find(m => m.role === 'user') || {}).text || '';\n"
+        "          r = { id: ++S.seq, title: first.slice(0, 60), tool_page: args.toolPage };\n"
+        "          S.rows.push(r);\n"
+        "        }\n"
+        "        r.messages = args.messages; r.model = args.model; r.updated_at = now;\n"
+        "        return Promise.resolve(r.id);\n"
+        "      }\n"
+        "      if (cmd === 'delete_chat_session') {\n"
+        "        S.rows = S.rows.filter(x => x.id !== args.id); return Promise.resolve(null);\n"
+        "      }\n"
+        "      if (cmd === 'delete_all_chat_sessions') { S.rows = []; return Promise.resolve(null); }\n"
         "    }\n"
         "    return Promise.resolve(cmd in H ? H[cmd] : null);\n"
         "  },\n"

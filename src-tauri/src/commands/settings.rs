@@ -190,6 +190,14 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         &["run_at", "active", "added", "updated", "deleted", "duplicate_skipped"],
     )?;
     let settings = dump(conn, "settings", &["key", "value"])?;
+    // ⚠️ Sohbet geçmişi yedeğe DAHİL. Teknik tablo gibi yeniden üretilemeyen kullanıcı emeği;
+    // yedekte olmazsa geri yüklemede sessizce kaybolur. (`ideasoft_catalog` bilinçli olarak
+    // yedeklenmiyor — o tek komutla yeniden çekiliyor.)
+    let chats = dump(
+        conn,
+        "chat_sessions",
+        &["id", "title", "tool_page", "messages_json", "model", "created_at", "updated_at"],
+    )?;
     let root = json!({
         "app": "seo-yoneticisi",
         "exported_at": now_str(),
@@ -197,6 +205,7 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         "seo_status": seo,
         "sync_log": log,
         "settings": settings,
+        "chat_sessions": chats,
     });
     serde_json::to_string_pretty(&root).map_err(|e| format!("JSON oluşturulamadı: {e}"))
 }
@@ -316,6 +325,80 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
             .map_err(|e| format!("Ayar geri yüklenemedi: {e}"))?;
         }
     }
+    // Sohbet geçmişi. Eski yedeklerde bu bölüm YOK — `arr()` boş liste döndürdüğü için
+    // döngü hiç dönmez ve geri yükleme kırılmaz.
+    for c in arr("chat_sessions") {
+        tx.execute(
+            "INSERT OR REPLACE INTO chat_sessions
+               (id, title, tool_page, messages_json, model, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                c.get("id").and_then(|v| v.as_i64()),
+                s(&c, "title").unwrap_or_default(),
+                s(&c, "tool_page"),
+                s(&c, "messages_json").unwrap_or_else(|| "[]".into()),
+                s(&c, "model"),
+                s(&c, "created_at").unwrap_or_default(),
+                s(&c, "updated_at").unwrap_or_default(),
+            ],
+        )
+        .map_err(|e| format!("Sohbet geri yüklenemedi: {e}"))?;
+    }
     tx.commit().map_err(|e| format!("İşlem tamamlanamadı: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ⚠️ Bu testin koruduğu risk somut: yedekleme `products`/`seo_status`/`sync_log`/
+    /// `settings` tablolarını elle sayıyor. Yeni bir tablo eklenip buraya YAZILMAZSA
+    /// içeriği geri yüklemede SESSİZCE kaybolur — hata da vermez. Sohbet geçmişi teknik
+    /// tablo gibi yeniden üretilemeyen kullanıcı emeği olduğu için yolculuk teste bağlandı.
+    #[test]
+    fn yedek_sohbet_gecmisini_tasiyor() {
+        let src = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&src).unwrap();
+        src.execute(
+            "INSERT INTO chat_sessions (title, tool_page, messages_json, model, created_at, updated_at)
+             VALUES ('en acil üç iş', 'opportunities',
+                     '[{\"role\":\"user\",\"text\":\"soru\"},{\"role\":\"model\",\"text\":\"cevap\"}]',
+                     'gemma-4-31b-it', '2026-07-30T10:00', '2026-07-30T10:05')",
+            [],
+        )
+        .unwrap();
+
+        let json = export_json(&src).expect("dışa aktarılamadı");
+        assert!(json.contains("chat_sessions"), "yedekte sohbet bölümü yok");
+
+        let mut dst = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&dst).unwrap();
+        import_json(&mut dst, &json).expect("içe aktarılamadı");
+
+        let (title, page, model, msgs): (String, String, String, String) = dst
+            .query_row(
+                "SELECT title, tool_page, model, messages_json FROM chat_sessions",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .expect("sohbet geri yüklenmedi");
+        assert_eq!(title, "en acil üç iş");
+        assert_eq!(page, "opportunities");
+        assert_eq!(model, "gemma-4-31b-it");
+        assert!(msgs.contains("cevap"), "mesaj gövdeleri kayboldu: {msgs}");
+    }
+
+    /// Sohbet bölümü olmayan ESKİ yedekler kırılmadan geri yüklenebilmeli.
+    #[test]
+    fn eski_yedek_sohbet_bolumu_olmadan_calisir() {
+        let mut dst = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&dst).unwrap();
+        let eski = r#"{"app":"seo-yoneticisi","products":[],"seo_status":[],"sync_log":[],"settings":[]}"#;
+        import_json(&mut dst, eski).expect("eski yedek geri yüklenemedi");
+        let n: i64 = dst
+            .query_row("SELECT count(*) FROM chat_sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
 }

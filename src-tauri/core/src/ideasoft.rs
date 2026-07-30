@@ -112,7 +112,6 @@ pub struct Resolved {
     pub seo_rule_count: Option<i64>,
 }
 
-/// sku → IdeaSoft ürün id'si (+ SEO kural skoru). `?s=` arama parametresi kullanılır
 // ---- Canonical (seo_settings) ----
 //
 // IdeaSoft admin API'sinde **301 yönlendirme ucu YOK** (rota haritası çıkarıldı: redirects,
@@ -370,28 +369,6 @@ pub async fn resolve_slug(
     Ok(None)
 }
 
-/// Serbest metinle ürün arar — canonical hedefini elle seçmek için.
-///
-/// Yapay zekâ halef bulamadığında kullanıcı hedefi kendisi seçebilmeli (kullanıcı geri
-/// bildirimi, 2026-07-30): "uygun halef bulunamasa bile canonical ayarlama imkânı sunulmalı."
-pub async fn search_products(
-    domain: &str,
-    token: &str,
-    term: &str,
-    limit: usize,
-) -> Result<Vec<CatalogItem>, String> {
-    let term = term.trim();
-    if term.len() < 3 {
-        return Ok(Vec::new());
-    }
-    let arr = search_raw(domain, token, term, limit).await?;
-    Ok(arr
-        .iter()
-        .map(parse_item)
-        .filter(|it| it.id > 0 && !it.slug.is_empty())
-        .collect())
-}
-
 /// **Tüm kataloğu** sayfalayarak çeker.
 ///
 /// Neden gerekli: XML feed bilinçli olarak sınırlı (bu mağazada 10.909 üründen 262'si).
@@ -463,6 +440,7 @@ where
     Ok(out)
 }
 
+/// sku → IdeaSoft ürün id'si (+ SEO kural skoru). `?s=` arama parametresi kullanılır
 /// (`?sku=`/`?name=` yok sayılıyor). Birden fazla sonuçta **sku'su birebir eşleşen** seçilir.
 pub async fn resolve(domain: &str, token: &str, sku: &str) -> Result<Option<Resolved>, String> {
     let base = base_url(domain)?;

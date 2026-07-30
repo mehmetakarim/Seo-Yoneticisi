@@ -18,7 +18,7 @@ mod tech;
 
 // Dış yüzey bölmeden ÖNCEKİYLE aynı: çağıranlar hâlâ `gemini::X` yazıyor, hangi alt
 // modülde durduğunu bilmek zorunda değiller.
-pub use chat::{assistant_system_prompt, chat_stream, ChatEvent, ChatMessage, CHAT_CHAIN};
+pub use chat::{assistant_system_prompt, chat_stream, session_title, ChatEvent, ChatMessage, CHAT_CHAIN};
 pub use details::{generate_details, generate_details_scratch, has_rewritable_content, optimize_details};
 pub use meta::{generate_meta, GeneratedMeta};
 pub use successor::suggest_successor;

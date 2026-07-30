@@ -359,3 +359,14 @@ export interface ChatMessage {
  * onu filtreliyoruz ama "model çalışıyor" bilgisini arayüze taşıyoruz.
  */
 export type AssistantEvent = { kind: "thinking" } | { kind: "chunk"; text: string };
+
+/** Kaydedilmiş bir sohbetin liste görünümü (mesaj gövdeleri taşınmaz). */
+export interface ChatSessionMeta {
+  id: number;
+  title: string;
+  /** Hangi araç ekranının verisiyle konuşulduğu; boş olabilir. */
+  tool_page: string;
+  messages: number;
+  model: string;
+  updated_at: string;
+}

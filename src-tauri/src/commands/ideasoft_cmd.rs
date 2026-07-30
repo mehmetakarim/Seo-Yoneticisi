@@ -382,29 +382,88 @@ async fn resolve_slug_cached(
     Ok((found.id, found.name))
 }
 
-/// Serbest metinle ürün arar — canonical hedefini **elle** seçmek için.
+/// Canonical hedefi için **SATIŞTAKİ** ürünlerde arar.
 ///
 /// Kullanıcı geri bildirimi (2026-07-30): *"Uygun halef bulunamasa bile kullanıcıya canonical
-/// ayarla imkânı sunulmalı."* Yapay zekânın halef bulamaması hedefin olmadığı anlamına gelmiyor;
-/// karar zaten operatörde.
+/// ayarla imkânı sunulmalı."* Yapay zekânın halef bulamaması hedefin olmadığı anlamına gelmiyor.
+///
+/// 🔴 **ARAMA KAYNAĞI FEED, IDEASOFT KATALOĞU DEĞİL — saha hatası (2026-07-30).**
+/// İlk sürüm IdeaSoft'un tam kataloğunda (bu mağazada 10.909 ürün) arıyordu ve satıştan
+/// kalkmış ürünleri de listeliyordu. Oysa bu akışın amacı tam tersi: satışta OLMAYAN ama
+/// hâlâ trafik alan bir sayfayı **satıştaki** bir ürüne yönlendirmek. Ölü bir sayfayı başka
+/// bir ölü sayfaya işaret ettirmek sorunu taşımak olurdu.
+///
+/// Feed = satıştaki ürünler (kullanıcı beyanı: *"Güncel olan ürünler xml de gelen ve sitede
+/// satışta olan ürünlerdir"*). Yapay zekâ halef önerisi (`suggest_eol_successor`) zaten
+/// `products` tablosunu kullanıyordu; elle seçme yolu bu kısıtı atlıyordu — aynı karara giden
+/// iki yoldan biri kısıtlı, diğeri değildi.
+///
+/// Yan fayda: arama artık yerel, ağ çağrısı yok.
 #[tauri::command]
-pub async fn search_catalog(
+pub fn search_live_products(
     state: State<'_, AppState>,
     term: String,
 ) -> Result<Vec<CatalogMatch>, String> {
-    let (domain, token) = ideasoft_creds(&state)?;
-    let items = ideasoft::search_products(&domain, &token, &term, 25).await?;
-    Ok(items
-        .into_iter()
-        .map(|i| CatalogMatch {
-            slug: i.slug,
-            id: i.id,
-            name: i.name,
-            status: i.status,
-            stock: i.stock,
-            canonical: i.canonical,
+    let t = term.trim();
+    if t.len() < 3 {
+        return Ok(Vec::new());
+    }
+    let like = format!("%{}%", t.to_lowercase());
+    let conn = state.conn.lock().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT sku, name, url FROM products
+             WHERE url IS NOT NULL AND url <> ''
+               AND (lower(name) LIKE ?1 OR lower(sku) LIKE ?1)
+             ORDER BY name LIMIT 25",
+        )
+        .map_err(|e| format!("Ürünler okunamadı: {e}"))?;
+    let rows = stmt
+        .query_map([&like], |r| {
+            let url: String = r.get(2)?;
+            Ok(CatalogMatch {
+                // Canonical hedefi URL'nin son parçası; ürün adresi feed'den geliyor.
+                slug: url.trim().trim_end_matches('/').rsplit('/').next().unwrap_or("").to_lowercase(),
+                // Feed'de IdeaSoft ürün kimliği yok; hedef için gerekmiyor (yalnızca slug yazılıyor).
+                id: 0,
+                name: r.get(1)?,
+                // Feed'de olan ürün satıştadır; ayrıca durum sorgulamaya gerek yok.
+                status: 1,
+                stock: 0.0,
+                canonical: r.get::<_, String>(0)?,
+            })
         })
-        .collect())
+        .map_err(|e| format!("Ürünler okunamadı: {e}"))?
+        .filter_map(Result::ok)
+        .filter(|m| !m.slug.is_empty())
+        .collect();
+    Ok(rows)
+}
+
+/// Verilen slug SATIŞTAKİ bir ürüne mi ait? Canonical yazmadan önceki son kapı.
+///
+/// ⚠️ Arayüz zaten yalnızca satıştaki ürünleri listeliyor; bu kontrol ikinci savunma hattı.
+/// Yapay zekâ önerisi de feed'den geldiği için iki yol da buradan geçiyor.
+fn live_product_name(conn: &Connection, slug: &str) -> Option<String> {
+    let s = slug.trim().trim_matches('/').to_lowercase();
+    if s.is_empty() {
+        return None;
+    }
+    // ⚠️ Karşılaştırma SQL'de `LIKE` ile YAPILMIYOR: slug'da geçen `_` karakteri LIKE'ta
+    // joker olur ve yanlış ürünü eşleştirebilirdi. Feed birkaç yüz satır — tam tarama bedava.
+    let mut stmt = conn
+        .prepare("SELECT name, url FROM products WHERE url IS NOT NULL AND url <> ''")
+        .ok()?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .ok()?;
+    for (name, url) in rows.filter_map(Result::ok) {
+        let last = url.trim().trim_end_matches('/').rsplit('/').next().unwrap_or("");
+        if last.to_lowercase() == s {
+            return Some(name);
+        }
+    }
+    None
 }
 
 #[derive(Serialize)]
@@ -432,9 +491,21 @@ pub async fn preview_canonical(
 ) -> Result<CanonicalPreview, String> {
     let (domain, token) = ideasoft_creds(&state)?;
     let (product_id, product_name) = resolve_slug_cached(&state, &domain, &token, &eol_slug).await?;
-    // ⚠️ HEDEF de doğrulanır. Var olmayan bir sayfaya canonical yazmak, hiç yazmamaktan kötüdür:
-    // Google'a "asıl sayfa şu" der ve o sayfa 404'tür. Bulunamazsa yazma adımına geçilmez.
-    let (_, target_name) = resolve_slug_cached(&state, &domain, &token, &target_slug).await?;
+    // 🔴 HEDEF SATIŞTA OLMALI. Bu akışın amacı satışta olmayan bir sayfayı satıştaki bir ürüne
+    // yönlendirmek; hedef de feed dışıysa ölü sayfayı başka bir ölü sayfaya işaret ettirmiş
+    // oluruz (saha hatası, 2026-07-30). Arayüz zaten yalnızca satıştakileri listeliyor —
+    // bu ikinci savunma hattı.
+    let target_name = {
+        let conn = state.conn.lock().unwrap();
+        live_product_name(&conn, &target_slug)
+    }
+    .ok_or_else(|| {
+        format!(
+            "\"{}\" satıştaki ürünler arasında değil. Canonical yalnızca feed'deki (satıştaki) \
+bir ürüne verilebilir; aksi halde ziyaretçiyi yine satın alınamayan bir sayfaya göndeririz.",
+            target_slug.trim().trim_matches('/')
+        )
+    })?;
 
     let cur = ideasoft::get_seo_setting(&domain, &token, product_id).await?;
     Ok(CanonicalPreview {
@@ -463,10 +534,17 @@ pub async fn apply_canonical(
 ) -> Result<String, String> {
     let (domain, token) = ideasoft_creds(&state)?;
     let (product_id, _) = resolve_slug_cached(&state, &domain, &token, &eol_slug).await?;
-    // Önizlemede doğrulanmış olsa da burada tekrar bakılıyor: bu komut canlı mağazayı değiştiriyor
-    // ve var olmayan bir hedefe canonical yazmamalı. Önizleme sonrası önbellekten geldiği için
-    // ek istek yok.
-    resolve_slug_cached(&state, &domain, &token, &target_slug).await?;
+    // Önizlemede doğrulanmış olsa da burada TEKRAR bakılıyor: bu komut canlı mağazayı
+    // değiştiriyor ve hedef satıştaki bir ürün değilse yazılmamalı. Yerel sorgu, ek istek yok.
+    {
+        let conn = state.conn.lock().unwrap();
+        if live_product_name(&conn, &target_slug).is_none() {
+            return Err(format!(
+                "\"{}\" satıştaki ürünler arasında değil — canonical yazılmadı.",
+                target_slug.trim().trim_matches('/')
+            ));
+        }
+    }
 
     // Mevcut kaydı oku: index/follow korunmalı, yalnızca canonical değişmeli.
     let cur = ideasoft::get_seo_setting(&domain, &token, product_id).await?;
@@ -482,4 +560,49 @@ pub async fn apply_canonical(
         );
     }
     Ok(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db_with(urls: &[(&str, &str)]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        for (sku, url) in urls {
+            conn.execute(
+                "INSERT INTO products (sku, name, url) VALUES (?1, ?2, ?3)",
+                params![sku, format!("Ürün {sku}"), url],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    /// 🔴 Bu testin koruduğu şey saha hatasının kendisi: canonical hedefi SATIŞTAKİ
+    /// (feed'deki) bir ürün olmalı. Feed dışı bir slug kabul edilirse ölü sayfayı başka bir
+    /// ölü sayfaya işaret ettirmiş oluruz.
+    #[test]
+    fn hedef_yalnizca_satistaki_urun_olabilir() {
+        let conn = db_with(&[
+            ("A1", "https://magaza.com/urun/satistaki-urun"),
+            ("A2", "https://magaza.com/urun/ikinci-urun/"),
+        ]);
+        assert_eq!(live_product_name(&conn, "satistaki-urun").as_deref(), Some("Ürün A1"));
+        // Sondaki eğik çizgi ve büyük harf eşleşmeyi bozmamalı.
+        assert_eq!(live_product_name(&conn, "/İKİNCİ-URUN/".to_lowercase().as_str()).as_deref(), None);
+        assert_eq!(live_product_name(&conn, "ikinci-urun").as_deref(), Some("Ürün A2"));
+        // Feed'de olmayan (satıştan kalkmış) ürün → hedef olamaz.
+        assert_eq!(live_product_name(&conn, "asus-zenbook-17-fold"), None);
+        assert_eq!(live_product_name(&conn, ""), None);
+    }
+
+    /// ⚠️ `LIKE` ile yapılsaydı slug'daki `_` joker olur ve YANLIŞ ürünü eşleştirirdi.
+    #[test]
+    fn alt_cizgi_joker_gibi_davranmamali() {
+        let conn = db_with(&[("B1", "https://magaza.com/urun/abc-x-def")]);
+        // `abc_x_def` LIKE kalıbı olarak `abc-x-def`e uyardı; burada uymamalı.
+        assert_eq!(live_product_name(&conn, "abc_x_def"), None);
+        assert_eq!(live_product_name(&conn, "abc-x-def").as_deref(), Some("Ürün B1"));
+    }
 }
