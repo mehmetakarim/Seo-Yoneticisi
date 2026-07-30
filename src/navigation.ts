@@ -89,7 +89,10 @@ export const NAV = [
 
   {
     key: "assistant",
-    label: "Yapay Zekâ Asistanı",
+    // ⚠️ Kenar çubuğu 190–238px; "Yapay Zekâ Asistanı" oraya sığmayıp iki satıra
+    // kırılıyordu ve tek satırlık diğer öğelerin arasında düzeni bozuyordu.
+    // Üst şerit başlığı tam adı taşımaya devam ediyor — orada yer var.
+    label: "AI Asistanı",
     icon: "message",
     title: "Yapay Zekâ Asistanı",
     sub: "Analiz verinizi konuşarak sorgulayın — asistan hiçbir değişiklik yapmaz",
