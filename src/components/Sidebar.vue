@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { useStore } from "../store";
-import { NAV } from "../navigation";
+import { groupedNav } from "../navigation";
 import Icon from "./Icon.vue";
+
+/**
+ * Menü 3 öğeden 9'a çıktı (her SEO aracı kendi ekranında). Düz liste hâlinde bu bir
+ * "araç kutusu" değil "uzun liste" gibi görünüyordu; grup başlıkları hiyerarşi kuruyor.
+ * Kayıt `navigation.ts`'te — buraya yeni öğe eklenmez.
+ */
+const groups = groupedNav();
 
 const store = useStore();
 
@@ -23,16 +30,19 @@ function fmtSync(): string {
       </div>
     </div>
 
-    <nav class="nav">
-      <div
-        v-for="item in NAV"
-        :key="item.key"
-        class="nav-item"
-        :class="{ active: store.page === item.key }"
-        @click="store.page = item.key"
-      >
-        <Icon :name="item.icon" :size="17" :stroke-width="1.9" />
-        <span>{{ item.label }}</span>
+    <nav class="nav om-scroll">
+      <div v-for="g in groups" :key="g.group" class="nav-group">
+        <div class="nav-cap">{{ g.group }}</div>
+        <div
+          v-for="item in g.items"
+          :key="item.key"
+          class="nav-item"
+          :class="{ active: store.page === item.key }"
+          @click="store.page = item.key"
+        >
+          <Icon :name="item.icon" :size="16" :stroke-width="1.9" />
+          <span>{{ item.label }}</span>
+        </div>
       </div>
     </nav>
 
@@ -101,18 +111,35 @@ function fmtSync(): string {
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  /* 9 öğe kısa pencerede taşabilir; tema anahtarı ve senkron durumu hep görünür kalsın. */
+  overflow-y: auto;
+  min-height: 0;
+}
+.nav-group + .nav-group {
+  margin-top: 16px;
+}
+/* Grup başlığı: küçük, soluk, harf aralığı açık — okunmak için değil, ayırmak için. */
+.nav-cap {
+  padding: 0 10px 6px;
+  font-size: 10.5px;
+  font-weight: 640;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--c-faint);
 }
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 9px 10px;
+  gap: 10px;
+  padding: 7px 10px;
   border-radius: 8px;
   color: var(--c-mid);
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+}
+.nav-item + .nav-item {
+  margin-top: 2px;
 }
 .nav-item:hover {
   background: var(--c-hover);

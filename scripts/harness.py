@@ -111,12 +111,17 @@ def main():
         "app_version": "harness",
     }
 
+    # `?empty=1` → analiz hiç çalıştırılmamış gibi davranır. Boş durumları elle test etmek
+    # mümkün değil: sayfalar açılırken önbelleği yeniden yüklüyor, store'u dışarıdan
+    # sıfırlamak yetmiyor. Bu senaryo önemli — v0.5.9'da boş ekran bir saha hatasıydı.
     stub = (
         "<script>\n"
         "// Tauri IPC taklidi — yalnızca harness için. Uygulama bundle'ı gerçek.\n"
         "window.__TAURI_INTERNALS__ = {\n"
         "  invoke: (cmd) => {\n"
         f"    const H = {json.dumps(handlers, ensure_ascii=False)};\n"
+        "    if (new URLSearchParams(location.search).has('empty')\n"
+        "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
         "    return Promise.resolve(cmd in H ? H[cmd] : null);\n"
         "  },\n"
         "  transformCallback: (cb) => { const id = Math.random(); window[id] = cb; return id; },\n"

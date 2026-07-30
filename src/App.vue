@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, type Component } from "vue";
 import { useStore } from "./store";
-import { titleOf, type Page } from "./navigation";
+import { subOf, titleOf, type Page } from "./navigation";
 import Sidebar from "./components/Sidebar.vue";
 import ProductsPage from "./components/ProductsPage.vue";
-import OpportunitiesPage from "./components/OpportunitiesPage.vue";
 import SettingsPage from "./components/SettingsPage.vue";
+// SEO araçları: her analiz kendi ekranında (v0.7.0). Hepsi TEK `opportunity_json`
+// önbelleğinin dilimlerini okur — ekran başına GSC çağrısı yok.
+import OverviewPage from "./components/tools/OverviewPage.vue";
+import OpportunitiesPage from "./components/tools/OpportunitiesPage.vue";
+import StrikingPage from "./components/tools/StrikingPage.vue";
+import CannibalPage from "./components/tools/CannibalPage.vue";
+import DecayPage from "./components/tools/DecayPage.vue";
+import EolPage from "./components/tools/EolPage.vue";
 import UpdateModal from "./components/UpdateModal.vue";
 import Icon from "./components/Icon.vue";
 
@@ -20,19 +27,27 @@ const pageRef = ref<{ focusSearch?: () => void } | null>(null);
 /** navigation.ts'teki kayda karşılık gelen bileşenler. Yeni sayfa → buraya bir satır. */
 const PAGES: Record<Page, Component> = {
   products: ProductsPage,
+  overview: OverviewPage,
   opportunities: OpportunitiesPage,
+  striking: StrikingPage,
+  cannibal: CannibalPage,
+  decay: DecayPage,
+  eol: EolPage,
   settings: SettingsPage,
 };
 
 const isProducts = computed(() => store.page === "products");
 const pageTitle = computed(() => titleOf(store.page));
+/**
+ * Üst şerit alt metni. Sabit olanlar `navigation.ts`'te (kayıt tek yerde kalsın);
+ * yalnızca ürün sayacı gibi DURUMA bağlı olanlar burada hesaplanıyor.
+ */
 const pageSub = computed(() => {
-  if (store.page === "opportunities")
-    return "Google Search Console verisiyle önceliklendirme";
-  if (!isProducts.value) return "Kaynaklar ve yedekleme";
-  const done = store.counts.tamamlandi;
-  const active = store.counts.tumu;
-  return `${active} ürün bekliyor · ${done} tamamlandı`;
+  if (isProducts.value) {
+    return `${store.counts.tumu} ürün bekliyor · ${store.counts.tamamlandi} tamamlandı`;
+  }
+  if (store.page === "settings") return "Kaynaklar ve yedekleme";
+  return subOf(store.page);
 });
 
 // İş takibi: tamamlanan ürün oranı (meta + açıklama + teknik tablo hepsi işaretli).

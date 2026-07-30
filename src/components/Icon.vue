@@ -30,6 +30,14 @@ const P: Record<string, string> = {
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
   alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  // SEO araç ekranları (v0.7.0) — her araç kendi ekranına taşındığında kenar çubuğunda
+  // birbirinden ayırt edilebilmesi gerekti.
+  layout: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M9 12h12"/>',
+  trendUp: '<path d="M16 7h6v6"/><path d="m22 7-8.5 8.5-5-5L2 17"/>',
+  trendDown: '<path d="M16 17h6v-6"/><path d="m22 17-8.5-8.5-5 5L2 7"/>',
+  split: '<path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/>',
+  archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  message: '<path d="M12 20a8 8 0 1 0-6.9-3.95L4 21l4.95-1.1A8 8 0 0 0 12 20Z"/>',
 };
 </script>
 
