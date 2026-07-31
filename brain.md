@@ -31,16 +31,15 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
 
 ### 📋 KUYRUK — kullanıcı önceliğiyle (2026-07-31)
 
-Sıra **kullanıcı kararı**, tahmini efor değil. **Sıradaki: K3.**
+Sıra **kullanıcı kararı**, tahmini efor değil. **Kuyruk boş — üç kalem de bitti.**
 
 **K1. İlk kurulum sihirbazı** ✅ **TAMAMLANDI (v0.8.0)** — ayrıntı ve çıkan kusur 0ao/0ap'de.
 
 **K2. Feed değişikliği tespiti** ✅ **TAMAMLANDI (v0.8.1)** — ayrıntı 0aq'da.
 
-**K3. Schema.org JSON-LD çıktısı** ← **SIRADAKİ**
-   `tech_specs_json` zaten yapılandırılmış → `Product` + `additionalProperty` +
-   `brand`/`sku`/`offers` üretmek tek adım. GEO/AI arama tarafında doğrudan kazanç,
-   neredeyse bedava.
+**K3. Schema.org JSON-LD çıktısı** ✅ **TAMAMLANDI (v0.8.2)** — ayrıntı 0ar'de.
+   ⚠️ Kuyruk tanımında `offers` da vardı; **ölçüm bunu çürüttü** — feed'de fiyat alanı yok,
+   mağaza fiyatı zaten canlı basıyor. Gerekçe 0ar'de.
 
 ### 🔍 Eski özellik listesinin denetimi (2026-07-31, kodda doğrulandı)
 
@@ -53,7 +52,7 @@ Daha eski bir öneri listesindeki 9 maddenin durumu — **bu soru tekrar sorulma
 | Meta/açıklama sürüm geçmişi | ✅ v0.5.7 |
 | Otomatik güncelleme | ✅ Faz 10, saha testinden geçti |
 | Feed değişikliği tespiti | ✅ v0.8.1 (K2) |
-| Schema.org JSON-LD | → **K3** |
+| Schema.org JSON-LD | ✅ v0.8.2 (K3) |
 | İlk kurulum sihirbazı | → **K1** |
 | Kod imzalama + notarization | ⏸️ kod işi değil, **maliyet kararı** (Apple ~$99/yıl + Windows sertifikası) |
 | Toplu üretim (batch) | 🔴 **YAPILMAYACAK — yeniden karar gerekiyor, aşağıya bak** |
@@ -154,6 +153,45 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    **Kota tasarımı:** istek üzerine, satır bazında, önbellekli. 1.073 sayfa için toplu çağrı
    günlük kotayı (flash 20/gün) anında tüketirdi. Trafik tepedeki sayfalarda yoğun.
    Arayüzde "halef yok" NÖTR renkte — başarısızlık değil, geçerli cevap.
+
+0ar. ✅ **SCHEMA.ORG JSON-LD (v0.8.2, K3).** Ürün detayında "Schema.org (JSON-LD)" kartı:
+   kodu göster + kopyala. Mantık `core/src/jsonld.rs`, komut `get_jsonld`. **Model çağrısı yok** —
+   elde olan veriden derleniyor, dolayısıyla halüsinasyon yüzeyi de yok.
+
+   🔬 **Ölçüm kapsamı belirledi — IdeaSoft ZATEN yapılandırılmış veri basıyor.** Canlı ürün
+   sayfasının ham HTML'i incelendi:
+
+   | | durum |
+   |---|---|
+   | `application/ld+json` | **0 tane** |
+   | microdata `schema.org/Product` | **var** (gizli div) — name·description·sku·brand·category·image·url |
+   | microdata `Offer` | priceCurrency·price·**availability**, canlı |
+
+   Yani temel alanları tekrar etmenin değeri yok. **Bizim eklediğimiz tek gerçek şey
+   `additionalProperty`** — teknik özellik tablosu. IdeaSoft'un mikroverisinde ürün özelliği YOK;
+   tablo mağazada yalnızca HTML olarak duruyor, arama motoru tarafında yapılandırılmış veri
+   olarak okunmuyor. Kazanç orada.
+
+   ⚠️ **Kuyruk tanımındaki `offers` ölçümle çürüdü:** feed'de fiyat alanı yok (`FeedProduct`),
+   stok anlık değişiyor. Kopyalanan koda yazılmış bir fiyat sayfadaki canlı mikroveriyle çelişir
+   ve Google bunu **hata** raporlar. **Yanlış fiyat, fiyat olmamasından kötüdür.**
+   `aggregateRating` de yok: puan verisi elimizde yok, uydurmak politika ihlali.
+
+   🔬 **Gerçek veri (254 ürün):** 254/254 JSON-LD üretiyor, **14'ünde özellik var (519 satır)**,
+   en büyük çıktı 8,5 KB. Ölçüm bir gürültü de gösterdi: teknik tablonun ilk satırları
+   ad/marka/kategoriyi tekrar ediyordu (üst düzeyde zaten yazılı) → **tam eşitlik** ölçütüyle
+   ayıklanıyor, 550 satır 519'a indi. Benzer değerler korunuyor.
+
+   🔴 **`</script>` kaçışı — ve aynı tuzağa harness'te düşüldü.** Özellik değerinde `</script>`
+   geçerse tarayıcı script'i erken kapatır. `render_script` bunu kaçırıyor ve testi var; ama
+   `scripts/harness.py` örneği gömerken kaçırmayı unutunca **harness sessizce boş açıldı** —
+   konsolda hata bile yok. Bir tur kaybettirdi. Ders: bu kaçış, JSON'un HTML'e gömüldüğü
+   HER yerde gerekli, yalnızca üretim kodunda değil.
+
+   ❓ **Açık soru (kullanıcıya soruldu):** çıktı şu an yalnızca panoya kopyalanıyor. IdeaSoft
+   gönderim modülü `extraDetails` alanına yazabiliyor (teknik tablo oradan gidiyor) → JSON-LD
+   de oraya eklenebilir. **Önce ölçülmeli: IdeaSoft `<script>` etiketini kırpıyor mu?** Bu
+   canlı bir yazma denemesi gerektiriyor, kullanıcı onayı olmadan yapılmadı.
 
 0aq. ✅ **FEED DEĞİŞİKLİĞİ TESPİTİ (v0.8.1, K2).** Senkronda ürünün *üretimi besleyen*
    alanlarından parmak izi alınıyor (`products.feed_fp`); kullanıcı "tamamlandı" dediğinde o

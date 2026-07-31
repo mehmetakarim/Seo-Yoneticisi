@@ -9,6 +9,7 @@ import DetailsSeoCard from "./DetailsSeoCard.vue";
 import SeoResearchPanel from "./SeoResearchPanel.vue";
 import ImageScoreCard from "./ImageScoreCard.vue";
 import TechTableCard from "./TechTableCard.vue";
+import SchemaCard from "./SchemaCard.vue";
 import IdeasoftPushModal from "./IdeasoftPushModal.vue";
 
 const store = useStore();
@@ -201,6 +202,9 @@ async function openProduct() {
         :badge="detail.tech_badge"
         :history="detail.tech_history"
       />
+
+      <!-- JSON-LD teknik tablodan besleniyor → hemen onun altında -->
+      <SchemaCard />
     </div>
 
     <div v-else class="no-sel">

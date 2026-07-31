@@ -22,6 +22,7 @@ import type {
 export const api = {
   syncFeed: () => invoke<SyncSummary>("sync_feed"),
   getLastSync: () => invoke<SyncSummary | null>("get_last_sync"),
+  getJsonld: (sku: string) => invoke<string>("get_jsonld", { sku }),
   markFeedReviewed: (sku: string) => invoke<void>("mark_feed_reviewed", { sku }),
   listProducts: (filter: string, search: string) =>
     invoke<ProductRow[]>("list_products", { filter, search }),

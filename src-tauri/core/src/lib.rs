@@ -19,6 +19,7 @@ pub mod fingerprint;
 pub mod gemini;
 pub mod history;
 pub mod ideasoft;
+pub mod jsonld;
 pub mod images;
 pub mod opportunity;
 pub mod seo_data;

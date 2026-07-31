@@ -45,6 +45,7 @@ pub fn run() {
             commands::save_meta_draft,
             commands::mark_meta_done,
             commands::mark_feed_reviewed,
+            commands::get_jsonld,
             commands::mark_details_done,
             commands::generate_meta,
             commands::generate_details,

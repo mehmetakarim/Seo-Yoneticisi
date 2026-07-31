@@ -123,7 +123,29 @@ def main():
     live = load_live_products(conn)
     conn.close()
 
+    # JSON-LD kartı için gösterim örneği. ⚠️ Gerçek çıktıyı `seo_core::jsonld` üretiyor;
+    # buradaki yalnızca kartın yerleşimini/kaydırmasını denemek için temsilî bir metin.
+    jsonld_stub = json.dumps(
+        {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "name": (listing or {}).get("name", "Örnek Ürün"),
+            "sku": (listing or {}).get("sku", "SKU-1"),
+            "brand": {"@type": "Brand", "name": (listing or {}).get("brand") or "Marka"},
+            "url": "https://ornek.com/urun/ornek",
+            "image": ["https://ornek.com/1.jpg", "https://ornek.com/2.jpg"],
+            "additionalProperty": [
+                {"@type": "PropertyValue", "name": f"Özellik {i}", "value": f"Değer {i}"}
+                for i in range(1, 13)
+            ],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    jsonld_stub = f'<script type="application/ld+json">\n{jsonld_stub}\n</script>'
+
     handlers = {
+        "get_jsonld": jsonld_stub,
         "get_opportunity_cache": report,
         "get_settings": {"theme": "light"},
         "get_last_sync": None,
@@ -155,7 +177,10 @@ def main():
         "// Tauri IPC taklidi — yalnızca harness için. Uygulama bundle'ı gerçek.\n"
         "window.__TAURI_INTERNALS__ = {\n"
         "  invoke: (cmd, args) => {\n"
-        f"    const H = {json.dumps(handlers, ensure_ascii=False)};\n"
+        # ⚠️ `</` kaçışı ZORUNLU: JSON-LD örneği gövdesinde `</script>` geçiyor ve HTML
+        # ayrıştırıcısı bunu gördüğü anda DIŞ script'i kapatıyor → sayfa sessizce boş açılıyor.
+        # (Bu tuzağa bir kez düşüldü; `seo_core::jsonld::render_script` aynı kaçışı yapıyor.)
+        f"    const H = {json.dumps(handlers, ensure_ascii=False).replace('</', '<\\/')};\n"
         "    if (new URLSearchParams(location.search).has('empty')\n"
         "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
         # `?setup=1` → taze kurulum benzetimi. Sihirbaz kullanıcının GERÇEK veritabanına

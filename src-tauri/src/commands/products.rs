@@ -177,6 +177,37 @@ pub fn save_meta_draft(
     Ok(())
 }
 
+/// Ürünün Schema.org `Product` JSON-LD çıktısı — sayfaya yapıştırılmaya hazır script etiketi.
+///
+/// Veri **üretilmiyor**, elde olandan derleniyor: ad/sku/marka/kategori feed'den, açıklama
+/// meta alanından (taslak öncelikli — sayfaya çıkacak olan o), görseller galeriden, özellikler
+/// teknik tablodan. Model çağrısı yok, dolayısıyla halüsinasyon yüzeyi de yok.
+///
+/// ⚠️ Fiyat/stok/puan bilinçli olarak DIŞARIDA — gerekçesi `seo_core::jsonld` başlığında.
+#[tauri::command]
+pub fn get_jsonld(state: State<'_, AppState>, sku: String) -> Result<String, String> {
+    let conn = state.conn.lock().unwrap();
+    let d = read_detail(&conn, &sku)?;
+    let facts = jsonld::ProductFacts {
+        name: d.name,
+        sku: d.sku,
+        brand: d.brand.unwrap_or_default(),
+        // Alt kategori daha belirleyici; yoksa ana kategoriye düşülüyor.
+        category: d.category.or(d.main_category).unwrap_or_default(),
+        // Taslak varsa taslak: yayımlandığında sayfada duracak olan metin o.
+        description: d.draft_descriptions.or(d.descriptions).unwrap_or_default(),
+        url: d.url.unwrap_or_default(),
+        images: d.gallery,
+    };
+    let specs = d.tech_specs.unwrap_or_default();
+    jsonld::build(&facts, &specs)
+        .map(|n| jsonld::render_script(&n))
+        .ok_or_else(|| {
+            "JSON-LD üretilemedi: ürünün adı veya sayfa adresi yok. Feed'i senkronlayın."
+                .to_string()
+        })
+}
+
 /// "Baktım, içerik hâlâ doğru" — bayrağı düşürür, içeriğe DOKUNMAZ.
 ///
 /// Feed değiştiğinde her zaman yeniden üretim gerekmiyor: bazen değişen alan zaten
