@@ -7,6 +7,23 @@ pub async fn test_capsolver_key(key: String) -> Result<String, String> {
     seo_data::ahrefs::test_key(&key).await
 }
 
+/// Kurulum sihirbazı gösterilmeli mi? (Karar mantığı `seo_core::db::needs_setup`'ta.)
+#[tauri::command]
+pub fn needs_setup(state: State<'_, AppState>) -> Result<bool, String> {
+    let conn = state.conn.lock().unwrap();
+    db::needs_setup(&conn)
+}
+
+/// Sihirbaz tamamlandı (ya da bilinçli olarak atlandı) — bir daha kendiliğinden açılmasın.
+///
+/// ⚠️ Atlandığında da yazılıyor: her açılışta sihirbazla karşılaşmak, atlama seçeneğini
+/// anlamsız kılardı. Kullanıcı Ayarlar'dan istediğinde tekrar çalıştırabiliyor.
+#[tauri::command]
+pub fn mark_setup_done(state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    db::set_setting(&conn, "setup_done", &now_str())
+}
+
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     let conn = state.conn.lock().unwrap();

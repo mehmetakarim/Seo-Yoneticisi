@@ -8,6 +8,14 @@ pub async fn sync_feed(state: State<'_, AppState>) -> Result<sync::SyncSummary, 
         let conn = state.conn.lock().unwrap();
         db::feed_url(&conn)?
     };
+    // Feed adresi artık varsayılana düşmüyor (bkz. db::feed_url) → boşsa kullanıcıya ne
+    // yapması gerektiği söylenmeli. Aksi halde `fetch_and_parse` teknik bir URL hatası döner.
+    if url.trim().is_empty() {
+        return Err(
+            "Feed adresi ayarlı değil. Ayarlar'dan girin veya kurulum sihirbazını çalıştırın."
+                .to_string(),
+        );
+    }
     let items = feed::fetch_and_parse(&url).await?;
     let mut conn = state.conn.lock().unwrap();
     sync::sync_products(&mut conn, items)

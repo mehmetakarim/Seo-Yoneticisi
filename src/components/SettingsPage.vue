@@ -288,6 +288,18 @@ async function doImport() {
 <template>
   <div class="settings om-scroll">
     <div class="wrap">
+      <!-- Sihirbazı atlayan ya da yeniden yapılandırmak isteyen için tek giriş noktası.
+           Sihirbaz yeni bir yetenek eklemiyor; aşağıdaki alanları doğru sıraya diziyor. -->
+      <div class="wiz-bar">
+        <div>
+          <div class="wiz-t">Kurulum sihirbazı</div>
+          <div class="wiz-s">Feed, Gemini ve entegrasyonları adım adım yapılandırın</div>
+        </div>
+        <button class="ghost" @click="store.openSetup()">
+          <Icon name="sparkles" :size="14" /> Çalıştır
+        </button>
+      </div>
+
       <!-- Kaynaklar -->
       <div class="card">
         <div class="card-head">
@@ -612,6 +624,31 @@ async function doImport() {
   flex-direction: column;
   gap: 18px;
 }
+.wiz-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--accent-tint);
+}
+.wiz-bar > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.wiz-t {
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--c-text);
+}
+.wiz-s {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--c-soft);
+}
+
 .card {
   border: 1px solid var(--c-border-soft);
   border-radius: 14px;

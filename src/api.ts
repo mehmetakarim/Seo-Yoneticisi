@@ -103,6 +103,8 @@ export const api = {
     invoke<ProductDetail>("ideasoft_push", { sku, parts }),
   ideasoftPullKeyword: (sku: string) =>
     invoke<ProductDetail>("ideasoft_pull_keyword", { sku }),
+  needsSetup: () => invoke<boolean>("needs_setup"),
+  markSetupDone: () => invoke<void>("mark_setup_done"),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (
     feedUrl: string,

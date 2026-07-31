@@ -13,6 +13,12 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.8.0
+- Yeni: **ilk kurulum sihirbazı** — feed adresi, Gemini anahtarı ve isteğe bağlı entegrasyonlar adım adım, her adımda "test et" ile
+- Gemini anahtarınız yoksa o adımı atlayabilirsiniz; nereden alacağınız ekranda yazıyor
+- Sihirbazı istediğiniz zaman Ayarlar'dan tekrar çalıştırabilirsiniz
+- Düzeltme: feed adresi girilmemişken uygulama artık örnek bir mağazanın feed'ine düşmüyor — kendi adresinizi girmeden senkron yapılmıyor
+
 ## v0.7.2
 - Yeni: AI Asistanı sohbetleri artık kaydediliyor — uygulamayı kapatıp açtığınızda geçmiş sohbetlerinize dönebilirsiniz
 - Yeni: geçmiş sohbetler tek tek veya toplu olarak silinebiliyor; silme öncesi onay isteniyor

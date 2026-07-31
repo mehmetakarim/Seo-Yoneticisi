@@ -1,7 +1,5 @@
 use rusqlite::Connection;
 
-pub const DEFAULT_FEED_URL: &str = "https://www.kurumsalit.com/output/2567783262";
-
 pub fn open(path: &std::path::Path) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Veritabanı açılamadı: {e}"))?;
     init(&conn)?;
@@ -183,6 +181,83 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), Stri
     Ok(())
 }
 
+/// Kayıtlı feed adresi; **ayarlanmamışsa boş string**.
+///
+/// 🔴 Burada eskiden `DEFAULT_FEED_URL` sabiti vardı ve tek bir mağazanın (kurumsalit.com)
+/// feed adresine düşüyordu. Yani uygulamayı kuran **herhangi bir işletme** varsayılan olarak
+/// başka birinin kataloğunu senkronluyordu — vizyonun açık ihlali (*"kullanıcıya özel değer
+/// gömmeden, ayarlanabilir olmalı"*) ve ilk çalıştırmada somut bir veri kazası.
+///
+/// Boş dönmesi bilinçli: çağıranlar "ayarlanmamış" durumunu görüp kullanıcıya ne yapması
+/// gerektiğini söyleyebilsin (bkz. `sync_feed`).
 pub fn feed_url(conn: &Connection) -> Result<String, String> {
-    Ok(get_setting(conn, "feed_url")?.unwrap_or_else(|| DEFAULT_FEED_URL.to_string()))
+    Ok(get_setting(conn, "feed_url")?.unwrap_or_default())
+}
+
+/// Kurulum sihirbazı gösterilmeli mi?
+///
+/// **Üç koşul birden** aranıyor — çünkü asıl risk yanlış pozitif: mevcut bir kullanıcı
+/// yükseltme yaptığında sihirbazın açılması, çalışan bir kurulumun üstüne kurulum teklif
+/// etmek olurdu.
+///
+/// Durum baştan hesaplanıyor; şema göçü ve tek seferlik geriye dönük yazma (backfill) YOK.
+pub fn needs_setup(conn: &Connection) -> Result<bool, String> {
+    if get_setting(conn, "setup_done")?.is_some() {
+        return Ok(false);
+    }
+    if get_setting(conn, "feed_url")?.is_some_and(|v| !v.trim().is_empty()) {
+        return Ok(false);
+    }
+    let products: i64 = conn
+        .query_row("SELECT count(*) FROM products", [], |r| r.get(0))
+        .map_err(|e| format!("Ürün sayısı okunamadı: {e}"))?;
+    Ok(products == 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn taze_kurulumda_sihirbaz_gerekir() {
+        let conn = fresh();
+        assert!(needs_setup(&conn).unwrap());
+        // Feed adresi ayarlanmamışsa BOŞ döner — eskiden tek bir mağazanın adresine düşüyordu.
+        assert_eq!(feed_url(&conn).unwrap(), "");
+    }
+
+    /// ⚠️ Asıl korunan risk yanlış pozitif: çalışan bir kuruluma sihirbaz teklif etmemek.
+    /// Üç çıkış yolunun üçü de ayrı ayrı sınanıyor.
+    #[test]
+    fn mevcut_kurulumda_sihirbaz_acilmaz() {
+        // 1) Sihirbaz daha önce tamamlanmış
+        let a = fresh();
+        set_setting(&a, "setup_done", "2026-07-31T10:00").unwrap();
+        assert!(!needs_setup(&a).unwrap());
+
+        // 2) Feed adresi girilmiş (sihirbaz atlanıp Ayarlar'dan yapılandırılmış olabilir)
+        let b = fresh();
+        set_setting(&b, "feed_url", "https://magaza.com/feed.xml").unwrap();
+        assert!(!needs_setup(&b).unwrap());
+
+        // 3) Katalog senkronlanmış — kullanıcı zaten çalışıyor
+        let c = fresh();
+        c.execute("INSERT INTO products (sku, name) VALUES ('A1', 'Ürün')", []).unwrap();
+        assert!(!needs_setup(&c).unwrap());
+    }
+
+    #[test]
+    fn bos_feed_ayari_sihirbazi_engellemez() {
+        // Boş string "ayarlanmış" sayılmamalı; aksi halde yarım kalan bir kayıt
+        // sihirbazı sonsuza dek kapatırdı.
+        let conn = fresh();
+        set_setting(&conn, "feed_url", "   ").unwrap();
+        assert!(needs_setup(&conn).unwrap());
+    }
 }

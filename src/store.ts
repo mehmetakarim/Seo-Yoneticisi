@@ -59,11 +59,14 @@ interface State {
   canonicalQuery: string;
   canonicalResults: CatalogMatch[];
   canonicalSearching: boolean;
-  /** Asistan sohbeti. Bellekte, oturumla sınırlı — DB'ye yazmak yeni tablo + temizleme
-   *  politikası demek; ilk sürümde kapsam dışı. */
+  /** Kurulum sihirbazı açık mı. İlk çalıştırmada kendiliğinden açılır; Ayarlar'dan da
+   *  elle açılabilir. */
+  setupOpen: boolean;
   /** Asistanın bağlam kaynağı: kullanıcı asistana geçmeden ÖNCE hangi araç ekranındaydı.
    *  `page` asistana geçince değiştiği için ayrı tutuluyor. App.vue güncelliyor. */
   lastToolPage: Page | "";
+  /** Açık sohbetin mesajları. v0.7.2'den beri her turdan sonra `chat_sessions` tablosuna
+   *  kaydediliyor — uygulama kapanınca kaybolmuyor. */
   chat: ChatMessage[];
   chatBusy: boolean;
   /** Model düşünüyor ama henüz cevap parçası gelmedi (Gemma akışta muhakemesini de
@@ -123,6 +126,7 @@ export const useStore = defineStore("app", {
     canonicalQuery: "",
     canonicalResults: [],
     canonicalSearching: false,
+    setupOpen: false,
     lastToolPage: "",
     chat: [],
     chatBusy: false,
@@ -282,6 +286,13 @@ export const useStore = defineStore("app", {
         }
         this.applyTheme();
         this.lastSync = await api.getLastSync();
+        // İlk çalıştırma mı? Karar backend'de (üç koşul birden, bkz. db::needs_setup) —
+        // ön yüz yalnızca sonucu gösteriyor.
+        try {
+          this.setupOpen = await api.needsSetup();
+        } catch {
+          /* sihirbaz sorulamazsa uygulama normal açılsın */
+        }
         // Sürüm bilgisi + sessiz güncelleme kontrolü (açılışta)
         try {
           const { getVersion } = await import("@tauri-apps/api/app");
@@ -485,6 +496,26 @@ export const useStore = defineStore("app", {
       } catch (e) {
         // Kaydedilememesi sohbeti bozmasın; kullanıcı yine de cevabını görüyor.
         this.toast(`Sohbet kaydedilemedi: ${e}`, "error");
+      }
+    },
+
+    /** Sihirbazı elle aç (Ayarlar'daki düğme). */
+    openSetup() {
+      this.setupOpen = true;
+    },
+
+    /**
+     * Sihirbazı kapat ve bir daha kendiliğinden açılmasın diye işaretle.
+     * ⚠️ ATLANDIĞINDA DA işaretleniyor: her açılışta sihirbazla karşılaşmak, atlama
+     * seçeneğini anlamsız kılardı. Kullanıcı Ayarlar'dan istediğinde tekrar açabiliyor.
+     */
+    async finishSetup() {
+      this.setupOpen = false;
+      try {
+        await api.markSetupDone();
+        this.settings = await api.getSettings();
+      } catch (e) {
+        this.toast(String(e), "error");
       }
     },
 

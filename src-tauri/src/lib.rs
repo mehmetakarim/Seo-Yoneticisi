@@ -75,6 +75,8 @@ pub fn run() {
             commands::delete_all_chat_sessions,
             commands::preview_canonical,
             commands::apply_canonical,
+            commands::needs_setup,
+            commands::mark_setup_done,
             commands::get_settings,
             commands::save_settings,
             commands::set_gsc_service_account,

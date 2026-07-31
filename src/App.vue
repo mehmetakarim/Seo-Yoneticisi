@@ -15,6 +15,7 @@ import DecayPage from "./components/tools/DecayPage.vue";
 import EolPage from "./components/tools/EolPage.vue";
 import AssistantPage from "./components/tools/AssistantPage.vue";
 import UpdateModal from "./components/UpdateModal.vue";
+import SetupWizard from "./components/SetupWizard.vue";
 import Icon from "./components/Icon.vue";
 
 const store = useStore();
@@ -144,6 +145,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
       </header>
 
       <UpdateModal />
+      <SetupWizard />
 
       <component :is="PAGES[store.page]" ref="pageRef" />
     </main>
