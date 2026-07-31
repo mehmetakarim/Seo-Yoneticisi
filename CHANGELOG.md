@@ -14,16 +14,14 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 ---
 
 ## v0.8.2
-- Yeni: her ürün için **Schema.org (JSON-LD)** kartı — ürünü arama motorlarına ve yapay zekâ araçlarına yapılandırılmış veri olarak anlatan kod, tek tıkla kopyalanır
-- Teknik özellik tablonuz da bu koda giriyor: mağaza yazılımının kendi çıktısında ürün özellikleri yok, asıl kazanç burada
-- Kod yeni içerik üretmez — mevcut ad, marka, kategori, görseller ve teknik tablodan derlenir
-- Fiyat ve stok bilinçle dışarıda: mağazanız bunları sayfada zaten canlı basıyor, kopyalanan koda yazılsa bir gün sonra yanlış olurdu
-
-## v0.8.1
 - Yeni: **feed değişikliği uyarısı** — tedarikçi bir ürünün adını veya açıklamasını değiştirdiğinde, tamamladığınız ürün "Değişti" olarak işaretlenir
 - Uyarı hangi alanların değiştiğini yazar; içerik hâlâ doğruysa tek tıkla "İçerik hâlâ doğru" diyip bayrağı kaldırabilirsiniz
 - Ürün listesine "Feed değişti" filtresi eklendi — yalnızca değişiklik varken görünür
 - Yalnızca gerçek içerik değişiklikleri sayılır: stok hareketi veya biçim/satır sonu farkı uyarı üretmez
+- Yeni: her ürün için **Schema.org (JSON-LD)** kartı — ürünü arama motorlarına ve yapay zekâ araçlarına yapılandırılmış veri olarak anlatan kod, tek tıkla kopyalanır
+- Teknik özellik tablonuz da bu koda giriyor: mağaza yazılımının kendi çıktısında ürün özellikleri yok, asıl kazanç burada
+- Kod yeni içerik üretmez — mevcut ad, marka, kategori, görseller ve teknik tablodan derlenir
+- Fiyat ve stok bilinçle dışarıda: mağazanız bunları sayfada zaten canlı basıyor, kopyalanan koda yazılsa bir gün sonra yanlış olurdu
 
 ## v0.8.0
 - Yeni: **ilk kurulum sihirbazı** — feed adresi, Gemini anahtarı ve isteğe bağlı entegrasyonlar adım adım, her adımda "test et" ile
