@@ -6,7 +6,8 @@
 **Son güncelleme:** 2026-07-30
 **Aktif faz:** v0.7.2 yayında — her SEO aracı kendi ekranında, gruplu navigasyon, Yapay Zekâ
 Asistanı (sohbet geçmişi kalıcı). **Faz 2b (modül bölme) ✅ TAMAMLANDI** (kalem 4).
-**Kuyruk şu an BOŞ** — saha testi geri bildirimleriyle ilerliyoruz.
+**Kuyruk:** K1 ilk kurulum sihirbazı ⭐ · K2 feed değişikliği tespiti · K3 Schema.org JSON-LD
+(ayrıntı ve gerekçeler "KALDIĞIMIZ YER" başında).
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -25,6 +26,59 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
+
+### 📋 KUYRUK — kullanıcı önceliğiyle (2026-07-31)
+
+Aşağıdaki üç iş sırayla yapılacak. Sıra **kullanıcı kararı**, tahmini efor değil.
+
+**K1. İlk kurulum sihirbazı** ⭐ *kullanıcının en önemli gördüğü madde*
+   Yeni kullanıcı uygulamayı açtığında boş bir ekran ve "Ayarlar'a git" sezgisi görüyor.
+   Adım adım karşılama: **feed → Gemini anahtarı → test → ilk senkron**.
+   ⚠️ **Neden kritik: bu bir "tek kullanıcı" uygulaması DEĞİL.** Vizyon baştan beri global
+   (bkz. "🌍 Vizyon"): IdeaSoft altyapısı kullanan **herhangi bir işletme** hedef kitle.
+   İlk kurulum deneyimi benimsemenin önündeki ilk engel — kod kalitesi ne olursa olsun,
+   ilk beş dakikada takılan kullanıcı geri gelmiyor.
+   Mevcut parçalar hazır: `test_feed_url`, `test_gemini_key`, `test_ideasoft`,
+   `test_gsc_credentials` komutları ZATEN var — sihirbaz bunları sıraya dizecek.
+
+**K2. Feed değişikliği tespiti**
+   Tedarikçide ürün adı/özellikleri değişirse uygulama fark etmiyor; ürün "Tamamlandı"
+   kalıyor ve SEO sessizce bayatlıyor. Senkronda içerik parmak izi (hash) tutup
+   *"bu ürünün feed verisi değişti, gözden geçir"* bayrağı konacak.
+   Desen hazır: `seo_status.image_check_fp` sütunu aynı fikri görsel kontrolü için zaten
+   uyguluyor — oradan okunabilir. Zamanla en çok işe yarayacak özelliklerden biri.
+
+**K3. Schema.org JSON-LD çıktısı**
+   `tech_specs_json` zaten yapılandırılmış → `Product` + `additionalProperty` +
+   `brand`/`sku`/`offers` üretmek tek adım. GEO/AI arama tarafında doğrudan kazanç,
+   neredeyse bedava.
+
+### 🔍 Eski özellik listesinin denetimi (2026-07-31, kodda doğrulandı)
+
+Daha eski bir öneri listesindeki 9 maddenin durumu — **bu soru tekrar sorulmasın diye**:
+
+| Madde | Durum |
+|---|---|
+| overall_status'a görsel + teknik | ✅ `validation.rs` — üç boyut da dahil, testi var |
+| GSC fırsat analizi | ✅ **kapsamı fazlasıyla aştı** — 6 araç ekranı (bkz. 0ai) |
+| Meta/açıklama sürüm geçmişi | ✅ v0.5.7 |
+| Otomatik güncelleme | ✅ Faz 10, saha testinden geçti |
+| Feed değişikliği tespiti | → **K2** |
+| Schema.org JSON-LD | → **K3** |
+| İlk kurulum sihirbazı | → **K1** |
+| Kod imzalama + notarization | ⏸️ kod işi değil, **maliyet kararı** (Apple ~$99/yıl + Windows sertifikası) |
+| Toplu üretim (batch) | 🔴 **YAPILMAYACAK — yeniden karar gerekiyor, aşağıya bak** |
+
+⚠️ **Toplu üretim (batch) neden kuyrukta değil:** listenin yazıldığı zamandan beri iki şey
+değişti ve ikisi de bu maddeyi çürütüyor.
+1. **Kullanıcı kısıtı:** *"halüsinasyon riskini göze alamam"* — üretim tek tek, operatör
+   kontrolünde. Toplu işlem tam da bu kontrolü kaldırıyor. (Aynı gerekçeyle canonical yazma
+   akışı da bilinçli olarak toplu DEĞİL, bkz. 0af.)
+2. **Ölçülen kota gerçeği varsayımı çürütüyor:** liste *"47 ürün ≈ 47 Gemini çağrısı"* diyor;
+   ama flash modellerin günlük limiti **20** (bkz. 0a). 47'lik bir kuyruk yarısına gelmeden
+   kotayı bitirir, kalanlar Gemma'ya düşer → çıktı model bakımından tekdüze olmaz.
+   Yapılacaksa ancak sınırlı bir biçimde: küçük kuyruk + satır başına onay + kota göstergesi.
+   **Bu bir karar, iş değil — kullanıcıya sorulmadan başlanmaz.**
 
 0. ⚠️ **GEMINI MODELLERİ EMEKLİYE AYRILIYOR — bu tekrar edecek (2026-07-28 saha hatası).**
    `gemini-1.5-flash` emekli olunca üretim TAMAMEN durdu. İki sebep vardı, ikisi de düzeltildi
@@ -498,6 +552,11 @@ Uygulama **şahsileştirilmiyor**, global kullanım için geliştiriliyor: aynı
 kuran farklı müşteriler de kendi feed URL'si + Gemini/CapSolver/GSC anahtarlarını Ayarlar'dan girip
 kullanabilir. Amaç exe/dmg release. → **Yeni özellikler kullanıcıya özel değer gömmeden, ayarlanabilir
 olmalı.** Anahtarlar her zaman SQLite `settings`'te; koda/git'e ASLA gömülmez.
+
+⚠️ **Bu vizyonun pratik sonucu: ilk kurulum deneyimi bir "nice to have" değil.** Uygulamayı
+şu an tek kişi kullanıyor olması onu tek kullanıcılı bir araç yapmaz; hedef kitle IdeaSoft
+altyapısı kullanan herhangi bir işletme. Yeni kullanıcının gördüğü ilk ekran boş bir liste
+ve "Ayarlar'a git" sezgisiyse, kodun kalitesi bir işe yaramıyor. (Kuyrukta **K1**.)
 
 ## 🔬 SEO araştırma entegrasyonu (Faz 4-6 planı)
 3 harici MCP (seo-research-mcp, gsc-mcp, google-news-trends) **paketlenmiyor**; altlarındaki HTTP
