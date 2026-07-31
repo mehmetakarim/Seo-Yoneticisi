@@ -4,8 +4,9 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-07-30
-**Aktif faz:** v0.7.0 çıktı — her SEO aracı kendi ekranında, gruplu navigasyon,
-Yapay Zekâ Asistanı. **Faz 2b (modül bölme) ✅ TAMAMLANDI** (kalem 4).
+**Aktif faz:** v0.7.2 yayında — her SEO aracı kendi ekranında, gruplu navigasyon, Yapay Zekâ
+Asistanı (sohbet geçmişi kalıcı). **Faz 2b (modül bölme) ✅ TAMAMLANDI** (kalem 4).
+**Kuyruk şu an BOŞ** — saha testi geri bildirimleriyle ilerliyoruz.
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -14,7 +15,9 @@ v0.5.8 = EOL sayfalar + filtreler · v0.5.9 = boş ekran düzeltmesi ·
 v0.6.0 = sorgu düzeyi analizler · v0.6.1 = EOL halef önerisi ·
 v0.6.2 = Ahrefs zorluk düzeltmesi · v0.6.3 = düşüşte olanlar (trend) ·
 v0.6.4 = canonical yazma akışı · v0.6.5 = canonical senkron ön koşulu kaldırıldı ·
-**v0.7.0 = araç ekranları + gruplu navigasyon + Yapay Zekâ Asistanı**
+v0.7.0 = araç ekranları + gruplu navigasyon + Yapay Zekâ Asistanı ·
+v0.7.1 = kenar çubuğu etiketi ·
+**v0.7.2 = sohbet geçmişi kalıcı + canonical hedefi yalnızca satıştaki ürünler**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
@@ -108,6 +111,47 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
    **Kota tasarımı:** istek üzerine, satır bazında, önbellekli. 1.073 sayfa için toplu çağrı
    günlük kotayı (flash 20/gün) anında tüketirdi. Trafik tepedeki sayfalarda yoğun.
    Arayüzde "halef yok" NÖTR renkte — başarısızlık değil, geçerli cevap.
+
+0al. 🔴 **CANONICAL HEDEFİ SATIŞTAKİ ÜRÜN OLMALI — saha hatası (v0.7.2, kullanıcı tespiti).**
+
+   Elle hedef seçme modali IdeaSoft'un **tam kataloğunda** arıyordu (bu mağazada 10.909 ürün)
+   ve satıştan kalkmış ürünleri de listeliyordu. Oysa akışın amacı tam tersi: satışta OLMAYAN
+   ama trafik alan bir sayfayı **satıştaki** bir ürüne yönlendirmek. Ölü sayfayı başka bir ölü
+   sayfaya işaret ettirmek sorunu taşımak olurdu.
+
+   ⚠️ **Asıl kusur TUTARSIZLIKTI.** Yapay zekâ halef önerisi (`suggest_eol_successor`) zaten
+   `products` tablosunu kullanıyordu — feed = satıştaki ürünler (kullanıcı beyanı: *"Güncel
+   olan ürünler xml de gelen ve sitede satışta olan ürünlerdir"*). Aynı karara giden iki
+   yoldan biri kısıtlı, diğeri değildi.
+   **Ders: bir kısıt varsa o karara giden HER yol ondan geçmeli.**
+
+   - `search_catalog` → **`search_live_products`**. Ad da düzeltildi: "katalog" IdeaSoft'un
+     tümünü çağrıştırıyordu ve hata tam bu karışıklıktan çıktı. Arama artık yerel (ağsız).
+   - `preview_canonical` VE `apply_canonical` hedefi doğruluyor → arayüz atlansa bile yazma
+     reddediliyor.
+   - ⚠️ Eşleştirme SQL `LIKE` ile YAPILMAZ: slug'daki `_` joker olur ve yanlış ürünü
+     eşleştirir. Feed birkaç yüz satır → tam tarama bedava. Test sabitliyor.
+   - Doğrulandı: "lenovo" → 25 satıştaki ürün · feed dışı "zenbook 17 fold" → **0 sonuç**.
+
+0am. ✅ **SOHBET GEÇMİŞİ KALICI (v0.7.2).** `chat_sessions` tablosu; mesajlar JSON sütunda
+   (projenin mevcut `*_history_json` idiomu). Her turdan sonra kaydediliyor — **hata alan tur
+   da dahil**, kullanıcı ne sorduğunu ve ne olduğunu sonradan görebilmeli. Başlık ilk sorudan
+   türüyor; ⚠️ başlık için modele AYRI ÇAĞRI YOK (her sohbet bir tur fazladan kota harcardı).
+   "Sohbeti temizle" → **"Yeni sohbet"**: eski ad yanıltıcıydı, gerçekten siliyordu.
+
+   🔴 **YENİ TABLO EKLERKEN YEDEKLEMEYİ UNUTMA.** `export_json`/`import_json` tabloları ELLE
+   sayıyor. `chat_sessions` eklenmeseydi geri yüklemede **sessizce kaybolurdu — hata bile
+   vermezdi**. Sohbet, teknik tablo gibi yeniden üretilemeyen kullanıcı emeği. İki test bunu
+   koruyor: yuvarlak yolculuk + sohbet bölümü olmayan ESKİ yedeğin kırılmadan yüklenmesi.
+   (`ideasoft_catalog` bilinçli olarak yedeklenmiyor — tek komutla yeniden çekiliyor.)
+
+0an. ⚠️ **ARAÇ EKRANLARI ÖNBELLEĞİ KENDİLERİ YÜKLEMELİ — iki kez yaşandı.**
+   Yükselmeye yakın / Yarışan sayfalar / Düşüşte olanlar / Satışta olmayanlar ekranlarında
+   `loadOpportunityCache` çağrısı YOKTU; yalnızca Fırsatlar ve Genel Bakış'ta vardı.
+   Uygulamayı açıp doğrudan o ekranlardan birine giden kullanıcı *"Henüz analiz
+   çalıştırılmadı"* görüyordu — oysa analiz veritabanındaydı. Aynı hata asistan ekranında da
+   çıkmıştı. Çözüm: yükleme ortak kabuğa (`ToolShell`) taşındı, beş ekranı birden çözüyor.
+   **Ders: "her ekranın yapması gereken" bir şey varsa kabuğa koy, ekrana değil.**
 
 0ai. ✅ **v0.7.0 — HER ARAÇ KENDİ EKRANINDA + ASİSTAN (5 kalemlik toparlama).**
 
