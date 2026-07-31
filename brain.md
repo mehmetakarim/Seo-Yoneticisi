@@ -188,10 +188,10 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    konsolda hata bile yok. Bir tur kaybettirdi. Ders: bu kaçış, JSON'un HTML'e gömüldüğü
    HER yerde gerekli, yalnızca üretim kodunda değil.
 
-   ❓ **Açık soru (kullanıcıya soruldu):** çıktı şu an yalnızca panoya kopyalanıyor. IdeaSoft
-   gönderim modülü `extraDetails` alanına yazabiliyor (teknik tablo oradan gidiyor) → JSON-LD
-   de oraya eklenebilir. **Önce ölçülmeli: IdeaSoft `<script>` etiketini kırpıyor mu?** Bu
-   canlı bir yazma denemesi gerektiriyor, kullanıcı onayı olmadan yapılmadı.
+   ⚖️ **Yayın yolu — kullanıcı kararı (2026-08-01): panoya kopyalama YETERLİ.** IdeaSoft
+   gönderimine (`extraDetails`) eklemek gündeme gelirse **önce ölçülmeli: IdeaSoft `<script>`
+   etiketini kırpıyor mu?** Bu canlı bir yazma denemesi gerektiriyor; kullanıcı şimdilik
+   istemedi, dolayısıyla denenmedi ve cevabı bilinmiyor.
 
 0aq. ✅ **FEED DEĞİŞİKLİĞİ TESPİTİ (v0.8.1, K2).** Senkronda ürünün *üretimi besleyen*
    alanlarından parmak izi alınıyor (`products.feed_fp`); kullanıcı "tamamlandı" dediğinde o
