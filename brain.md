@@ -188,10 +188,20 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    konsolda hata bile yok. Bir tur kaybettirdi. Ders: bu kaçış, JSON'un HTML'e gömüldüğü
    HER yerde gerekli, yalnızca üretim kodunda değil.
 
-   ⚖️ **Yayın yolu — kullanıcı kararı (2026-08-01): panoya kopyalama YETERLİ.** IdeaSoft
-   gönderimine (`extraDetails`) eklemek gündeme gelirse **önce ölçülmeli: IdeaSoft `<script>`
-   etiketini kırpıyor mu?** Bu canlı bir yazma denemesi gerektiriyor; kullanıcı şimdilik
-   istemedi, dolayısıyla denenmedi ve cevabı bilinmiyor.
+   ⚖️ **Yayın yolu — kullanıcı kararı (2026-08-01): şimdilik panoya kopyalama YETERLİ.**
+
+   📌 **ERTELENEN SEÇENEK (kullanıcı notu, 2026-08-01):** teknik tablo verisiyle birlikte
+   JSON-LD'nin **IdeaSoft'a gönderilmesi** ileride değerlendirilecek. Kullanıcının koyduğu
+   ön koşullar, sırasıyla:
+   1. **Saha testleri** — *"Saha testleri sonrasında ancak karar verebilirim."*
+   2. **Site teması kontrol edilecek** — tema `extraDetails` içeriğini nasıl basıyor,
+      script etiketi sayfaya olduğu gibi düşüyor mu.
+   3. ⚠️ **Ölçülmemiş soru: IdeaSoft `<script>` etiketini kırpıyor mu?** Cevap BİLİNMİYOR;
+      canlı bir yazma denemesi gerektiriyor, onay olmadığı için denenmedi. Karar bu ölçüm
+      yapılmadan verilmemeli.
+
+   Teknik zemin hazır: gönderim modülü `extraDetails` alanına zaten yazıyor (teknik tablo
+   oradan gidiyor), yani iş "yeni yetenek" değil, mevcut gönderime bir parça eklemek.
 
 0aq. ✅ **FEED DEĞİŞİKLİĞİ TESPİTİ (v0.8.1, K2).** Senkronda ürünün *üretimi besleyen*
    alanlarından parmak izi alınıyor (`products.feed_fp`); kullanıcı "tamamlandı" dediğinde o
@@ -1166,10 +1176,22 @@ olmadan `.app.tar.gz` / `.nsis.zip` updater paketleri ve manifest üretilmez. (�
 v0.5.1 kurulduktan sonraki sürümde modal kendiliğinden çıkar; öncesi elle kurulum.
 
 ## 🎯 Sonraki olası işler (opsiyonel)
-- Toplu üretim (seçili ürünler için sırayla meta/details) + ilerleme çubuğu
-- Gemini kota/kullanım göstergesi, model seçimi Ayarlar'da
-- IdeaSoft'a doğrudan yazma (şu an kullanıcı elle kopyalıyor) — API varsa
-- details üretiminde de yoğunluk hedef dışıysa tek retry (şu an sadece uzunluk uyuşmazlığında retry)
+
+⚠️ Bu liste **2026-08-01'de kodda tek tek doğrulandı** — eski hâli bayattı ve "atladığımız iş
+var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler aşağıda işaretli.
+
+- ~~Toplu üretim + ilerleme çubuğu~~ → 🔴 **YAPILMAYACAK**, gerekçe kuyruk denetiminde
+  (halüsinasyon kısıtı + ölçülen kota gerçeği). Yeniden karar gerektirir.
+- ~~IdeaSoft'a doğrudan yazma~~ → ✅ **Faz 9'da yapıldı**, gönderim modülü çalışıyor.
+- ~~details üretiminde yoğunluk retry'ı~~ → ✅ **var** (`gemini/details.rs`, üç ayrı üretim
+  yolunda da "yoğunluk aralık dışıysa tek retry, hedefe yakın olanı seç").
+- **Gemini kota/kullanım göstergesi** → hâlâ yok. Kısmen karşılanıyor: `ModelTag` hangi modelin
+  ürettiğini gösterdiği için alt modele düşüş görülebiliyor; ama "bugün kaç hakkım kaldı"
+  bilgisi yok. Google bu sayacı API'den vermiyor → yerel sayım gerekir (kesin olmaz).
+- **Kod imzalama + notarization** → ⏸️ kod işi değil, **maliyet kararı** (Apple ~$99/yıl).
+  İmzasız kurulumda macOS "geliştirici doğrulanamadı" uyarısı veriyor; global dağıtımda
+  ilk izlenimi doğrudan etkileyen tek açık kalem bu.
+- **JSON-LD'yi IdeaSoft gönderimine eklemek** → 📌 ertelendi, koşulları 0ar'de.
 
 ---
 
@@ -1192,5 +1214,6 @@ v0.5.1 kurulduktan sonraki sürümde modal kendiliğinden çıkar; öncesi elle 
 ## 🧩 Açık sorular / kullanıcı kararları bekleyen
 - [x] Kart 2 "Açıklamayı Tamamlandı" aktif olsun mu? → EVET, Faz 2'de aktifleştirildi.
 - [x] Gemini model tercihi? → Kademeli fallback zinciri (2.0-flash → 2.5-flash → 1.5-flash).
-- [ ] Faz 3: details üretiminde hangi model? (muhtemelen aynı zincir, ama uzun içerik → maliyet dikkat)
-- [ ] "Açıklama Bekliyor" filtresi: meta done + details pending mantığı Faz 3'te devreye alınacak (şu an count 0)
+- [x] Faz 3: details üretiminde hangi model? → **Aynı `MODEL_CHAIN`**; kota dolunca alt modele
+      düşüyor, üreten model `ModelTag` ile kart başlığında görünüyor.
+- [x] "Açıklama Bekliyor" filtresi → **çalışıyor** (`store.ts` sayaçları, `overall === "bekliyor"`).
