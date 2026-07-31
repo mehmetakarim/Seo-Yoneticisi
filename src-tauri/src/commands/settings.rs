@@ -184,6 +184,9 @@ fn export_json(conn: &Connection) -> Result<String, String> {
             "sku", "id", "name", "brand", "main_category", "category", "quantity", "url",
             "img_url", "title", "descriptions", "keywords", "search_keywords", "details",
             "last_synced_at", "picture2", "picture3", "picture4",
+            // ⚠️ feed_fp yedeğe DAHİL olmak zorunda: geri yüklemede boş kalırsa ilk senkronda
+            // her onaylı ürün "feed değişti" diye yanlış bayraklanır (iz ↔ damga ayrışması).
+            "feed_fp", "feed_changed",
         ],
     )?;
     // Not: draft_details/research_json/tech_* alanları da yedeklenir. Teknik tablo feed'de YOK,
@@ -199,6 +202,8 @@ fn export_json(conn: &Connection) -> Result<String, String> {
             "ideasoft_product_id", "ideasoft_pushed_at", "ideasoft_seo_rule",
             "meta_model", "details_model", "tech_model",
             "meta_history_json", "details_history_json",
+            // Onay damgası; feed_fp ile birlikte anlam taşır.
+            "reviewed_fp",
         ],
     )?;
     let log = dump(
@@ -282,14 +287,15 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
         tx.execute(
             "INSERT OR REPLACE INTO products (sku, id, name, brand, main_category, category,
                quantity, url, img_url, title, descriptions, keywords, search_keywords, details, last_synced_at,
-               picture2, picture3, picture4)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
+               picture2, picture3, picture4, feed_fp, feed_changed)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
             params![
                 s(&p, "sku"), s(&p, "id"), s(&p, "name").unwrap_or_default(), s(&p, "brand"),
                 s(&p, "main_category"), s(&p, "category"), i(&p, "quantity"), s(&p, "url"),
                 s(&p, "img_url"), s(&p, "title"), s(&p, "descriptions"), s(&p, "keywords"),
                 s(&p, "search_keywords"), s(&p, "details"), s(&p, "last_synced_at"),
                 s(&p, "picture2"), s(&p, "picture3"), s(&p, "picture4"),
+                s(&p, "feed_fp"), s(&p, "feed_changed"),
             ],
         )
         .map_err(|e| format!("Ürün geri yüklenemedi: {e}"))?;
@@ -302,9 +308,9 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
                tech_source_text, tech_specs_json, tech_status, tech_history_json,
                ideasoft_product_id, ideasoft_pushed_at, ideasoft_seo_rule,
                meta_model, details_model, tech_model,
-               meta_history_json, details_history_json)
+               meta_history_json, details_history_json, reviewed_fp)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
-                     ?21,?22,?23,?24,?25)",
+                     ?21,?22,?23,?24,?25,?26)",
             params![
                 s(&r, "sku"),
                 s(&r, "meta_status").unwrap_or_else(|| "pending".into()),
@@ -318,6 +324,7 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
                 s(&r, "ideasoft_pushed_at"), i(&r, "ideasoft_seo_rule"),
                 s(&r, "meta_model"), s(&r, "details_model"), s(&r, "tech_model"),
                 s(&r, "meta_history_json"), s(&r, "details_history_json"),
+                s(&r, "reviewed_fp"),
             ],
         )
         .map_err(|e| format!("SEO durumu geri yüklenemedi: {e}"))?;
@@ -368,6 +375,45 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 🔴 Yedekte `feed_fp`/`reviewed_fp` taşınmazsa oluşan hasar sessiz DEĞİL, gürültülü:
+    /// geri yüklemeden sonraki ilk senkronda iz yeniden hesaplanır, damga ile ayrışır ve
+    /// **onaylanmış her ürün "feed verisi değişti" diye yanlış bayraklanır.** Kullanıcı
+    /// kataloğun tamamını gözden geçirmeye çağrılır; bir kez olduğunda bayrağa güven biter.
+    #[test]
+    fn yedek_parmak_izi_ve_onay_damgasini_tasiyor() {
+        let src = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&src).unwrap();
+        src.execute(
+            "INSERT INTO products (sku, name, feed_fp) VALUES ('ABC-1', 'Ürün', 'a1b2c3d4')",
+            [],
+        )
+        .unwrap();
+        src.execute(
+            "INSERT INTO seo_status (sku, meta_status, details_status, reviewed_fp)
+             VALUES ('ABC-1', 'done', 'done', 'a1b2c3d4')",
+            [],
+        )
+        .unwrap();
+
+        let json = export_json(&src).expect("dışa aktarılamadı");
+        let mut dst = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&dst).unwrap();
+        import_json(&mut dst, &json).expect("içe aktarılamadı");
+
+        let (fp, reviewed): (Option<String>, Option<String>) = dst
+            .query_row(
+                "SELECT p.feed_fp, s.reviewed_fp FROM products p
+                 JOIN seo_status s ON s.sku = p.sku WHERE p.sku = 'ABC-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("ürün geri yüklenmedi");
+        assert_eq!(fp.as_deref(), Some("a1b2c3d4"), "parmak izi yedekte taşınmadı");
+        assert_eq!(reviewed.as_deref(), Some("a1b2c3d4"), "onay damgası yedekte taşınmadı");
+        // Asıl korunan davranış: geri yüklemenin hemen ardından bayrak YOK.
+        assert_eq!(feed_change_note(fp, reviewed, None), None, "geri yükleme yanlış bayrak üretti");
+    }
 
     /// ⚠️ Bu testin koruduğu risk somut: yedekleme `products`/`seo_status`/`sync_log`/
     /// `settings` tablolarını elle sayıyor. Yeni bir tablo eklenip buraya YAZILMAZSA

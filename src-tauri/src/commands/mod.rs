@@ -53,6 +53,9 @@ pub struct ProductRow {
     pub details_done: bool,
     pub tech_done: bool,
     pub image_count: usize,
+    /// Doluysa: kullanıcı bu ürünü "tamamlandı" işaretledikten SONRA feed verisi değişti.
+    /// İçeriği değişen alanların adı ("ad, açıklama"). Bkz. [`mark_reviewed`].
+    pub feed_changed: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -95,6 +98,8 @@ pub struct ProductDetail {
     pub tech_history: Vec<TechVersionMeta>,
     // Faz 9: IdeaSoft
     pub ideasoft_pushed_at: Option<String>,
+    /// Doluysa: onaydan sonra feed verisi değişti; değişen alanların adı yazılı.
+    pub feed_changed: Option<String>,
     /// IdeaSoft'un kendi SEO kural skoru (yalnızca liste ucunda dolu gelir, cache'lenir).
     pub ideasoft_seo_rule: Option<i64>,
     /// İçeriği hangi Gemini modelinin ürettiği. Zincir kotaya takıldıkça alt modellere
@@ -145,6 +150,8 @@ struct RowData {
     tech_status: String,
     tech_specs_json: Option<String>,
     image_count: usize,
+    /// Bkz. [`feed_change_note`] — rozet değil, uyarı metni.
+    feed_changed: Option<String>,
 }
 
 /// Meta rozeti — taslak varsa taslak (NULL değilse) yoksa feed değeri üzerinden.
@@ -178,12 +185,14 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 s.tech_source_text, s.tech_specs_json, COALESCE(s.tech_status,'pending'),
                 s.tech_history_json, s.ideasoft_pushed_at, s.ideasoft_seo_rule,
                 s.meta_model, s.details_model, s.tech_model,
-                s.meta_history_json, s.details_history_json
+                s.meta_history_json, s.details_history_json,
+                p.feed_fp, s.reviewed_fp, p.feed_changed
          FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
          WHERE p.sku = ?1",
         [&sku],
         |row| {
             let img_url: Option<String> = row.get(7)?;
+            let feed_changed = feed_change_note(row.get(36)?, row.get(37)?, row.get(38)?);
             let draft_keywords: Option<String> = row.get(20)?;
             let picture2: Option<String> = row.get(21)?;
             let picture3: Option<String> = row.get(22)?;
@@ -266,6 +275,7 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 tech_status,
                 tech_history,
                 ideasoft_pushed_at: row.get(29)?,
+                feed_changed,
                 ideasoft_seo_rule: row.get(30)?,
                 meta_model: row.get(31)?,
                 details_model: row.get(32)?,
@@ -306,6 +316,46 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
         d.image_badge = image_badge(d.image_count, all_dims_ok);
         d
     })
+}
+
+/// Ürünü "bu hâliyle gözden geçirildi" olarak damgalar.
+///
+/// Kullanıcı meta/açıklama/teknik tablodan birini **tamamlandı** işaretlediğinde çağrılır:
+/// o andaki feed parmak izi saklanır. Sonraki senkronda feed değişirse iki iz ayrışır ve
+/// ürün "feed verisi değişti, gözden geçir" olarak işaretlenir (bkz. core/src/fingerprint.rs).
+///
+/// ⚠️ Yalnızca "tamamlandı"da çağrılıyor, üretimde değil: üretmek "onayladım" demek değil.
+/// Bayrağın anlamı *"onayladıktan SONRA kaynak veri değişti"*.
+/// Ürünün feed verisi, kullanıcının onayından sonra değişti mi?
+///
+/// Üç koşul birden: damga var (yani kullanıcı bir kez onaylamış), damga güncel izle uyuşmuyor
+/// ve elimizde hangi alanların değiştiği yazıyor. Damga yoksa bayrak YOK — henüz onaylanmamış
+/// ürün için "değişti" demek anlamsız, o zaten "bekliyor" durumunda.
+fn feed_change_note(
+    feed_fp: Option<String>,
+    reviewed_fp: Option<String>,
+    changed: Option<String>,
+) -> Option<String> {
+    let reviewed = reviewed_fp?;
+    let current = feed_fp?;
+    if reviewed == current {
+        return None;
+    }
+    // Alan listesi bir sebeple boşsa da bayrak kalkmalı: iz ayrışması tek başına yeterli kanıt.
+    Some(changed.unwrap_or_else(|| "feed verisi".into()))
+}
+
+fn mark_reviewed(conn: &Connection, sku: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE seo_status SET reviewed_fp = (SELECT feed_fp FROM products WHERE sku = ?1)
+         WHERE sku = ?1",
+        [sku],
+    )
+    .map_err(|e| format!("Gözden geçirme damgası yazılamadı: {e}"))?;
+    // Damgalandığına göre kullanıcı değişikliği görmüş sayılır; not temizlenir.
+    conn.execute("UPDATE products SET feed_changed = NULL WHERE sku = ?1", [sku])
+        .map_err(|e| format!("Değişiklik notu temizlenemedi: {e}"))?;
+    Ok(())
 }
 
 fn ensure_seo_row(conn: &Connection, sku: &str) -> Result<(), String> {

@@ -15,6 +15,9 @@ const filterDefs: { key: FilterKey; label: string }[] = [
   { key: "bekliyor", label: "Açıklama Bekliyor" },
   { key: "uygun", label: "Uygun" },
   { key: "tamamlandi", label: "Tamamlandı" },
+  // Feed'i onaydan sonra değişenler. Diğerleri kalıcı kategori, bu bir ALARM:
+  // sıfırken gösterilmiyor (aşağıdaki v-if), yoksa hep 0 duran bir sekme gürültü olurdu.
+  { key: "degisti", label: "Feed değişti" },
   { key: "tumu", label: "Tümü" },
 ];
 
@@ -43,9 +46,10 @@ function okBadge(b: string) {
     <div class="filters">
       <button
         v-for="f in filterDefs"
+        v-show="f.key !== 'degisti' || store.counts.degisti > 0"
         :key="f.key"
         class="filter"
-        :class="{ on: store.filter === f.key }"
+        :class="{ on: store.filter === f.key, alarm: f.key === 'degisti' }"
         @click="store.setFilter(f.key)"
       >
         <span>{{ f.label }}</span>
@@ -71,7 +75,14 @@ function okBadge(b: string) {
             <div class="row-sku">{{ p.sku }}</div>
           </div>
 
-          <span v-if="p.meta_done && p.details_done" class="pill done">
+          <span
+            v-if="p.feed_changed"
+            class="pill changed"
+            :title="`Onaydan sonra feed verisi değişti: ${p.feed_changed}`"
+          >
+            <Icon name="refresh" :size="10" :stroke-width="2.6" />Değişti
+          </span>
+          <span v-else-if="p.meta_done && p.details_done" class="pill done">
             <Icon name="check" :size="11" :stroke-width="3" />Tamamlandı
           </span>
           <div v-else class="dual">
@@ -253,6 +264,20 @@ function okBadge(b: string) {
 .pill.done {
   background: var(--badge-tamamlandi-bg);
   color: var(--badge-tamamlandi-c);
+}
+/* "Tamamlandı" rozetinin YERİNE geçiyor: ürün teknik olarak tamamlanmış ama içerik artık
+   ürünü anlatmıyor olabilir. İkisini yan yana göstermek çelişkili bir mesaj olurdu. */
+.pill.changed {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border: 1px solid var(--warn-border);
+}
+.filter.alarm:not(.on) {
+  color: var(--warn-text);
+}
+.filter.alarm:not(.on) .count {
+  background: var(--warn-bg);
+  color: var(--warn-text);
 }
 .dual {
   flex: none;

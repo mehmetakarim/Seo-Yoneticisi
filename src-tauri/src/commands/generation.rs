@@ -336,6 +336,9 @@ pub fn mark_tech_done(state: State<'_, AppState>, sku: String) -> Result<String,
         params![sku, next, now_str()],
     )
     .map_err(|e| format!("Durum güncellenemedi: {e}"))?;
+    if next == "done" {
+        super::mark_reviewed(&conn, &sku)?;
+    }
     Ok(next.to_string())
 }
 

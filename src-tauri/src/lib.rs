@@ -44,6 +44,7 @@ pub fn run() {
             commands::set_target_keyword,
             commands::save_meta_draft,
             commands::mark_meta_done,
+            commands::mark_feed_reviewed,
             commands::mark_details_done,
             commands::generate_meta,
             commands::generate_details,

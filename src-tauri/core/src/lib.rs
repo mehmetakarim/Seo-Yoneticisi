@@ -15,6 +15,7 @@
 
 pub mod db;
 pub mod feed;
+pub mod fingerprint;
 pub mod gemini;
 pub mod history;
 pub mod ideasoft;

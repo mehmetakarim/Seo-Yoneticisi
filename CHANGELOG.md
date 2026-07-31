@@ -13,6 +13,12 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.8.1
+- Yeni: **feed değişikliği uyarısı** — tedarikçi bir ürünün adını veya açıklamasını değiştirdiğinde, tamamladığınız ürün "Değişti" olarak işaretlenir
+- Uyarı hangi alanların değiştiğini yazar; içerik hâlâ doğruysa tek tıkla "İçerik hâlâ doğru" diyip bayrağı kaldırabilirsiniz
+- Ürün listesine "Feed değişti" filtresi eklendi — yalnızca değişiklik varken görünür
+- Yalnızca gerçek içerik değişiklikleri sayılır: stok hareketi veya biçim/satır sonu farkı uyarı üretmez
+
 ## v0.8.0
 - Yeni: **ilk kurulum sihirbazı** — feed adresi, Gemini anahtarı ve isteğe bağlı entegrasyonlar adım adım, her adımda "test et" ile
 - Gemini anahtarınız yoksa o adımı atlayabilirsiniz; nereden alacağınız ekranda yazıyor

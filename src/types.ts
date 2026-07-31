@@ -27,6 +27,8 @@ export interface ProductRow {
   details_done: boolean;
   tech_done: boolean;
   image_count: number;
+  /** Doluysa: onaydan sonra feed verisi değişti; değişen alanların adı ("ad, açıklama"). */
+  feed_changed: string | null;
 }
 
 export interface ProductDetail {
@@ -75,6 +77,8 @@ export interface ProductDetail {
   /** Yeniden üretimden önceki hâller (en yeni başta). */
   meta_history: MetaVersionMeta[];
   details_history: DetailsVersionMeta[];
+  /** Doluysa: onaydan sonra feed verisi değişti — bkz. ProductRow.feed_changed. */
+  feed_changed: string | null;
 }
 
 export interface MetaVersionMeta {
@@ -200,6 +204,7 @@ export type FilterKey =
   | "bekliyor"
   | "uygun"
   | "tamamlandi"
+  | "degisti"
   | "tumu";
 
 /** Fırsat analizi: bir ürünün neden listede olduğu. */

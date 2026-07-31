@@ -90,6 +90,7 @@ def load_product(conn):
         "sku": sku, "name": name, "brand": brand, "img_url": None,
         "meta_badge": "hatali", "details_badge": "eksik", "overall": "bekliyor",
         "meta_done": False, "details_done": False, "tech_done": False, "image_count": 4,
+        "feed_changed": None,
     }
     detail = {k: None for k in (
         "brand main_category category quantity url img_url title descriptions keywords "
@@ -104,6 +105,7 @@ def load_product(conn):
         "gallery": [], "image_count": 0, "image_badge": "eksik",
         "tech_status": "pending", "tech_badge": "eksik", "tech_history": [],
         "meta_history": [], "details_history": [],
+        "feed_changed": None,
     })
     return listing, detail
 
@@ -174,6 +176,17 @@ def main():
         "      if (cmd === 'test_ideasoft') return Promise.reject('IdeaSoft token geçersiz.');\n"
         "      if (cmd === 'sync_feed') return Promise.resolve({ run_at: '2026-07-31T12:00',\n"
         "        active: 142, added: 142, updated: 0, deleted: 0, duplicate_skipped: 3 });\n"
+        "    }\n"
+        # `?changed=1` → feed değişikliği bayrağı benzetimi (K2). Gerçek veride bayrak ancak
+        # tedarikçi bir ürünü değiştirdiğinde çıkıyor; uyarıyı beklemeden görmek için.
+        "    if (new URLSearchParams(location.search).has('changed')) {\n"
+        "      const NOTE = 'ad, açıklama';\n"
+        "      if (cmd === 'list_products') return Promise.resolve(H.list_products.map(\n"
+        "        r => ({ ...r, feed_changed: NOTE, meta_done: true, details_done: true,\n"
+        "                overall: 'tamamlandi' })));\n"
+        "      if (cmd === 'get_product') return Promise.resolve({ ...H.get_product,\n"
+        "        feed_changed: NOTE, meta_status: 'done', details_status: 'done' });\n"
+        "      if (cmd === 'mark_feed_reviewed') return Promise.resolve(null);\n"
         "    }\n"
         "    if (cmd === 'assistant_ask') {\n"
         f"      const ANS = {json.dumps(fake_answer, ensure_ascii=False)};\n"

@@ -160,9 +160,12 @@ export const useStore = defineStore("app", {
         bekliyor: 0,
         uygun: 0,
         tamamlandi: 0,
+        degisti: 0,
         tumu: 0,
       };
       for (const r of state.allRows) {
+        // "Değişti" diğerlerinden bağımsız: bayraklı ürün aynı anda "tamamlandı"dır da.
+        if (r.feed_changed) c.degisti++;
         if (r.overall === "tamamlandi") c.tamamlandi++;
         else {
           c.tumu++;
@@ -188,6 +191,8 @@ export const useStore = defineStore("app", {
             return r.overall !== "tamamlandi";
           case "tamamlandi":
             return r.overall === "tamamlandi";
+          case "degisti":
+            return !!r.feed_changed;
           default:
             return r.overall === state.filter;
         }
@@ -894,6 +899,15 @@ export const useStore = defineStore("app", {
       const next = await api.markMetaDone(this.selectedSku);
       this.detail.meta_status = next;
       await this.reload();
+    },
+
+    /// "Baktım, içerik hâlâ doğru" — bayrağı düşürür, içeriğe dokunmaz.
+    async dismissFeedChange() {
+      if (!this.selectedSku) return;
+      await api.markFeedReviewed(this.selectedSku);
+      if (this.detail) this.detail.feed_changed = null;
+      await this.reload();
+      this.toast("Ürün gözden geçirildi olarak işaretlendi.");
     },
 
     async toggleDetailsDone() {

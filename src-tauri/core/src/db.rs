@@ -125,6 +125,14 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         [],
     )
     .map_err(|e| format!("chat_sessions tablosu oluşturulamadı: {e}"))?;
+    // Feed değişikliği tespiti (bkz. core/src/fingerprint.rs).
+    // `feed_fp`      → ürünün ŞU ANKİ parmak izi, her senkronda güncellenir (sahibi: senkron).
+    // `feed_changed` → son değişiklikte hangi alanların oynadığı, kullanıcıya gösterilir.
+    // `reviewed_fp`  → kullanıcı "tamamlandı" işaretlediği andaki iz (sahibi: kullanıcı eylemi).
+    // İkisi ayrışırsa ürün "feed verisi değişti, gözden geçir" olarak işaretlenir.
+    add_column_if_missing(conn, "products", "feed_fp", "TEXT")?;
+    add_column_if_missing(conn, "products", "feed_changed", "TEXT")?;
+    add_column_if_missing(conn, "seo_status", "reviewed_fp", "TEXT")?;
     // Sürüm geçmişi: yeniden üretmeden önceki hâl saklanır (bkz. core/src/history.rs).
     // Teknik tabloda zaten vardı; meta ve açıklamada içerik geri dönüşsüz kayboluyordu.
     add_column_if_missing(conn, "seo_status", "meta_history_json", "TEXT")?;

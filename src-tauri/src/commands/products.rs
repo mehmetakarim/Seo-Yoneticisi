@@ -40,7 +40,8 @@ pub fn list_products(
                     COALESCE(s.meta_status,'pending'), COALESCE(s.details_status,'pending'),
                     s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_details,
                     COALESCE(s.tech_status,'pending'), s.tech_specs_json,
-                    p.picture2, p.picture3, p.picture4
+                    p.picture2, p.picture3, p.picture4,
+                    p.feed_fp, s.reviewed_fp, p.feed_changed
              FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
              ORDER BY p.name COLLATE NOCASE",
         )
@@ -72,6 +73,7 @@ pub fn list_products(
                 .into_iter()
                 .filter(|u| u.as_deref().map_or(false, |x| !x.trim().is_empty()))
                 .count(),
+                feed_changed: feed_change_note(row.get(18)?, row.get(19)?, row.get(20)?),
             })
         })
         .map_err(|e| format!("Ürün listesi okunamadı: {e}"))?
@@ -113,6 +115,8 @@ pub fn list_products(
             "bekliyor" => overall == OverallStatus::Bekliyor,
             "uygun" => overall == OverallStatus::Uygun,
             "tamamlandi" => overall == OverallStatus::Tamamlandi,
+            // Onaydan sonra kaynak verisi değişenler — "sessizce bayatlayan" ürünler.
+            "degisti" => r.feed_changed.is_some(),
             other => return Err(format!("Bilinmeyen filtre: {other}")),
         };
         if keep {
@@ -128,6 +132,7 @@ pub fn list_products(
                 details_done,
                 tech_done: r.tech_status == "done",
                 image_count: r.image_count,
+                feed_changed: r.feed_changed,
             });
         }
     }
@@ -172,6 +177,17 @@ pub fn save_meta_draft(
     Ok(())
 }
 
+/// "Baktım, içerik hâlâ doğru" — bayrağı düşürür, içeriğe DOKUNMAZ.
+///
+/// Feed değiştiğinde her zaman yeniden üretim gerekmiyor: bazen değişen alan zaten
+/// üretilmiş metni etkilemiyor. Bu düğme olmasaydı kullanıcının bayraktan kurtulmak için
+/// "tamamlandı"yı kapatıp açması gerekirdi — durum alanını yalan söylemeye zorlayan bir çözüm.
+#[tauri::command]
+pub fn mark_feed_reviewed(state: State<'_, AppState>, sku: String) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    mark_reviewed(&conn, &sku)
+}
+
 #[tauri::command]
 pub fn mark_meta_done(state: State<'_, AppState>, sku: String) -> Result<String, String> {
     let conn = state.conn.lock().unwrap();
@@ -185,6 +201,9 @@ pub fn mark_meta_done(state: State<'_, AppState>, sku: String) -> Result<String,
         params![sku, next, now_str()],
     )
     .map_err(|e| format!("SEO durumu güncellenemedi: {e}"))?;
+    if next == "done" {
+        mark_reviewed(&conn, &sku)?;
+    }
     Ok(next.to_string())
 }
 
@@ -201,5 +220,8 @@ pub fn mark_details_done(state: State<'_, AppState>, sku: String) -> Result<Stri
         params![sku, next, now_str()],
     )
     .map_err(|e| format!("SEO durumu güncellenemedi: {e}"))?;
+    if next == "done" {
+        mark_reviewed(&conn, &sku)?;
+    }
     Ok(next.to_string())
 }

@@ -115,6 +115,18 @@ async function openProduct() {
         </div>
       </div>
 
+      <!-- feed değişikliği uyarısı: onaydan SONRA kaynak veri değişmişse çıkar -->
+      <div v-if="detail.feed_changed" class="warn feed-warn">
+        <Icon name="refresh" :size="14" :stroke-width="2" />
+        <span class="feed-warn-text">
+          Bu ürünün feed verisi onayınızdan sonra değişti
+          (<b>{{ detail.feed_changed }}</b>). Üretilmiş içerik ürünü artık doğru anlatmıyor olabilir.
+        </span>
+        <button class="feed-warn-btn" @click="store.dismissFeedChange()">
+          İçerik hâlâ doğru
+        </button>
+      </div>
+
       <!-- ortak hedef kelime -->
       <div class="keyword-row">
         <label>
@@ -214,6 +226,31 @@ async function openProduct() {
 </template>
 
 <style scoped>
+.feed-warn {
+  margin: 0 0 14px;
+}
+.feed-warn-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
+}
+/* Eylem "yeniden üret" DEĞİL: değişikliği görmek üretimi zorunlu kılmıyor. Üretmek isteyen
+   zaten aşağıdaki kartlardan yapar; buradaki tek iş bayrağı düşürmek. */
+.feed-warn-btn {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warn-text);
+  background: transparent;
+  border: 1px solid var(--warn-border);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.18s cubic-bezier(.32,.72,0,1);
+}
+.feed-warn-btn:hover {
+  background: var(--warn-border);
+}
 .detail {
   flex: 1;
   overflow-y: auto;

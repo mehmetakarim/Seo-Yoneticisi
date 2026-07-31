@@ -31,18 +31,13 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
 
 ### 📋 KUYRUK — kullanıcı önceliğiyle (2026-07-31)
 
-Sıra **kullanıcı kararı**, tahmini efor değil. **Sıradaki: K2.**
+Sıra **kullanıcı kararı**, tahmini efor değil. **Sıradaki: K3.**
 
 **K1. İlk kurulum sihirbazı** ✅ **TAMAMLANDI (v0.8.0)** — ayrıntı ve çıkan kusur 0ao/0ap'de.
 
-**K2. Feed değişikliği tespiti** ← **SIRADAKİ**
-   Tedarikçide ürün adı/özellikleri değişirse uygulama fark etmiyor; ürün "Tamamlandı"
-   kalıyor ve SEO sessizce bayatlıyor. Senkronda içerik parmak izi (hash) tutup
-   *"bu ürünün feed verisi değişti, gözden geçir"* bayrağı konacak.
-   Desen hazır: `seo_status.image_check_fp` sütunu aynı fikri görsel kontrolü için zaten
-   uyguluyor — oradan okunabilir. Zamanla en çok işe yarayacak özelliklerden biri.
+**K2. Feed değişikliği tespiti** ✅ **TAMAMLANDI (v0.8.1)** — ayrıntı 0aq'da.
 
-**K3. Schema.org JSON-LD çıktısı**
+**K3. Schema.org JSON-LD çıktısı** ← **SIRADAKİ**
    `tech_specs_json` zaten yapılandırılmış → `Product` + `additionalProperty` +
    `brand`/`sku`/`offers` üretmek tek adım. GEO/AI arama tarafında doğrudan kazanç,
    neredeyse bedava.
@@ -57,7 +52,7 @@ Daha eski bir öneri listesindeki 9 maddenin durumu — **bu soru tekrar sorulma
 | GSC fırsat analizi | ✅ **kapsamı fazlasıyla aştı** — 6 araç ekranı (bkz. 0ai) |
 | Meta/açıklama sürüm geçmişi | ✅ v0.5.7 |
 | Otomatik güncelleme | ✅ Faz 10, saha testinden geçti |
-| Feed değişikliği tespiti | → **K2** |
+| Feed değişikliği tespiti | ✅ v0.8.1 (K2) |
 | Schema.org JSON-LD | → **K3** |
 | İlk kurulum sihirbazı | → **K1** |
 | Kod imzalama + notarization | ⏸️ kod işi değil, **maliyet kararı** (Apple ~$99/yıl + Windows sertifikası) |
@@ -159,6 +154,50 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    **Kota tasarımı:** istek üzerine, satır bazında, önbellekli. 1.073 sayfa için toplu çağrı
    günlük kotayı (flash 20/gün) anında tüketirdi. Trafik tepedeki sayfalarda yoğun.
    Arayüzde "halef yok" NÖTR renkte — başarısızlık değil, geçerli cevap.
+
+0aq. ✅ **FEED DEĞİŞİKLİĞİ TESPİTİ (v0.8.1, K2).** Senkronda ürünün *üretimi besleyen*
+   alanlarından parmak izi alınıyor (`products.feed_fp`); kullanıcı "tamamlandı" dediğinde o
+   anki iz damgalanıyor (`seo_status.reviewed_fp`). İkisi ayrışırsa ürün *"feed verisi
+   onayınızdan sonra değişti"* diye işaretleniyor. Mantık: `core/src/fingerprint.rs`.
+
+   🔬 **Ölçüm önce yapıldı ve tasarımı değiştirdi (254 ürünlük gerçek feed):**
+
+   | | bayraklanan |
+   |---|---|
+   | ham karşılaştırma | **8** |
+   | boşluk normalize | **1** |
+
+   7'si sahte pozitifti: feed `\r\n`, veritabanı `\n` kullanıyor (ham baytta doğrulandı,
+   189 tane). Normalizasyon olmasaydı **özellik ilk senkronda 7 yanlış bayrakla açılacak** ve
+   kullanıcı bayrağa güvenmeyi bırakacaktı. Kalan 1 gerçek: `SW.ARB.JL686B`'nin açıklaması
+   baştan yazılmış (`<section>` → `<div>`).
+
+   ⚠️ **Hangi alanlar İZE GİRMİYOR ve neden:**
+   - `quantity` (stok) — üretimi beslemiyor; girseydi her stok hareketinde tüm katalog
+     bayraklanır, bayrak anlamsızlaşırdı. Ölçümde 0 değişiklik zaten.
+   - `title`/`keywords`/`descriptions` — bunlar mağazadaki MEVCUT SEO alanları, yani üretimin
+     girdisi değil **rakibi**. Değişmeleri "kaynak veri değişti" demek değil.
+
+   ⚠️ **Üç tuzak, üçü de teste bağlandı:**
+   1. **Yedekleme:** `feed_fp`/`reviewed_fp` yedeğe girmezse geri yüklemenin ardından ilk
+      senkronda **onaylı her ürün yanlış bayraklanır** (iz yeniden hesaplanır, damga eski
+      kalır). Sessiz değil, gürültülü hasar. → `yedek_parmak_izi_ve_onay_damgasini_tasiyor`.
+   2. **Taban çizgisi:** özellik gelmeden önce "tamamlandı" olan ürünlerin damgası yok →
+      hiç bayraklanmazlar. Senkron sonunda tek seferlik damga basılıyor (yalnızca
+      `reviewed_fp IS NULL` olanlara → tekrarı zararsız). Bedeli: adaptasyon senkronunda o
+      1 gerçek değişiklik yutuluyor — kaçınılmaz, çünkü "onay öncesi hâl" hiç kaydedilmemişti.
+   3. **Not birikimi:** kullanıcı bakmadan iki değişiklik gelirse not ÜSTÜNE YAZILMAMALI;
+      "onaydan beri değişenler" birleştiriliyor → `onaydan_beri_degisen_alanlar_birikir`.
+
+   🔬 **Gerçek veritabanı kopyası + canlı feed ile uçtan uca doğrulandı** (`sync_fingerprint_real`,
+   `--ignored`): 256 ürün, 56 damgalı, **iki turda da 0 bayrak**. Damga kasten bozulduğunda
+   bayrak doğru alan listesiyle çıkıyor (`ENT.GNX.1002110098 → ad, açıklama`).
+
+   Arayüz: liste satırında "Değişti" rozeti *"Tamamlandı"nın YERİNE* (ikisi yan yana çelişkili
+   mesaj olurdu), sayacı sıfırken gizlenen "Feed değişti" filtresi, detayda uyarı şeridi +
+   **"İçerik hâlâ doğru"** düğmesi (`mark_feed_reviewed`). O düğme olmasaydı kullanıcı bayraktan
+   kurtulmak için "tamamlandı"yı kapatıp açmak zorunda kalırdı — durumu yalan söylemeye zorlayan
+   bir çözüm. Harness kipi: **`?changed=1`**.
 
 0ao. 🔴 **VARSAYILAN FEED ADRESİ TEK BİR MAĞAZAYA GÖMÜLÜYDÜ (v0.8.0'da kaldırıldı).**
 

@@ -1,4 +1,5 @@
 use crate::feed::FeedProduct;
+use crate::fingerprint::{self, FeedFacts};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -11,6 +12,22 @@ pub struct SyncSummary {
     pub updated: i64,
     pub deleted: i64,
     pub duplicate_skipped: i64,
+}
+
+/// Feed kaydından parmak izi girdilerini toplar (bkz. core/src/fingerprint.rs).
+///
+/// ⚠️ Yalnızca ÜRETİMİ BESLEYEN alanlar; stok ve mağazadaki mevcut SEO alanları bilinçli
+/// olarak dışarıda — gerekçesi fingerprint modülünde yazılı.
+fn facts_of(p: &FeedProduct) -> FeedFacts {
+    let s = |o: &Option<String>| o.clone().unwrap_or_default();
+    FeedFacts {
+        name: s(&p.name),
+        brand: s(&p.product_brand),
+        main_category: s(&p.main_category),
+        category: s(&p.category),
+        details: s(&p.details),
+        images: vec![s(&p.img_url), s(&p.picture2), s(&p.picture3), s(&p.picture4)],
+    }
 }
 
 /// Spec'teki senkron mantığı: sku bazlı upsert (seo_status'a dokunmadan),
@@ -34,19 +51,74 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
             continue;
         }
 
-        let exists: bool = tx
-            .query_row("SELECT 1 FROM products WHERE sku = ?1", [&sku], |_| Ok(true))
-            .or_else(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => Ok(false),
-                other => Err(format!("Ürün sorgulanamadı: {other}")),
-            })?;
+        // Eski hâli parmak izi için oku (varsa). Aynı sorgu hem "var mı?" hem "neydi?"
+        // sorusunu cevaplıyor — ek sorgu maliyeti yok.
+        // Eski hâl + eski not + onay damgası tek sorguda. Aynı sorgu "var mı?" sorusunu da
+        // cevaplıyor, ayrı bir SELECT gerekmiyor.
+        let before: Option<(FeedFacts, Option<String>, Option<String>, Option<String>)> = tx
+            .query_row(
+                "SELECT p.name, p.brand, p.main_category, p.category, p.details,
+                        p.img_url, p.picture2, p.picture3, p.picture4,
+                        p.feed_fp, p.feed_changed, s.reviewed_fp
+                 FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
+                 WHERE p.sku = ?1",
+                [&sku],
+                |r| {
+                    let g = |i: usize| -> rusqlite::Result<String> {
+                        Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default())
+                    };
+                    Ok((
+                        FeedFacts {
+                            name: g(0)?,
+                            brand: g(1)?,
+                            main_category: g(2)?,
+                            category: g(3)?,
+                            details: g(4)?,
+                            images: vec![g(5)?, g(6)?, g(7)?, g(8)?],
+                        },
+                        r.get(9)?,
+                        r.get(10)?,
+                        r.get(11)?,
+                    ))
+                },
+            )
+            .ok();
 
+        let now_facts = facts_of(p);
+        let fp = fingerprint::fingerprint(&now_facts);
+        // Not YALNIZCA gerçekten değişiklik varsa yazılır; yoksa mevcut not korunur
+        // (SQL tarafında COALESCE) — kullanıcı henüz gözden geçirmemiş olabilir.
+        let changed: Option<String> =
+            before.as_ref().and_then(|(b, old_fp, prev_note, reviewed)| {
+                let fields = fingerprint::changed_fields(b, &now_facts);
+                if fields.is_empty() {
+                    return None;
+                }
+                // Not "onaydan beri neler değişti" demeli, "son senkronda ne değişti" değil:
+                // ürün zaten bayraklıysa önceki değişiklikleri de kullanıcı GÖRMEDİ, üstüne
+                // yazmak onları sessizce yutardı.
+                let already_flagged = matches!((reviewed, old_fp), (Some(r), Some(o)) if r != o);
+                let prev: Vec<&str> = match (already_flagged, prev_note.as_deref()) {
+                    (true, Some(n)) => n.split(", ").collect(),
+                    _ => Vec::new(),
+                };
+                // FIELDS sırasında birleştir — sıra sabit kalsın, tekrar olmasın.
+                let merged: Vec<&str> = fingerprint::FIELDS
+                    .iter()
+                    .copied()
+                    .filter(|f| fields.contains(f) || prev.contains(f))
+                    .collect();
+                Some(merged.join(", "))
+            });
+
+        let exists = before.is_some();
         if exists {
             tx.execute(
                 "UPDATE products SET id=?2, name=?3, brand=?4, main_category=?5, category=?6,
                    quantity=?7, url=?8, img_url=?9, title=?10, descriptions=?11, keywords=?12,
                    search_keywords=?13, details=?14, last_synced_at=?15,
-                   picture2=?16, picture3=?17, picture4=?18
+                   picture2=?16, picture3=?17, picture4=?18,
+                   feed_fp=?19, feed_changed=COALESCE(?20, feed_changed)
                  WHERE sku=?1",
                 params![
                     sku,
@@ -67,6 +139,8 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
                     p.picture2,
                     p.picture3,
                     p.picture4,
+                    fp,
+                    changed,
                 ],
             )
             .map_err(|e| format!("Ürün güncellenemedi ({sku}): {e}"))?;
@@ -75,8 +149,8 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
             tx.execute(
                 "INSERT INTO products (sku, id, name, brand, main_category, category, quantity,
                    url, img_url, title, descriptions, keywords, search_keywords, details, last_synced_at,
-                   picture2, picture3, picture4)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
+                   picture2, picture3, picture4, feed_fp)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
                 params![
                     sku,
                     p.id,
@@ -96,6 +170,7 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
                     p.picture2,
                     p.picture3,
                     p.picture4,
+                    fp,
                 ],
             )
             .map_err(|e| format!("Ürün eklenemedi ({sku}): {e}"))?;
@@ -127,6 +202,22 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
             deleted += 1;
         }
     }
+
+    // Taban çizgisi: özellik gelmeden ÖNCE "tamamlandı" işaretlenmiş ürünlerin damgası yok.
+    // Damgasız ürün hiçbir zaman bayraklanmaz — yani mevcut kullanıcının onaylı kataloğu
+    // özellikten hiç yararlanamaz. Bir kez, o ürünleri "bugünkü hâliyle onaylanmış" sayıyoruz.
+    //
+    // ⚠️ Alternatif (hepsini bayraklamak) çok daha kötü: kullanıcı ilk güncellemede tüm
+    // kataloğu "değişti" görür, hiçbiri gerçek değildir ve bayrağa güveni biter.
+    // Damgası olan satıra dokunmuyor (WHERE reviewed_fp IS NULL) → tekrarlansa da zararsız.
+    tx.execute(
+        "UPDATE seo_status
+            SET reviewed_fp = (SELECT feed_fp FROM products WHERE products.sku = seo_status.sku)
+          WHERE reviewed_fp IS NULL
+            AND (meta_status = 'done' OR details_status = 'done' OR tech_status = 'done')",
+        [],
+    )
+    .map_err(|e| format!("Onay damgası taban çizgisi yazılamadı: {e}"))?;
 
     let active: i64 = tx
         .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
@@ -190,6 +281,139 @@ mod tests {
             })
             .collect();
         format!("<products>{body}</products>")
+    }
+
+    /// Gerçek veritabanının KOPYASI + canlı feed üzerinde uçtan uca doğrulama.
+    /// Kullanıcının asıl veritabanına dokunmaz — kopya yolu env ile verilir.
+    ///
+    /// `SEO_DB_COPY=/tmp/kopya.db FEED_URL=... cargo test sync_fingerprint_real -- --ignored --nocapture`
+    ///
+    /// Ölçtüğü şey: ilk senkronda kaç ürün bayraklanıyor. Beklenen **0** — bu senkron taban
+    /// çizgisini kuruyor. İkinci koşuda da 0 olmalı (feed değişmediyse).
+    #[tokio::test]
+    #[ignore]
+    async fn sync_fingerprint_real() {
+        let db = std::env::var("SEO_DB_COPY").expect("SEO_DB_COPY yok");
+        let url = std::env::var("FEED_URL").expect("FEED_URL yok");
+        let mut conn = Connection::open(&db).unwrap();
+        db::init(&conn).unwrap();
+
+        for tur in 1..=2 {
+            let items = feed::fetch_and_parse(&url).await.expect("feed");
+            let s = sync_products(&mut conn, items).unwrap();
+            let flagged: Vec<(String, String)> = conn
+                .prepare(
+                    "SELECT p.sku, COALESCE(p.feed_changed,'?') FROM products p
+                     JOIN seo_status s ON s.sku = p.sku
+                     WHERE s.reviewed_fp IS NOT NULL AND s.reviewed_fp <> p.feed_fp",
+                )
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .filter_map(Result::ok)
+                .collect();
+            let stamped: i64 = conn
+                .query_row("SELECT COUNT(*) FROM seo_status WHERE reviewed_fp IS NOT NULL", [], |r| r.get(0))
+                .unwrap();
+            println!(
+                "tur {tur}: {} ürün · güncellenen {} · damgalı {stamped} · bayraklı {}",
+                s.active, s.updated, flagged.len()
+            );
+            for (sku, note) in &flagged {
+                println!("  ⚑ {sku} → {note}");
+            }
+            assert!(flagged.is_empty(), "feed değişmediği hâlde bayrak çıktı: {flagged:?}");
+        }
+    }
+
+    /// Tek satırda "iz / damga / değişiklik notu" üçlüsü.
+    fn fp_state(conn: &Connection, sku: &str) -> (Option<String>, Option<String>, Option<String>) {
+        conn.query_row(
+            "SELECT p.feed_fp, s.reviewed_fp, p.feed_changed FROM products p
+             LEFT JOIN seo_status s ON s.sku = p.sku WHERE p.sku = ?1",
+            [sku],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap()
+    }
+
+    /// Özelliğin çekirdeği: onaydan SONRA feed değişirse ürün işaretlenmeli.
+    #[test]
+    fn onaydan_sonra_degisen_feed_isaretlenir() {
+        let mut conn = mem_conn();
+        sync_products(&mut conn, feed::parse(&feed_xml(&[("A", "Ürün A")])).unwrap()).unwrap();
+        conn.execute("UPDATE seo_status SET meta_status='done' WHERE sku='A'", []).unwrap();
+        // Taban çizgisi damgası bir sonraki senkronda basılıyor.
+        sync_products(&mut conn, feed::parse(&feed_xml(&[("A", "Ürün A")])).unwrap()).unwrap();
+
+        let (fp, reviewed, changed) = fp_state(&conn, "A");
+        assert_eq!(fp, reviewed, "damga taban çizgisinde ize eşitlenmedi");
+        assert_eq!(changed, None, "değişiklik yokken not yazıldı");
+
+        sync_products(&mut conn, feed::parse(&feed_xml(&[("A", "Ürün A v2")])).unwrap()).unwrap();
+        let (fp2, reviewed2, changed2) = fp_state(&conn, "A");
+        assert_ne!(fp2, reviewed2, "iz değişti ama damga ile ayrışmadı → bayrak çıkmaz");
+        assert_eq!(changed2.as_deref(), Some("ad"), "hangi alanın değiştiği yazılmadı");
+        assert_eq!(reviewed2, reviewed, "senkron kullanıcının onay damgasını EZDİ");
+    }
+
+    /// Kullanıcı bakmadan iki değişiklik üst üste gelirse İKİSİ de not edilmeli.
+    /// Üstüne yazsaydık ilk değişiklik sessizce kaybolurdu — özelliğin bütün amacı bu
+    /// sessizliği ortadan kaldırmak.
+    #[test]
+    fn onaydan_beri_degisen_alanlar_birikir() {
+        let mut conn = mem_conn();
+        sync_products(&mut conn, feed::parse(&feed_xml(&[("A", "Ürün A")])).unwrap()).unwrap();
+        conn.execute("UPDATE seo_status SET meta_status='done' WHERE sku='A'", []).unwrap();
+        sync_products(&mut conn, feed::parse(&feed_xml(&[("A", "Ürün A")])).unwrap()).unwrap();
+
+        // 1) ad değişti
+        sync_products(&mut conn, feed::parse(&feed_xml(&[("A", "Ürün A v2")])).unwrap()).unwrap();
+        assert_eq!(fp_state(&conn, "A").2.as_deref(), Some("ad"));
+
+        // 2) kullanıcı henüz bakmadan açıklama da değişti
+        let xml = "<products><product><sku><![CDATA[A]]></sku><name><![CDATA[Ürün A v2]]></name>\
+                   <details><![CDATA[yeni açıklama]]></details><quantity>5</quantity>\
+                   <status>1</status></product></products>";
+        sync_products(&mut conn, feed::parse(xml).unwrap()).unwrap();
+        assert_eq!(
+            fp_state(&conn, "A").2.as_deref(),
+            Some("ad, açıklama"),
+            "önceki değişiklik notu ezildi"
+        );
+    }
+
+    /// 🔴 Ölçülen tuzak: feed `\r\n`, veritabanı `\n` kullanıyor. Normalizasyon olmasaydı
+    /// gerçek katalogda 7 ürün ilk senkronda sahte bayrak alacaktı.
+    #[test]
+    fn sadece_bicim_degisirse_isaretlenmez() {
+        let mut conn = mem_conn();
+        let xml = |d: &str| {
+            format!(
+                "<products><product><sku><![CDATA[A]]></sku><name><![CDATA[Ürün A]]></name>\
+                 <details><![CDATA[{d}]]></details><quantity>5</quantity><status>1</status></product></products>"
+            )
+        };
+        sync_products(&mut conn, feed::parse(&xml("<p>Bir</p>\n<p>İki</p>")).unwrap()).unwrap();
+        conn.execute("UPDATE seo_status SET details_status='done' WHERE sku='A'", []).unwrap();
+        sync_products(&mut conn, feed::parse(&xml("<p>Bir</p>\n<p>İki</p>")).unwrap()).unwrap();
+
+        sync_products(&mut conn, feed::parse(&xml("<p>Bir</p>\r\n  <p>İki</p>")).unwrap()).unwrap();
+        let (fp, reviewed, changed) = fp_state(&conn, "A");
+        assert_eq!(fp, reviewed, "yalnızca satır sonu değişti ama iz kaydı");
+        assert_eq!(changed, None, "biçim farkı kullanıcıyı rahatsız etti");
+    }
+
+    /// ⚠️ Damga yalnızca "tamamlandı" olan ürünlere basılır; bekleyen ürün için bayrak
+    /// anlamsızdır (zaten yapılacak iş olarak duruyor) ve gürültü yaratır.
+    #[test]
+    fn onaylanmamis_urune_damga_basilmaz() {
+        let mut conn = mem_conn();
+        sync_products(&mut conn, feed::parse(&feed_xml(&[("A", "Ürün A")])).unwrap()).unwrap();
+        sync_products(&mut conn, feed::parse(&feed_xml(&[("A", "Ürün A v2")])).unwrap()).unwrap();
+        let (fp, reviewed, _) = fp_state(&conn, "A");
+        assert!(fp.is_some(), "iz hiç yazılmadı");
+        assert_eq!(reviewed, None, "onaylanmamış ürüne damga basıldı");
     }
 
     #[test]
