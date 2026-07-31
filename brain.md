@@ -347,9 +347,9 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
    **Dayanıklılık:** sorgu çağrısı hata verirse raporun GERİ KALANI YİNE DÖNER — sorgu
    katmanı ek bilgidir, yokluğu tüm analizi kaybettirmemeli.
 
-   **Sıradakiler:** trend (içerik gerilemesi, 2. GSC çağrısı) · iç link adayı · EOL için
-   yapay zekâ halef önerisi · Ahrefs hacim/zorluk (**istek üzerine, satır bazında,
-   önbellekli** — her CapSolver çözümü ücretli, toplu çalıştırılamaz).
+   ~~**Sıradakiler:** trend · iç link adayı · EOL halef önerisi · Ahrefs hacim/zorluk~~
+   ✅ **BU LİSTE KAPANDI (v0.6.1–v0.6.3).** Trend ve EOL halef önerisi yapıldı; iç link adayı
+   ile Ahrefs zorluk verisi **ölçülerek elendi** (bkz. madde 0ae) — bekleyen iş değiller.
 
 0ac. 📦 **ESKİ NOT — sorgu×sayfa altyapısı ilk kurulduğunda (v0.5.8'de kod var, analizler henüz yok).**
    `gsc.rs::query_page_stats` — `dimensions:["page","query"]`, `startRow` sayfalama (GSC tek
@@ -410,8 +410,12 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
    CHANGELOG maddeleri **tek satır** olmalı (sarma satırlar önceki maddeye ekleniyor ama
    okunabilirlik için tek satır tercih edilir).
 
-0b. ⏸️ **FAZ 2B YARIM KALDI — `gemini.rs` (1923 satır) modül bölme.** Faz 1/2a/3 bitti (bkz. aşağı).
-   **Önce şunu bil: bu iş TAMAMEN KOZMETİK.** Rust'ta derleme birimi dosya değil crate'tir;
+0b. ✅ **FAZ 2B TAMAMLANDI (v0.7.0, kalem 4) — aşağısı tarihsel kayıt.**
+   `gemini.rs` (2119) → 5 dosya, `commands.rs` (2619) → 7 dosya; her iki bölmede de satır
+   KAYBI=0 doğrulandı. Nasıl yapıldığı ve çıkan üç tuzak madde 0ai'de. Aşağıdaki plan
+   uygulandığı hâliyle duruyor — benzer bir bölme gerekirse yöntem oradan okunabilir.
+
+   **Bu iş TAMAMEN KOZMETİKTİ.** Rust'ta derleme birimi dosya değil crate'tir;
    dosyayı bölmek derleme süresini DÜŞÜRMEZ — bu ölçülerek doğrulandı. Değeri yalnızca
    okunabilirlik. (Yine de değersiz değil: 2026-07-28 hatasında aynı hata sınıflandırması
    4 yerde kopyalanmıştı ve dördü de yanlıştı.)
