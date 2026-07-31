@@ -3,11 +3,12 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-07-30
-**Aktif faz:** v0.7.2 yayında — her SEO aracı kendi ekranında, gruplu navigasyon, Yapay Zekâ
-Asistanı (sohbet geçmişi kalıcı). **Faz 2b (modül bölme) ✅ TAMAMLANDI** (kalem 4).
-**Kuyruk:** K1 ilk kurulum sihirbazı ⭐ · K2 feed değişikliği tespiti · K3 Schema.org JSON-LD
-(ayrıntı ve gerekçeler "KALDIĞIMIZ YER" başında).
+**Son güncelleme:** 2026-07-31
+**Aktif faz:** v0.8.0 yayında — her SEO aracı kendi ekranında, gruplu navigasyon, Yapay Zekâ
+Asistanı (sohbet geçmişi kalıcı) ve **ilk kurulum sihirbazı**. Uygulama artık gerçekten
+global kullanıma hazır: gömülü varsayılan feed adresi kaldırıldı (bkz. 0ao).
+**Kuyruk:** ~~K1 sihirbaz~~ ✅ v0.8.0 · **K2 feed değişikliği tespiti** (sıradaki) ·
+K3 Schema.org JSON-LD.
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -18,7 +19,8 @@ v0.6.2 = Ahrefs zorluk düzeltmesi · v0.6.3 = düşüşte olanlar (trend) ·
 v0.6.4 = canonical yazma akışı · v0.6.5 = canonical senkron ön koşulu kaldırıldı ·
 v0.7.0 = araç ekranları + gruplu navigasyon + Yapay Zekâ Asistanı ·
 v0.7.1 = kenar çubuğu etiketi ·
-**v0.7.2 = sohbet geçmişi kalıcı + canonical hedefi yalnızca satıştaki ürünler**
+v0.7.2 = sohbet geçmişi kalıcı + canonical hedefi satıştaki ürünler ·
+**v0.8.0 = ilk kurulum sihirbazı + varsayılan feed adresi kaldırıldı**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
@@ -29,19 +31,11 @@ bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.
 
 ### 📋 KUYRUK — kullanıcı önceliğiyle (2026-07-31)
 
-Aşağıdaki üç iş sırayla yapılacak. Sıra **kullanıcı kararı**, tahmini efor değil.
+Sıra **kullanıcı kararı**, tahmini efor değil. **Sıradaki: K2.**
 
-**K1. İlk kurulum sihirbazı** ⭐ *kullanıcının en önemli gördüğü madde*
-   Yeni kullanıcı uygulamayı açtığında boş bir ekran ve "Ayarlar'a git" sezgisi görüyor.
-   Adım adım karşılama: **feed → Gemini anahtarı → test → ilk senkron**.
-   ⚠️ **Neden kritik: bu bir "tek kullanıcı" uygulaması DEĞİL.** Vizyon baştan beri global
-   (bkz. "🌍 Vizyon"): IdeaSoft altyapısı kullanan **herhangi bir işletme** hedef kitle.
-   İlk kurulum deneyimi benimsemenin önündeki ilk engel — kod kalitesi ne olursa olsun,
-   ilk beş dakikada takılan kullanıcı geri gelmiyor.
-   Mevcut parçalar hazır: `test_feed_url`, `test_gemini_key`, `test_ideasoft`,
-   `test_gsc_credentials` komutları ZATEN var — sihirbaz bunları sıraya dizecek.
+**K1. İlk kurulum sihirbazı** ✅ **TAMAMLANDI (v0.8.0)** — ayrıntı ve çıkan kusur 0ao/0ap'de.
 
-**K2. Feed değişikliği tespiti**
+**K2. Feed değişikliği tespiti** ← **SIRADAKİ**
    Tedarikçide ürün adı/özellikleri değişirse uygulama fark etmiyor; ürün "Tamamlandı"
    kalıyor ve SEO sessizce bayatlıyor. Senkronda içerik parmak izi (hash) tutup
    *"bu ürünün feed verisi değişti, gözden geçir"* bayrağı konacak.
@@ -165,6 +159,43 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    **Kota tasarımı:** istek üzerine, satır bazında, önbellekli. 1.073 sayfa için toplu çağrı
    günlük kotayı (flash 20/gün) anında tüketirdi. Trafik tepedeki sayfalarda yoğun.
    Arayüzde "halef yok" NÖTR renkte — başarısızlık değil, geçerli cevap.
+
+0ao. 🔴 **VARSAYILAN FEED ADRESİ TEK BİR MAĞAZAYA GÖMÜLÜYDÜ (v0.8.0'da kaldırıldı).**
+
+   K1 (kurulum sihirbazı) keşfinde çıktı ve sihirbazdan daha önemliydi:
+   ```rust
+   pub const DEFAULT_FEED_URL: &str = "https://www.kurumsalit.com/output/2567783262";
+   ```
+   `db::feed_url()` ayar yoksa buna düşüyordu. Uygulamayı kuran **herhangi bir işletme**
+   varsayılan olarak başka birinin feed'ini alıyor, "Manuel Güncelle"ye basarsa **başka bir
+   mağazanın kataloğunu senkronluyordu.** Hem vizyonun açık ihlali (*"kullanıcıya özel değer
+   gömmeden, ayarlanabilir olmalı"*) hem de ilk çalıştırmada somut bir veri kazası.
+
+   Sabit kaldırıldı → `feed_url()` boş dönüyor, `sync_feed` anlamlı hata veriyor.
+   **Ders: "global kullanım" kararı yalnızca yeni özellikler için değil, MEVCUT
+   varsayılanlar için de geçerli.** Vizyon maddesi yazılmadan önceki kod bu gözle taranmalı.
+
+0ap. ✅ **KURULUM SİHİRBAZI (v0.8.0).** hoş geldiniz → feed (test) → Gemini (test) →
+   isteğe bağlı entegrasyonlar → ilk senkron → özet. **Yeni yetenek EKLEMİYOR**: mevcut
+   `test_*` komutlarını doğru sıraya diziyor. Atlanabilir; Ayarlar'dan tekrar çalıştırılır.
+
+   `needs_setup` **üç koşul birden** arıyor (setup_done yok + feed_url yok + ürün yok).
+   ⚠️ Korunan risk yanlış pozitif: mevcut kullanıcı yükseltme yaptığında çalışan bir kuruluma
+   sihirbaz teklif etmek. Şema göçü ve geriye dönük yazma YOK — durum baştan hesaplanıyor.
+
+   ⚠️ **İki tuzak (keşifte bulundu, ikisi de doğrulandı):**
+   1. **Test-önce-kaydet asimetrisi:** `test_feed_url`/`test_gemini_key` **parametre** alıyor →
+      kaydetmeden test edilebiliyor. Ama `test_ideasoft`/`test_gsc_credentials` **DB'den
+      okuyor** → önce kaydetmek gerekiyor. Zorunlu adımlarda yarım kayıt oluşmuyor; isteğe
+      bağlı adımda "kaydet, sonra test et" ve kullanıcıya kaydedildiği söyleniyor.
+   2. 🔴 **`save_settings` YEDİ alanı birden alıyor** → dokunulmayan alanlar mevcut
+      değerleriyle geri yazılmazsa kullanıcının kayıtlı anahtarları **SİLİNİR**. Sihirbaz
+      Ayarlar'dan tekrar çalıştırılabildiği için gerçek risk. Tarayıcıda doğrulandı.
+      **Aynı tuzak `SettingsPage.persist()` için de geçerli** — oraya yeni alan eklenirse
+      sihirbazın `persist()`'i de güncellenmeli.
+
+   Harness'e **`?setup=1`** kipi eklendi: sihirbaz kullanıcının GERÇEK veritabanına
+   dokunmadan uçtan uca denenebiliyor (yazan komutlar yutuluyor).
 
 0al. 🔴 **CANONICAL HEDEFİ SATIŞTAKİ ÜRÜN OLMALI — saha hatası (v0.7.2, kullanıcı tespiti).**
 
