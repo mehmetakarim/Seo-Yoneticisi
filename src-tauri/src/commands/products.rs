@@ -208,6 +208,80 @@ pub fn get_jsonld(state: State<'_, AppState>, sku: String) -> Result<String, Str
         })
 }
 
+/// "Ne değişti?" — onaylanan hâl ile şu anki feed verisini karşılaştırır.
+///
+/// ⚠️ Karşılaştırma **onay anına** göre yapılıyor, son senkrona göre değil: kullanıcı arada
+/// iki değişikliği de görmediyse ikisi birden gösterilmeli.
+///
+/// Onay kaydı yoksa (`has_snapshot=false`) yalnızca alan adları dönüyor — özellikten önce
+/// onaylanmış ürünlerde önceki değerler kaydedilmemişti ve geri getirilemez.
+#[tauri::command]
+pub fn get_feed_diff(state: State<'_, AppState>, sku: String) -> Result<FeedDiff, String> {
+    let conn = state.conn.lock().unwrap();
+    let now = db::read_feed_facts(&conn, &sku)
+        .ok_or_else(|| format!("Ürün bulunamadı: {sku}"))?;
+    let (snapshot, note): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT s.reviewed_facts_json, p.feed_changed FROM products p
+             LEFT JOIN seo_status s ON s.sku = p.sku WHERE p.sku = ?1",
+            [&sku],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| format!("Karşılaştırma verisi okunamadı: {e}"))?;
+
+    let old: Option<fingerprint::FeedFacts> =
+        snapshot.as_deref().and_then(|j| serde_json::from_str(j).ok());
+    Ok(build_feed_diff(old, now, note))
+}
+
+/// Karşılaştırmanın saf hâli — veritabanı dokunuşu yok, doğrudan test edilebilir.
+fn build_feed_diff(
+    old: Option<fingerprint::FeedFacts>,
+    now: fingerprint::FeedFacts,
+    note: Option<String>,
+) -> FeedDiff {
+    let temiz = |v: Vec<String>| -> Vec<String> {
+        v.into_iter().filter(|s| !s.trim().is_empty()).collect()
+    };
+    let Some(old) = old else {
+        // Onay kaydı yok: elimizdeki tek bilgi senkronun yazdığı alan adları. Kullanıcıya
+        // boş bir karşılaştırma göstermek yerine bunu açıkça söylemek gerekiyor.
+        return FeedDiff {
+            has_snapshot: false,
+            changed_fields: note
+                .unwrap_or_default()
+                .split(", ")
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_string)
+                .collect(),
+            fields: Vec::new(),
+            images_old: Vec::new(),
+            images_new: temiz(now.images),
+        };
+    };
+
+    let changed = fingerprint::changed_fields(&old, &now);
+    let fields = changed
+        .iter()
+        .filter_map(|f| {
+            let (a, b) = (old.text_of(f)?, now.text_of(f)?);
+            Some(FeedFieldDiff {
+                field: (*f).to_string(),
+                // Açıklamada kullanıcı işaretlemeyi değil metni karşılaştırıyor.
+                old: seo_core::validation::html_strip(a),
+                new: seo_core::validation::html_strip(b),
+            })
+        })
+        .collect();
+    FeedDiff {
+        has_snapshot: true,
+        changed_fields: changed.iter().map(|s| (*s).to_string()).collect(),
+        fields,
+        images_old: temiz(old.images),
+        images_new: temiz(now.images),
+    }
+}
+
 /// "Baktım, içerik hâlâ doğru" — bayrağı düşürür, içeriğe DOKUNMAZ.
 ///
 /// Feed değiştiğinde her zaman yeniden üretim gerekmiyor: bazen değişen alan zaten
@@ -255,4 +329,79 @@ pub fn mark_details_done(state: State<'_, AppState>, sku: String) -> Result<Stri
         mark_reviewed(&conn, &sku)?;
     }
     Ok(next.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use seo_core::fingerprint::FeedFacts;
+
+    fn facts() -> FeedFacts {
+        FeedFacts {
+            name: "Lenovo ThinkPad E16".into(),
+            brand: "Lenovo".into(),
+            main_category: "Bilgisayar".into(),
+            category: "Notebook".into(),
+            details: "<p>Güçlü performans</p>".into(),
+            images: vec!["https://cdn/a.jpg".into(), "https://cdn/b.jpg".into()],
+        }
+    }
+
+    /// Kullanıcının sorduğu şey: "içeriği nasıl kontrol edeceğim?" — cevabı bu.
+    /// Alan adı yetmiyor, ESKİ ve YENİ değer yan yana gelmeli.
+    #[test]
+    fn eski_ve_yeni_deger_birlikte_donuyor() {
+        let mut yeni = facts();
+        yeni.name = "Lenovo ThinkPad E16 Gen 2".into();
+        yeni.details = "<p>Yenilenmiş açıklama</p>".into();
+
+        let d = build_feed_diff(Some(facts()), yeni, None);
+        assert!(d.has_snapshot);
+        assert_eq!(d.changed_fields, vec!["ad", "açıklama"]);
+        let ad = d.fields.iter().find(|f| f.field == "ad").expect("ad farkı yok");
+        assert_eq!(ad.old, "Lenovo ThinkPad E16");
+        assert_eq!(ad.new, "Lenovo ThinkPad E16 Gen 2");
+        // Açıklamada HTML değil METİN karşılaştırılıyor: kullanıcı etikete bakmıyor.
+        let ac = d.fields.iter().find(|f| f.field == "açıklama").unwrap();
+        assert_eq!(ac.old, "Güçlü performans");
+        assert!(!ac.new.contains('<'), "HTML etiketleri ayıklanmadı: {}", ac.new);
+    }
+
+    /// Görseller metin olarak değil, iki liste hâlinde dönüyor — arayüz küçük resim gösteriyor.
+    #[test]
+    fn gorsel_degisikligi_iki_liste_olarak_doner() {
+        let mut yeni = facts();
+        yeni.images = vec!["https://cdn/a.jpg".into(), "https://cdn/c.jpg".into()];
+
+        let d = build_feed_diff(Some(facts()), yeni, None);
+        assert_eq!(d.changed_fields, vec!["görseller"]);
+        // Görsel alanı metin farkı üretmiyor (text_of None döner) — boş satır çizilmesin.
+        assert!(d.fields.is_empty(), "görsel için metin farkı üretildi");
+        assert_eq!(d.images_old.len(), 2);
+        assert_eq!(d.images_new, vec!["https://cdn/a.jpg", "https://cdn/c.jpg"]);
+    }
+
+    /// 🔴 Özellikten ÖNCE onaylanmış ürünlerde önceki değerler kayıtlı değil ve geri
+    /// getirilemez. Bu durumda boş bir karşılaştırma göstermek kullanıcıyı yanıltır —
+    /// arayüzün "kayıt yok" diyebilmesi için bayrak dönüyor.
+    #[test]
+    fn onay_kaydi_yoksa_yalnizca_alan_adlari_doner() {
+        let d = build_feed_diff(None, facts(), Some("görseller, açıklama".into()));
+        assert!(!d.has_snapshot);
+        assert_eq!(d.changed_fields, vec!["görseller", "açıklama"]);
+        assert!(d.fields.is_empty());
+        assert!(d.images_old.is_empty(), "olmayan geçmiş uydurulmuş");
+        assert_eq!(d.images_new.len(), 2, "şu anki görseller yine de gösterilmeli");
+    }
+
+    #[test]
+    fn bos_gorsel_alanlari_listeye_girmez() {
+        let mut eski = facts();
+        eski.images = vec!["https://cdn/a.jpg".into(), "".into(), "  ".into()];
+        let mut yeni = facts();
+        yeni.images = vec!["https://cdn/z.jpg".into(), "".into(), "".into()];
+        let d = build_feed_diff(Some(eski), yeni, None);
+        assert_eq!(d.images_old, vec!["https://cdn/a.jpg"]);
+        assert_eq!(d.images_new, vec!["https://cdn/z.jpg"]);
+    }
 }

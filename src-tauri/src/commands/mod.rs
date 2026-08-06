@@ -5,7 +5,7 @@ use seo_core::validation::{
     details_badge, image_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallInput,
     OverallStatus,
 };
-use seo_core::{db, feed, gemini, history, jsonld, opportunity, sync};
+use seo_core::{db, feed, fingerprint, gemini, history, jsonld, opportunity, sync};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -38,6 +38,31 @@ pub struct AppState {
 
 fn now_str() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
+}
+
+/// Onaylanan hâl ile şu anki feed verisi arasındaki tek alanlık fark.
+#[derive(Debug, Serialize)]
+pub struct FeedFieldDiff {
+    /// `seo_core::fingerprint::FIELDS` adlarından biri.
+    pub field: String,
+    /// Onay anındaki değer. Açıklama alanında HTML etiketleri ayıklanmış hâli —
+    /// kullanıcı işaretlemeye değil metne bakıyor.
+    pub old: String,
+    pub new: String,
+}
+
+/// "Ne değişti?" cevabı.
+#[derive(Debug, Serialize)]
+pub struct FeedDiff {
+    /// Onay anındaki kayıt var mı? Özellikten ÖNCE onaylanmış ürünlerde yok: o zaman
+    /// yalnızca alan adları biliniyor, önceki değerler geri getirilemez.
+    pub has_snapshot: bool,
+    /// Değişen alan adları — kayıt olmasa da her zaman dolu.
+    pub changed_fields: Vec<String>,
+    pub fields: Vec<FeedFieldDiff>,
+    /// Görseller ayrı: metin değil, küçük resim olarak gösteriliyor.
+    pub images_old: Vec<String>,
+    pub images_new: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -346,10 +371,16 @@ fn feed_change_note(
 }
 
 fn mark_reviewed(conn: &Connection, sku: &str) -> Result<(), String> {
+    // Parmak izi "değişti mi?", bu kayıt "NE değişti?" sorusunu cevaplıyor. İz geri
+    // döndürülemez bir özet; onaylanan değerler saklanmazsa kullanıcıya yalnızca alan ADI
+    // gösterilebiliyor ("görseller değişti") — hangi görselin gittiğini göremiyor.
+    let facts = db::read_feed_facts(conn, sku);
+    let snapshot = facts.as_ref().and_then(|f| serde_json::to_string(f).ok());
     conn.execute(
-        "UPDATE seo_status SET reviewed_fp = (SELECT feed_fp FROM products WHERE sku = ?1)
+        "UPDATE seo_status SET reviewed_fp = (SELECT feed_fp FROM products WHERE sku = ?1),
+                               reviewed_facts_json = ?2
          WHERE sku = ?1",
-        [sku],
+        params![sku, snapshot],
     )
     .map_err(|e| format!("Gözden geçirme damgası yazılamadı: {e}"))?;
     // Damgalandığına göre kullanıcı değişikliği görmüş sayılır; not temizlenir.

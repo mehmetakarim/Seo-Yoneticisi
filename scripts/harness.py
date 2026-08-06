@@ -110,6 +110,15 @@ def load_product(conn):
     return listing, detail
 
 
+def load_gallery(conn):
+    """Karşılaştırma stub'ı için GERÇEK görsel adresleri — küçük resimler gerçekten yüklensin."""
+    rows = conn.execute(
+        "SELECT img_url, picture2, picture3, picture4 FROM products "
+        "WHERE img_url IS NOT NULL AND picture3 IS NOT NULL LIMIT 1"
+    ).fetchone()
+    return [u for u in (rows or []) if u]
+
+
 def main():
     if not DB.exists():
         sys.exit(f"veritabanı bulunamadı: {DB}")
@@ -121,6 +130,7 @@ def main():
     report = load_report(conn)
     listing, detail = load_product(conn)
     live = load_live_products(conn)
+    gallery = load_gallery(conn)
     conn.close()
 
     # JSON-LD kartı için gösterim örneği. ⚠️ Gerçek çıktıyı `seo_core::jsonld` üretiyor;
@@ -204,6 +214,8 @@ def main():
         "    }\n"
         # `?changed=1` → feed değişikliği bayrağı benzetimi (K2). Gerçek veride bayrak ancak
         # tedarikçi bir ürünü değiştirdiğinde çıkıyor; uyarıyı beklemeden görmek için.
+        # `?changed=1` karşılaştırma verisi; `?nosnap=1` ile "onay kaydı yok" hâli denenir.
+        f"    const DIFF = {json.dumps({'has_snapshot': True, 'changed_fields': ['ad', 'açıklama', 'görseller'], 'fields': [{'field': 'ad', 'old': 'HPE Aruba R8W31A Instant On 802.3af 15.4W POE Midspan Injector', 'new': 'HPE Aruba R8W31A Instant On 802.3af 15.4W PoE Midspan Injector (Yeni Nesil)'}, {'field': 'açıklama', 'old': 'Bu ürün küçük ofisler için tasarlanmış tek portlu bir PoE enjektörüdür. 802.3af standardını destekler ve 15.4W güç sağlar.', 'new': 'HPE Aruba Instant On R8W31A, küçük ve orta ölçekli işletmeler için tasarlanmış tek portlu Power over Ethernet enjektörüdür. IEEE 802.3af standardına tam uyumludur, bağlı cihaza 15.4W güç sağlar ve Gigabit hızını korur. Kurulum için ek yapılandırma gerektirmez.'}], 'images_old': gallery[:3], 'images_new': gallery[1:] or gallery}, ensure_ascii=False)};\n"
         "    if (new URLSearchParams(location.search).has('changed')) {\n"
         "      const NOTE = 'ad, açıklama';\n"
         "      if (cmd === 'list_products') return Promise.resolve(H.list_products.map(\n"
@@ -212,6 +224,11 @@ def main():
         "      if (cmd === 'get_product') return Promise.resolve({ ...H.get_product,\n"
         "        feed_changed: NOTE, meta_status: 'done', details_status: 'done' });\n"
         "      if (cmd === 'mark_feed_reviewed') return Promise.resolve(null);\n"
+        "      if (cmd === 'get_feed_diff') return Promise.resolve(\n"
+        "        new URLSearchParams(location.search).has('nosnap')\n"
+        "          ? { has_snapshot: false, changed_fields: ['görseller'], fields: [],\n"
+        "              images_old: [], images_new: DIFF.images_new }\n"
+        "          : DIFF);\n"
         "    }\n"
         "    if (cmd === 'assistant_ask') {\n"
         f"      const ANS = {json.dumps(fake_answer, ensure_ascii=False)};\n"

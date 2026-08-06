@@ -55,34 +55,21 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
         // sorusunu cevaplıyor — ek sorgu maliyeti yok.
         // Eski hâl + eski not + onay damgası tek sorguda. Aynı sorgu "var mı?" sorusunu da
         // cevaplıyor, ayrı bir SELECT gerekmiyor.
-        let before: Option<(FeedFacts, Option<String>, Option<String>, Option<String>)> = tx
-            .query_row(
-                "SELECT p.name, p.brand, p.main_category, p.category, p.details,
-                        p.img_url, p.picture2, p.picture3, p.picture4,
-                        p.feed_fp, p.feed_changed, s.reviewed_fp
-                 FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
-                 WHERE p.sku = ?1",
-                [&sku],
-                |r| {
-                    let g = |i: usize| -> rusqlite::Result<String> {
-                        Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default())
-                    };
-                    Ok((
-                        FeedFacts {
-                            name: g(0)?,
-                            brand: g(1)?,
-                            main_category: g(2)?,
-                            category: g(3)?,
-                            details: g(4)?,
-                            images: vec![g(5)?, g(6)?, g(7)?, g(8)?],
-                        },
-                        r.get(9)?,
-                        r.get(10)?,
-                        r.get(11)?,
-                    ))
-                },
-            )
-            .ok();
+        // Alan okuması `db::read_feed_facts` üzerinden: aynı alan kümesi onay damgasında da
+        // okunuyor, ikisi ayrışırsa bayrak ile gösterilen fark birbirini tutmaz.
+        let before: Option<(FeedFacts, Option<String>, Option<String>, Option<String>)> =
+            crate::db::read_feed_facts(&tx, &sku).map(|facts| {
+                let meta: (Option<String>, Option<String>, Option<String>) = tx
+                    .query_row(
+                        "SELECT p.feed_fp, p.feed_changed, s.reviewed_fp
+                         FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
+                         WHERE p.sku = ?1",
+                        [&sku],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    )
+                    .unwrap_or((None, None, None));
+                (facts, meta.0, meta.1, meta.2)
+            });
 
         let now_facts = facts_of(p);
         let fp = fingerprint::fingerprint(&now_facts);

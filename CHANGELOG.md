@@ -13,6 +13,13 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.8.3
+- Yeni: feed değişikliği uyarısında **"Neler değişti?"** — onayladığınız hâl ile şu anki feed verisi yan yana gösteriliyor
+- Ad ve açıklama için eski/yeni metin, görseller için çıkan ve gelen küçük resimler; kaç karakterden kaça gittiği de yazıyor
+- Karşılaştırma son senkrona değil **onay anınıza** göre yapılıyor: arada iki değişiklik olduysa ikisini de görürsünüz
+- Uygulamayı bu sürümden önce tamamladığınız ürünlerde önceki değerler kayıtlı olmadığı için yalnızca değişen alan adı görünür; bundan sonraki değişikliklerde karşılaştırma tam çalışır
+- Düzeltme: uyarı şeridinin üst boşluğu yoktu, başlığa yapışık duruyordu
+
 ## v0.8.2
 - Yeni: **feed değişikliği uyarısı** — tedarikçi bir ürünün adını veya açıklamasını değiştirdiğinde, tamamladığınız ürün "Değişti" olarak işaretlenir
 - Uyarı hangi alanların değiştiğini yazar; içerik hâlâ doğruysa tek tıkla "İçerik hâlâ doğru" diyip bayrağı kaldırabilirsiniz

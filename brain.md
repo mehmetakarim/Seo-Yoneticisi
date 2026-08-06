@@ -241,6 +241,29 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    `--ignored`): 256 ürün, 56 damgalı, **iki turda da 0 bayrak**. Damga kasten bozulduğunda
    bayrak doğru alan listesiyle çıkıyor (`ENT.GNX.1002110098 → ad, açıklama`).
 
+   🔴 **SAHA GERİ BİLDİRİMİ (v0.8.3'te giderildi):** uyarı yalnızca alan ADINI söylüyordu
+   ("görseller değişti") ve yanında **"İçerik hâlâ doğru"** düğmesi duruyordu. Kullanıcının
+   haklı sorusu: *"içeriği nasıl kontrol edeceğim hakkında bir belirsizlik var."*
+   **Karar vermesi istenen kişiye kararın dayanağı da verilmeli.**
+
+   Çözüm: onay anındaki alan değerleri `seo_status.reviewed_facts_json` alanına yazılıyor
+   (`mark_reviewed`), `get_feed_diff` komutu bunu şu anki feed'le karşılaştırıyor.
+   - Parmak izi **"değişti mi?"**, bu kayıt **"NE değişti?"** sorusunu cevaplıyor. İz geri
+     döndürülemez bir özet olduğu için tek başına karşılaştırmaya yetmiyor.
+   - Açıklamada HTML değil **metin** karşılaştırılıyor (`validation::html_strip`) — kullanıcı
+     etikete değil içeriğe bakıyor.
+   - Görseller metin farkı üretmiyor; çıkanlar/gelenler küçük resim olarak gösteriliyor.
+   - ⚠️ **Onay kaydı olmayan ürünlerde uydurma YOK.** Özellikten önce onaylanmış ürünlerde
+     eski değerler kayıtlı değil; arayüz bunu açıkça yazıyor. Tarayıcı denemesinde bir kusur
+     çıktı ve düzeltildi: kayıt yokken tüm görseller "GELENLER" diye etiketleniyordu — yani
+     bilmediğimiz bir şey iddia ediliyordu. Artık o durumda yalnızca "şu anki görseller".
+   - 📐 **Boşluk ölçüldü:** şeridin üstünde 0, altında 16px vardı (başlığa yapışıktı).
+     `margin: 16px 0 0` → iki tarafta da 16px; alttaki zaten sonraki satırın margin'inden
+     geliyor, margin'ler birleşiyor. *"Boşluk da bir özelliktir"* (kullanıcı).
+
+   Ölçüm: kullanıcının veritabanında güncelleme sonrası **14 ürün bayraklandı** (9 görsel,
+   5 açıklama) — özellik sahada çalışıyor.
+
    Arayüz: liste satırında "Değişti" rozeti *"Tamamlandı"nın YERİNE* (ikisi yan yana çelişkili
    mesaj olurdu), sayacı sıfırken gizlenen "Feed değişti" filtresi, detayda uyarı şeridi +
    **"İçerik hâlâ doğru"** düğmesi (`mark_feed_reviewed`). O düğme olmasaydı kullanıcı bayraktan

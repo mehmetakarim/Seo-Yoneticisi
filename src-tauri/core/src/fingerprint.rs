@@ -33,6 +33,7 @@
 //! Kalan 1 ürün gerçek: `SW.ARB.JL686B`'nin açıklama HTML'i baştan yazılmış
 //! (`<section class="container">` → `<div class="container">`). Tam da yakalanması gereken vaka.
 
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -49,7 +50,12 @@ pub const FIELDS: &[&str] = &[
 ];
 
 /// Ürünün üretimi besleyen alanları. `FIELDS` ile aynı sırada.
-#[derive(Debug, Clone, Default, PartialEq)]
+///
+/// `Serialize`/`Deserialize`: kullanıcı bir ürünü "tamamlandı" işaretlediğinde bu yapının o
+/// anki hâli `seo_status.reviewed_facts_json` alanına yazılıyor. **Parmak izi "değişti mi?"
+/// sorusunu cevaplıyor, bu kayıt ise "NE değişti?" sorusunu** — iz geri döndürülemez bir
+/// özet olduğu için tek başına karşılaştırma yapmaya yetmiyor.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FeedFacts {
     pub name: String,
     pub brand: String,
@@ -62,6 +68,19 @@ pub struct FeedFacts {
 }
 
 impl FeedFacts {
+    /// `FIELDS` adına karşılık gelen metin değeri. Görseller metin değil (liste hâlinde
+    /// küçük resim olarak gösteriliyor), o yüzden `None` dönüyor.
+    pub fn text_of(&self, field: &str) -> Option<&str> {
+        match field {
+            "ad" => Some(&self.name),
+            "marka" => Some(&self.brand),
+            "ana kategori" => Some(&self.main_category),
+            "kategori" => Some(&self.category),
+            "açıklama" => Some(&self.details),
+            _ => None,
+        }
+    }
+
     fn parts(&self) -> [String; 6] {
         [
             norm(&self.name),

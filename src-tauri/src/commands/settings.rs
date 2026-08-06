@@ -202,8 +202,8 @@ fn export_json(conn: &Connection) -> Result<String, String> {
             "ideasoft_product_id", "ideasoft_pushed_at", "ideasoft_seo_rule",
             "meta_model", "details_model", "tech_model",
             "meta_history_json", "details_history_json",
-            // Onay damgası; feed_fp ile birlikte anlam taşır.
-            "reviewed_fp",
+            // Onay damgası + o anki alan değerleri; feed_fp ile birlikte anlam taşır.
+            "reviewed_fp", "reviewed_facts_json",
         ],
     )?;
     let log = dump(
@@ -308,9 +308,9 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
                tech_source_text, tech_specs_json, tech_status, tech_history_json,
                ideasoft_product_id, ideasoft_pushed_at, ideasoft_seo_rule,
                meta_model, details_model, tech_model,
-               meta_history_json, details_history_json, reviewed_fp)
+               meta_history_json, details_history_json, reviewed_fp, reviewed_facts_json)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,
-                     ?21,?22,?23,?24,?25,?26)",
+                     ?21,?22,?23,?24,?25,?26,?27)",
             params![
                 s(&r, "sku"),
                 s(&r, "meta_status").unwrap_or_else(|| "pending".into()),
@@ -324,7 +324,7 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
                 s(&r, "ideasoft_pushed_at"), i(&r, "ideasoft_seo_rule"),
                 s(&r, "meta_model"), s(&r, "details_model"), s(&r, "tech_model"),
                 s(&r, "meta_history_json"), s(&r, "details_history_json"),
-                s(&r, "reviewed_fp"),
+                s(&r, "reviewed_fp"), s(&r, "reviewed_facts_json"),
             ],
         )
         .map_err(|e| format!("SEO durumu geri yüklenemedi: {e}"))?;
@@ -390,8 +390,10 @@ mod tests {
         )
         .unwrap();
         src.execute(
-            "INSERT INTO seo_status (sku, meta_status, details_status, reviewed_fp)
-             VALUES ('ABC-1', 'done', 'done', 'a1b2c3d4')",
+            "INSERT INTO seo_status (sku, meta_status, details_status, reviewed_fp,
+                                     reviewed_facts_json)
+             VALUES ('ABC-1', 'done', 'done', 'a1b2c3d4',
+                     '{\"name\":\"Ürün\",\"brand\":\"\",\"main_category\":\"\",\"category\":\"\",\"details\":\"eski\",\"images\":[]}')",
             [],
         )
         .unwrap();
@@ -411,6 +413,17 @@ mod tests {
             .expect("ürün geri yüklenmedi");
         assert_eq!(fp.as_deref(), Some("a1b2c3d4"), "parmak izi yedekte taşınmadı");
         assert_eq!(reviewed.as_deref(), Some("a1b2c3d4"), "onay damgası yedekte taşınmadı");
+        // ⚠️ Karşılaştırma kaydı da taşınmalı: yedekten dönen kullanıcı "ne değişti?"
+        // sorusunun cevabını kaybetmemeli — bu veri feed'den yeniden üretilemez.
+        let snap: Option<String> = dst
+            .query_row("SELECT reviewed_facts_json FROM seo_status WHERE sku='ABC-1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(
+            snap.as_deref().unwrap_or("").contains("eski"),
+            "onay anındaki değerler yedekte taşınmadı: {snap:?}"
+        );
         // Asıl korunan davranış: geri yüklemenin hemen ardından bayrak YOK.
         assert_eq!(feed_change_note(fp, reviewed, None), None, "geri yükleme yanlış bayrak üretti");
     }

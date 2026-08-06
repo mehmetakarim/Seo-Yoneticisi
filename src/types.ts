@@ -375,3 +375,20 @@ export interface ChatSessionMeta {
   model: string;
   updated_at: string;
 }
+
+/** Onay anındaki hâl ile şu anki feed verisi arasındaki tek alanlık fark. */
+export interface FeedFieldDiff {
+  field: string;
+  old: string;
+  new: string;
+}
+
+/** "Ne değişti?" cevabı — bkz. `get_feed_diff` komutu. */
+export interface FeedDiff {
+  /** false ise önceki değerler kayıtlı değil (ürün, özellik eklenmeden önce onaylanmış). */
+  has_snapshot: boolean;
+  changed_fields: string[];
+  fields: FeedFieldDiff[];
+  images_old: string[];
+  images_new: string[];
+}

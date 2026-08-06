@@ -1,3 +1,4 @@
+use crate::fingerprint::FeedFacts;
 use rusqlite::Connection;
 
 pub fn open(path: &std::path::Path) -> Result<Connection, String> {
@@ -133,6 +134,8 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(conn, "products", "feed_fp", "TEXT")?;
     add_column_if_missing(conn, "products", "feed_changed", "TEXT")?;
     add_column_if_missing(conn, "seo_status", "reviewed_fp", "TEXT")?;
+    // "Ne değişti?" sorusunun cevabı: onay anındaki alan değerleri (bkz. fingerprint::FeedFacts).
+    add_column_if_missing(conn, "seo_status", "reviewed_facts_json", "TEXT")?;
     // Sürüm geçmişi: yeniden üretmeden önceki hâl saklanır (bkz. core/src/history.rs).
     // Teknik tabloda zaten vardı; meta ve açıklamada içerik geri dönüşsüz kayboluyordu.
     add_column_if_missing(conn, "seo_status", "meta_history_json", "TEXT")?;
@@ -268,4 +271,32 @@ mod tests {
         set_setting(&conn, "feed_url", "   ").unwrap();
         assert!(needs_setup(&conn).unwrap());
     }
+}
+
+/// Ürünün üretimi besleyen alanlarını `products` satırından okur.
+///
+/// Tek yerde duruyor çünkü iki farklı yol aynı alan kümesini okuyor: senkron (parmak izi
+/// hesabı) ve onay damgası (karşılaştırma kaydı). İkisi ayrışırsa "değişti" bayrağı ile
+/// gösterilen fark birbirini tutmaz.
+pub fn read_feed_facts(conn: &Connection, sku: &str) -> Option<FeedFacts> {
+    conn.query_row(
+        "SELECT name, brand, main_category, category, details,
+                img_url, picture2, picture3, picture4
+         FROM products WHERE sku = ?1",
+        [sku],
+        |r| {
+            let g = |i: usize| -> rusqlite::Result<String> {
+                Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default())
+            };
+            Ok(FeedFacts {
+                name: g(0)?,
+                brand: g(1)?,
+                main_category: g(2)?,
+                category: g(3)?,
+                details: g(4)?,
+                images: vec![g(5)?, g(6)?, g(7)?, g(8)?],
+            })
+        },
+    )
+    .ok()
 }
