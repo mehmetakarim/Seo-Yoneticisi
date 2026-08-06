@@ -9,9 +9,10 @@ feed değişikliği tespiti + karşılaştırma (K2), Schema.org JSON-LD (K3). �
 geri bildirimiyle gelen iki iş: "Neler değişti?" karşılaştırması ve IdeaSoft'tan teknik
 tablo getirme (0as — ölçüme göre satıştaki ürünlerin **%94'ünde** uygulamanın göremediği
 tablo verisi varmış).
-**Kuyruk: BOŞ.** Açık kalanlar kod işi değil → kod imzalama (maliyet kararı), Gemini kota
-göstergesi (Google sayacı API'den vermiyor), JSON-LD'nin IdeaSoft'a gönderilmesi
-(kullanıcı kararı, koşulları 0ar'de).
+**Yön ve fazlar artık `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
+orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
+haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
+**Sıradaki faz: B (tasarım bütünlüğü — araç ekranlarında ortak tablo + İşlem sütunu).**
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -224,6 +225,25 @@ değişti ve ikisi de bu maddeyi çürütüyor.
 
    Teknik zemin hazır: gönderim modülü `extraDetails` alanına zaten yazıyor (teknik tablo
    oradan gidiyor), yani iş "yeni yetenek" değil, mevcut gönderime bir parça eklemek.
+
+0at. 🔴 **ARAÇ EKRANLARINDA STİL SAPMASI — ölçüldü (2026-08-07), Faz B'de kapanacak.**
+   Kalem 1/2'de ürün kartlarında düzeltilen hastalığın aynısı, bu kez SEO araç ekranlarında:
+
+   | Ne | Durum |
+   |---|---|
+   | `.tbl` kullanan | 4 ekran (Fırsatlar · Satışta olmayanlar · Yükselmeye yakın · Düşüşte) |
+   | **Yapı olarak farklı** | **Yarışan sayfalar** tablo değil, `div` listesi (`.cann-list`) |
+   | `.head` yerel tanım | **5 ekranda** ayrı ayrı |
+   | `.note` / `.more` | 4 / 3 ekranda kopyalanmış |
+   | **Sessiz sapma** | `.sku` → Düşüşte/Striking `margin-top: 2px`, Fırsatlar **1px** |
+
+   ⚠️ Ayrıca **satır eylemi görünmez:** dört ekranda birincil eylem çıplak satır tıklaması
+   (`store.openProduct`); yalnızca EOL'de görünür düğme var, o da hücreye gömülü yerel
+   `.succ-btn`. Kullanıcı tespiti: *"tasarım bütünlüğü için tablo/liste ekranları aynı ya da
+   birbiri ile tutarlı olmalı"* + işlem sütunu önerisi.
+
+   **Ders (üçüncü kez aynı):** kopyalanan geometri sapıyor. Yeni ekran açarken ortak bileşen
+   yoksa önce o yazılmalı — sonra toplamak iki kat iş.
 
 0as. ✅ **TEKNİK TABLO IDEASOFT'TAN GETİRİLİYOR (v0.8.3).** "Getir" düğmesi hedef kelimeyle
    birlikte `extraDetails` (IdeaSoft'un "Teknik Özellikler" sekmesi) içeriğini de alıyor,
