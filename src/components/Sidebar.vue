@@ -38,6 +38,7 @@ function fmtSync(): string {
           :key="item.key"
           class="nav-item"
           :class="{ active: store.page === item.key }"
+          :data-nav="item.key"
           @click="store.page = item.key"
         >
           <Icon :name="item.icon" :size="16" :stroke-width="1.9" />

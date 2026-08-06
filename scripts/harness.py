@@ -182,6 +182,34 @@ def main():
         "doğrudan tıklamaya dönüşür. Bunu **Ürünler** ekranından üretebilirsiniz."
     )
 
+    # `?nav=eol` → uygulama doğrudan o ekranda açılır. Başsız ekran görüntüsü almak için
+    # gerekli (tıklama yok): tasarım promptlarına mevcut ekranların görüntüsü ekleniyor.
+    nav_stub = (
+        "<script>\n"
+        "(() => {\n"
+        "  const p = new URLSearchParams(location.search).get('nav');\n"
+        "  if (!p) return;\n"
+        "  // Store hazır olduğunda sayfayı değiştir; Pinia mağazası pencerede değil, bu yüzden\n"
+        "  // kenar çubuğundaki düğmeye tıklanıyor — gerçek gezinme yolunun aynısı.\n"
+        "  const tik = () => {\n"
+        "    const b = document.querySelector(`[data-nav=\"${p}\"]`);\n"
+        "    if (b) { b.click(); return true; }\n"
+        "    return false;\n"
+        "  };\n"
+        "  // `&tema=koyu` → koyu temada görüntü al (tasarım promptları iki temayı da ister).\n"
+        "  const koyu = new URLSearchParams(location.search).get('tema') === 'koyu';\n"
+        "  const temaSec = () => {\n"
+        "    if (!koyu) return true;\n"
+        "    const b = [...document.querySelectorAll('button')].find(x => x.textContent.trim() === 'Koyu');\n"
+        "    if (b) { b.click(); return true; }\n"
+        "    return false;\n"
+        "  };\n"
+        "  const t = setInterval(() => { if (tik() && temaSec()) clearInterval(t); }, 120);\n"
+        "  setTimeout(() => clearInterval(t), 6000);\n"
+        "})();\n"
+        "</script>\n"
+    )
+
     stub = (
         "<script>\n"
         "// Tauri IPC taklidi — yalnızca harness için. Uygulama bundle'ı gerçek.\n"
@@ -294,7 +322,9 @@ def main():
 
     html = index.read_text()
     out = DIST / "harness.html"
-    out.write_text(html.replace('<script type="module"', stub + '<script type="module"', 1))
+    # nav_stub bundle'dan SONRA çalışmalı (kenar çubuğu çizilmiş olmalı) → gövde sonuna.
+    html = html.replace('<script type="module"', stub + '<script type="module"', 1)
+    out.write_text(html.replace("</body>", nav_stub + "</body>", 1))
     counts = {k: len(v) for k, v in report.items() if isinstance(v, list)}
     print(f"{out} hazır · {counts}")
 
