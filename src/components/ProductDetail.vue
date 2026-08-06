@@ -140,7 +140,7 @@ async function openProduct() {
           <button
             class="research-btn"
             :disabled="store.ideasoftBusy"
-            title="Hedef kelimeyi IdeaSoft'tan getir"
+            title="Hedef kelimeyi ve varsa teknik tablo verisini IdeaSoft'tan getir"
             @click="store.pullIdeasoftKeyword()"
           >
             <Icon name="download" :size="13" :stroke-width="2" />
@@ -156,7 +156,6 @@ async function openProduct() {
             Gönder
           </button>
         </template>
-        <span class="kw-hint">iki kart da bu kelimeyi kullanır</span>
       </div>
 
       <ImageScoreCard :gallery="detail.gallery" :image-count="detail.image_count" />
@@ -340,10 +339,6 @@ h1 {
 .research-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
-}
-.kw-hint {
-  font-size: 11px;
-  color: var(--c-faint);
 }
 .no-sel {
   height: 100%;

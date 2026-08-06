@@ -513,6 +513,72 @@ pub async fn fetch_product(domain: &str, token: &str, id: i64) -> Result<RemoteP
     Ok(to_remote(&v))
 }
 
+/// HTML teknik tabloyu "Yapılandır" adımının beklediği düz metne çevirir.
+///
+/// Kaynak: `RemoteProduct::extra_details` — IdeaSoft'un "Teknik Özellikler" sekmesi.
+/// ⚠️ Bu alan **XML feed'de YOK**; yalnızca API'den geliyor. Ölçüm (2026-08-07): bizim hiç
+/// dokunmadığımız 6 üründen 6'sında mağazanın kendi yazdığı tablo vardı (1–2,4 KB) — yani
+/// uygulamanın göremediği gerçek veri.
+///
+/// İki biçim de ölçülerek desteklendi (gerçek mağaza verisi, 2026-08-07):
+/// - **Bizim ürettiğimiz:** `<caption>Grup</caption>` + `<tr><th>etiket</th><td>değer</td></tr>`
+/// - **Mağazanın kendi yazdığı:** `<thead><th>Grup</th><th></th></thead>` +
+///   `<tr><td>etiket</td><td>değer</td></tr>`
+///
+/// ⚠️ Etiket/değer ayracı olmadan düz `html_strip` kullanılamaz: "PanelIPS" gibi birleşik
+/// metin çıkar ve yapılandırıcı satırı ayıramaz.
+pub fn tech_html_to_text(html: &str) -> String {
+    let tag = regex::Regex::new(r"(?is)<[^>]+>").unwrap();
+    let temiz = |s: &str| -> String {
+        let s = tag.replace_all(s, " ");
+        // HTML varlıkları: tabloda geçen birkaç tanesi yeterli.
+        let s = s
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'");
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+
+    let tablo = regex::Regex::new(r"(?is)<table[^>]*>(.*?)</table>").unwrap();
+    let caption = regex::Regex::new(r"(?is)<caption[^>]*>(.*?)</caption>").unwrap();
+    let thead = regex::Regex::new(r"(?is)<thead[^>]*>(.*?)</thead>").unwrap();
+    let satir = regex::Regex::new(r"(?is)<tr[^>]*>(.*?)</tr>").unwrap();
+    let hucre = regex::Regex::new(r"(?is)<t[dh][^>]*>(.*?)</t[dh]>").unwrap();
+
+    let mut out = String::new();
+    for tbl in tablo.captures_iter(html) {
+        let govde = &tbl[1];
+        // Grup adı: önce caption, yoksa thead'in ilk dolu hücresi.
+        let grup = caption
+            .captures(govde)
+            .map(|c| temiz(&c[1]))
+            .or_else(|| {
+                let th = thead.captures(govde)?;
+                hucre.captures_iter(&th[1]).map(|c| temiz(&c[1])).find(|s| !s.is_empty())
+            })
+            .unwrap_or_default();
+        if !grup.is_empty() {
+            out.push_str(&format!("\n{grup}\n"));
+        }
+        // thead satırları grup başlığıydı; gövdeden çıkarılıyor.
+        let satirlar = thead.replace_all(govde, "");
+        for s in satir.captures_iter(&satirlar) {
+            let hucreler: Vec<String> =
+                hucre.captures_iter(&s[1]).map(|c| temiz(&c[1])).collect();
+            match hucreler.as_slice() {
+                [a, b] if !a.is_empty() && !b.is_empty() => {
+                    out.push_str(&format!("{a}: {b}\n"))
+                }
+                _ => {}
+            }
+        }
+    }
+    out.trim().to_string()
+}
+
 /// Gönderilecek gövdeyi kurar. **Yalnızca istenen parçalar ve boş olmayan alanlar** yazılır —
 /// uzaktaki dolu bir alanı yanlışlıkla silmeyelim. `details` + `tech` birlikte istenirse
 /// tek bir `detail` nesnesinde birleşir (biri diğerini ezmesin).
@@ -683,6 +749,62 @@ mod tests {
         assert!(p.as_object().unwrap().is_empty());
     }
 
+    /// Bizim ürettiğimiz biçim: `<caption>` grup + `<th>etiket</th><td>değer</td>`.
+    /// Örnek, gerçek mağaza yanıtından kısaltıldı (2026-08-07).
+    #[test]
+    fn kendi_tablomuz_metne_cevrilir() {
+        let html = r#"<table class="table teknik-tablo"><caption>Ürün Ailesi</caption>
+            <colgroup><col class="tt-etiket" /><col class="tt-deger" /></colgroup><tbody>
+            <tr><th scope="row">Ürün Adı</th><td>Anycubic Photon P1</td></tr>
+            <tr><th scope="row">Marka</th><td>Anycubic</td></tr></tbody></table>
+            <table class="table teknik-tablo"><caption>Baskı</caption><tbody>
+            <tr><th scope="row">Baskı Hacmi</th><td>223*126*230 mm³</td></tr></tbody></table>"#;
+        let out = tech_html_to_text(html);
+        assert_eq!(
+            out,
+            "Ürün Ailesi\nÜrün Adı: Anycubic Photon P1\nMarka: Anycubic\n\nBaskı\nBaskı Hacmi: 223*126*230 mm³"
+        );
+    }
+
+    /// 🔴 Mağazanın kendi yazdığı biçim BAMBAŞKA: grup adı `<thead>` içinde, satırlar
+    /// `<td>/<td>`. Ölçümde bizim dokunmadığımız 6 üründen 6'sı bu biçimdeydi — yani asıl
+    /// yaygın olan bu. Yalnızca kendi biçimimizi desteklemek özelliği işe yaramaz kılardı.
+    #[test]
+    fn magazanin_kendi_tablosu_metne_cevrilir() {
+        let html = r#"<table class="table"><thead class="thead-light"><tr>
+            <th class="col-4">Ürün Ailesi</th><th class="col-8"></th></tr></thead><tbody>
+            <tr><td>Kategori</td><td>PoE Midspan Injector</td></tr>
+            <tr><td>Marka</td><td>HPE / Aruba Instant On</td></tr></tbody></table>"#;
+        let out = tech_html_to_text(html);
+        assert_eq!(
+            out,
+            "Ürün Ailesi\nKategori: PoE Midspan Injector\nMarka: HPE / Aruba Instant On"
+        );
+    }
+
+    /// ⚠️ Ayraçsız düz metne çevirseydik "PanelIPS" çıkardı ve yapılandırıcı satırı ayıramazdı.
+    #[test]
+    fn etiket_ve_deger_ayrac_ile_ayrilir() {
+        let out = tech_html_to_text("<table><tbody><tr><td>Panel</td><td>IPS</td></tr></tbody></table>");
+        assert_eq!(out, "Panel: IPS");
+    }
+
+    #[test]
+    fn html_varliklari_ve_bos_hucreler_temizlenir() {
+        let html = "<table><tbody>\
+            <tr><td>Ekran&nbsp;Boyutu</td><td>27&quot;</td></tr>\
+            <tr><td>Boş</td><td></td></tr>\
+            <tr><td colspan=\"2\">Tek hücreli satır</td></tr></tbody></table>";
+        let out = tech_html_to_text(html);
+        assert_eq!(out, "Ekran Boyutu: 27\"", "varlık çözülmedi veya boş satır girdi");
+    }
+
+    #[test]
+    fn tablo_yoksa_bos_doner() {
+        assert_eq!(tech_html_to_text("<p>düz metin</p>"), "");
+        assert_eq!(tech_html_to_text(""), "");
+    }
+
     #[test]
     fn pick_exact_sku_ignores_partial_matches() {
         let arr = vec![
@@ -733,6 +855,34 @@ mod tests {
         assert_eq!(r.details, "<p>a</p>");
         assert_eq!(r.extra_details, "<table>t</table>");
         assert_eq!(r.seo_rule_count, Some(7));
+    }
+
+    /// Gerçek mağaza — teknik tablo çekimi ve metne çevrimi. **YALNIZCA OKUMA.**
+    /// `IDEASOFT_DOMAIN=... IDEASOFT_TOKEN=... IDEASOFT_IDS=120448,120283 \
+    ///  cargo test tech_pull_real -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn tech_pull_real() {
+        let domain = std::env::var("IDEASOFT_DOMAIN").expect("IDEASOFT_DOMAIN yok");
+        let token = std::env::var("IDEASOFT_TOKEN").expect("IDEASOFT_TOKEN yok");
+        let ids = std::env::var("IDEASOFT_IDS").expect("IDEASOFT_IDS yok");
+        for id in ids.split(',').filter_map(|s| s.trim().parse::<i64>().ok()) {
+            let urun = fetch_product(&domain, &token, id).await.expect("ürün");
+            let metin = tech_html_to_text(&urun.extra_details);
+            println!(
+                "id {id} · extraDetails {} bayt → {} satır metin",
+                urun.extra_details.len(),
+                metin.lines().count()
+            );
+            for l in metin.lines().take(5) {
+                println!("   {l}");
+            }
+            if !urun.extra_details.trim().is_empty() {
+                assert!(!metin.is_empty(), "tablo var ama metne çevrilemedi (id {id})");
+                // Ayraç yoksa yapılandırıcı etiketle değeri ayıramaz — asıl korunan şey bu.
+                assert!(metin.contains(": "), "etiket/değer ayracı yok (id {id})");
+            }
+        }
     }
 
     /// Gerçek mağaza — **YALNIZCA OKUMA** (canlı veriye yazmaz).

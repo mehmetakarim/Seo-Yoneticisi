@@ -40,6 +40,16 @@ fn now_str() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
+/// IdeaSoft'tan "Getir" sonucu: güncel ürün + ne yapıldığının kullanıcıya dönük özeti.
+///
+/// Mesaj arka uçta kuruluyor çünkü "yazıldı mı, korundu mu, hiç yok muydu" ayrımını yalnızca
+/// burası biliyor. Ön yüz tahmin ederse yanlış söyler.
+#[derive(Debug, Serialize)]
+pub struct IdeasoftPull {
+    pub detail: ProductDetail,
+    pub message: String,
+}
+
 /// Onaylanan hâl ile şu anki feed verisi arasındaki tek alanlık fark.
 #[derive(Debug, Serialize)]
 pub struct FeedFieldDiff {

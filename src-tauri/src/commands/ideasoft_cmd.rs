@@ -116,7 +116,7 @@ pub async fn ideasoft_preview(
 pub async fn ideasoft_pull_keyword(
     state: State<'_, AppState>,
     sku: String,
-) -> Result<ProductDetail, String> {
+) -> Result<IdeasoftPull, String> {
     let (domain, token) = {
         let conn = state.conn.lock().unwrap();
         let d = db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default();
@@ -128,18 +128,54 @@ pub async fn ideasoft_pull_keyword(
     };
     let id = ideasoft_id_for(&state, &sku, &domain, &token).await?;
     let remote = ideasoft::fetch_product(&domain, &token, id).await?;
+    // Teknik tablo IdeaSoft'un "Teknik Özellikler" sekmesinde (`extraDetails`) duruyor ve
+    // XML feed'de YOK — uygulamanın bu veriyi görebildiği tek yol bu çağrı.
+    let tech_text = ideasoft::tech_html_to_text(&remote.extra_details);
+
     let kw = remote.target_keyword.trim().to_string();
-    if kw.is_empty() {
-        return Err("IdeaSoft'ta bu ürün için hedef kelime tanımlı değil.".to_string());
+    if kw.is_empty() && tech_text.is_empty() {
+        return Err(
+            "IdeaSoft'ta bu ürün için hedef kelime ve teknik tablo tanımlı değil.".to_string()
+        );
     }
+
     let conn = state.conn.lock().unwrap();
     ensure_seo_row(&conn, &sku)?;
-    conn.execute(
-        "UPDATE seo_status SET target_keyword = ?2, updated_at = ?3 WHERE sku = ?1",
-        params![sku, kw, now_str()],
-    )
-    .map_err(|e| format!("Hedef kelime kaydedilemedi: {e}"))?;
-    read_detail(&conn, &sku)
+    if !kw.is_empty() {
+        conn.execute(
+            "UPDATE seo_status SET target_keyword = ?2, updated_at = ?3 WHERE sku = ?1",
+            params![sku, kw, now_str()],
+        )
+        .map_err(|e| format!("Hedef kelime kaydedilemedi: {e}"))?;
+    }
+    // ⚠️ Dolu kaynak metnin ÜZERİNE YAZILMAZ: orası kullanıcının elle yapıştırdığı ham veri
+    // olabilir ve geri alınamaz. Boşsa dolduruluyor, doluysa korunuyor — hangisi olduğu
+    // kullanıcıya AÇIKÇA söyleniyor, yoksa "getirdim" deyip getirmemiş oluruz.
+    let mut tech_durum = "";
+    if !tech_text.is_empty() {
+        let yazilan = conn
+            .execute(
+                "UPDATE seo_status SET tech_source_text = ?2, updated_at = ?3
+                 WHERE sku = ?1 AND COALESCE(TRIM(tech_source_text), '') = ''",
+                params![sku, tech_text, now_str()],
+            )
+            .map_err(|e| format!("Teknik tablo kaydedilemedi: {e}"))?;
+        tech_durum = if yazilan > 0 { "yazildi" } else { "korundu" };
+    }
+
+    let message = match (kw.is_empty(), tech_durum) {
+        (false, "yazildi") => format!("Hedef kelime ve teknik tablo getirildi: \"{kw}\""),
+        (false, "korundu") => format!(
+            "Hedef kelime getirildi: \"{kw}\" · teknik tablo alanı zaten dolu olduğu için değiştirilmedi"
+        ),
+        (false, _) => format!("Hedef kelime getirildi: \"{kw}\" · IdeaSoft'ta teknik tablo yok"),
+        (true, "yazildi") => "Teknik tablo getirildi · IdeaSoft'ta hedef kelime tanımlı değil".into(),
+        (true, "korundu") => {
+            "Teknik tablo alanı zaten dolu · IdeaSoft'ta hedef kelime tanımlı değil".into()
+        }
+        _ => "IdeaSoft'ta getirilecek bilgi bulunamadı".into(),
+    };
+    Ok(IdeasoftPull { detail: read_detail(&conn, &sku)?, message })
 }
 
 /// Seçilen parçaları IdeaSoft'a yazar. `parts` ∈ meta | keyword | details | tech.

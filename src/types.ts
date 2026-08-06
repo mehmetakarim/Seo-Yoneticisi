@@ -392,3 +392,9 @@ export interface FeedDiff {
   images_old: string[];
   images_new: string[];
 }
+
+/** IdeaSoft "Getir" sonucu — mesaj arka uçta kuruluyor (bkz. `IdeasoftPull`). */
+export interface IdeasoftPull {
+  detail: ProductDetail;
+  message: string;
+}

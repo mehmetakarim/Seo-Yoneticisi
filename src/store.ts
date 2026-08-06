@@ -757,8 +757,10 @@ export const useStore = defineStore("app", {
       if (!this.selectedSku || this.ideasoftBusy) return;
       this.ideasoftBusy = true;
       try {
-        this.detail = await api.ideasoftPullKeyword(this.selectedSku);
-        this.toast(`Hedef kelime getirildi: "${this.detail.target_keyword ?? ""}"`, "ok");
+        // Ne getirildiği/neyin korunduğu ayrımını arka uç biliyor; mesaj oradan geliyor.
+        const r = await api.ideasoftPullKeyword(this.selectedSku);
+        this.detail = r.detail;
+        this.toast(r.message, "ok");
       } catch (e) {
         this.toast(String(e), "error");
       } finally {

@@ -18,6 +18,10 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 - Ad ve açıklama için eski/yeni metin, görseller için çıkan ve gelen küçük resimler; kaç karakterden kaça gittiği de yazıyor
 - Karşılaştırma son senkrona değil **onay anınıza** göre yapılıyor: arada iki değişiklik olduysa ikisini de görürsünüz
 - Uygulamayı bu sürümden önce tamamladığınız ürünlerde önceki değerler kayıtlı olmadığı için yalnızca değişen alan adı görünür; bundan sonraki değişikliklerde karşılaştırma tam çalışır
+- Yeni: hedef kelime **"Getir"** artık teknik tablo verisini de getiriyor — IdeaSoft'un "Teknik Özellikler" sekmesindeki veri XML feed'de gelmiyordu, uygulama bu veriyi ilk kez görüyor
+- Gelen tablo düz metne çevrilip teknik tablo kaynağına yazılıyor; oradan **"Yapılandır"** ile düzenli tabloya dönüştürebilirsiniz
+- Kaynak alanınız doluysa üzerine yazılmaz — ne yapıldığı (getirildi / korundu / IdeaSoft'ta yok) her seferinde açıkça bildirilir
+- Hedef kelime satırındaki "iki kart da bu kelimeyi kullanır" açıklaması kaldırıldı
 - Düzeltme: uyarı şeridinin üst boşluğu yoktu, başlığa yapışık duruyordu
 
 ## v0.8.2

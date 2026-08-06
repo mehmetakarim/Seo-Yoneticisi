@@ -18,6 +18,7 @@ import type {
   AssistantEvent,
   ChatSessionMeta,
   FeedDiff,
+  IdeasoftPull,
 } from "./types";
 
 export const api = {
@@ -106,7 +107,7 @@ export const api = {
   ideasoftPush: (sku: string, parts: string[]) =>
     invoke<ProductDetail>("ideasoft_push", { sku, parts }),
   ideasoftPullKeyword: (sku: string) =>
-    invoke<ProductDetail>("ideasoft_pull_keyword", { sku }),
+    invoke<IdeasoftPull>("ideasoft_pull_keyword", { sku }),
   needsSetup: () => invoke<boolean>("needs_setup"),
   markSetupDone: () => invoke<void>("mark_setup_done"),
   getSettings: () => invoke<Settings>("get_settings"),

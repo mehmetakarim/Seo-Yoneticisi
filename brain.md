@@ -203,6 +203,36 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    Teknik zemin hazır: gönderim modülü `extraDetails` alanına zaten yazıyor (teknik tablo
    oradan gidiyor), yani iş "yeni yetenek" değil, mevcut gönderime bir parça eklemek.
 
+0as. ✅ **TEKNİK TABLO IDEASOFT'TAN GETİRİLİYOR (v0.8.3).** "Getir" düğmesi hedef kelimeyle
+   birlikte `extraDetails` (IdeaSoft'un "Teknik Özellikler" sekmesi) içeriğini de alıyor,
+   `tech_html_to_text` ile düz metne çevirip `tech_source_text`e yazıyor → "Yapılandır" ile
+   düzenli tabloya dönüşüyor.
+
+   🔬 **Ölçüm — özelliğin değerini bu sayı gösteriyor (2026-08-07):** en yeni 150 üründen
+   **satışta olan 90'ının 85'inde (%94)** IdeaSoft'ta teknik tablo VAR. Uygulamada ise
+   yalnızca 14 üründe tablo vardı. **Bu veri XML feed'de hiç gelmiyor** — uygulamanın
+   göremediği, mağazada hazır duran gerçek içerik.
+
+   🔴 **Kendi ölçüm hatam — ders:** ilk turda `/admin-api/products/{id}` yanıtında
+   `details`/`extraDetails` anahtarlarını **üst düzeyde** aradım, bulamayınca "API bu alanları
+   dönmüyor" sonucuna vardım ve ayrı bir uç (`product_details`) için kod yazdım. Gerçekte
+   alanlar **`detail` (tekil) nesnesinin içinde** ve `fetch_product` bunu zaten okuyordu
+   (`to_remote_reads_nested_detail` testi tam bu yüzden var). Fazladan uç ve fazladan HTTP
+   isteği silindi. **Ders: "alan yok" demeden önce yanıtın TÜM yapısına bakılmalı; iç içe
+   nesneler üst düzey anahtar aramasıyla kaçırılıyor.**
+
+   ⚠️ **İki tablo biçimi var, ikisi de destekleniyor (ölçüldü):**
+   - bizim ürettiğimiz: `<caption>Grup</caption>` + `<th>etiket</th><td>değer</td>`
+   - mağazanın kendi yazdığı: `<thead><th>Grup</th></thead>` + `<td>etiket</td><td>değer</td>`
+     — dokunmadığımız 6 üründen 6'sı bu biçimdeydi, yani **asıl yaygın olan bu**.
+   Düz `html_strip` kullanılamaz: ayraç olmadan "PanelIPS" çıkar ve yapılandırıcı satırı
+   ayıramaz. `tech_html_to_text` "Etiket: Değer" satırları üretiyor (5 test + canlı test).
+
+   ⚠️ **Dolu kaynak metnin üzerine YAZILMIYOR** — orası kullanıcının elle yapıştırdığı ham
+   veri olabilir. Boşsa yazılıyor, doluysa korunuyor ve hangisi olduğu kullanıcıya
+   söyleniyor (mesaj arka uçta kuruluyor: "yazıldı / korundu / IdeaSoft'ta yok" ayrımını
+   yalnızca orası biliyor).
+
 0aq. ✅ **FEED DEĞİŞİKLİĞİ TESPİTİ (v0.8.1, K2).** Senkronda ürünün *üretimi besleyen*
    alanlarından parmak izi alınıyor (`products.feed_fp`); kullanıcı "tamamlandı" dediğinde o
    anki iz damgalanıyor (`seo_status.reviewed_fp`). İkisi ayrışırsa ürün *"feed verisi
