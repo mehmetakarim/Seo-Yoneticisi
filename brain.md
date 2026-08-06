@@ -3,12 +3,15 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-07-31
-**Aktif faz:** v0.8.0 yayında — her SEO aracı kendi ekranında, gruplu navigasyon, Yapay Zekâ
-Asistanı (sohbet geçmişi kalıcı) ve **ilk kurulum sihirbazı**. Uygulama artık gerçekten
-global kullanıma hazır: gömülü varsayılan feed adresi kaldırıldı (bkz. 0ao).
-**Kuyruk:** ~~K1 sihirbaz~~ ✅ v0.8.0 · **K2 feed değişikliği tespiti** (sıradaki) ·
-K3 Schema.org JSON-LD.
+**Son güncelleme:** 2026-08-07
+**Aktif faz:** **v0.8.3 yayında.** Üç kalemlik kuyruk tamamen bitti: kurulum sihirbazı (K1),
+feed değişikliği tespiti + karşılaştırma (K2), Schema.org JSON-LD (K3). Üstüne saha
+geri bildirimiyle gelen iki iş: "Neler değişti?" karşılaştırması ve IdeaSoft'tan teknik
+tablo getirme (0as — ölçüme göre satıştaki ürünlerin **%94'ünde** uygulamanın göremediği
+tablo verisi varmış).
+**Kuyruk: BOŞ.** Açık kalanlar kod işi değil → kod imzalama (maliyet kararı), Gemini kota
+göstergesi (Google sayacı API'den vermiyor), JSON-LD'nin IdeaSoft'a gönderilmesi
+(kullanıcı kararı, koşulları 0ar'de).
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -20,11 +23,15 @@ v0.6.4 = canonical yazma akışı · v0.6.5 = canonical senkron ön koşulu kald
 v0.7.0 = araç ekranları + gruplu navigasyon + Yapay Zekâ Asistanı ·
 v0.7.1 = kenar çubuğu etiketi ·
 v0.7.2 = sohbet geçmişi kalıcı + canonical hedefi satıştaki ürünler ·
-**v0.8.0 = ilk kurulum sihirbazı + varsayılan feed adresi kaldırıldı**
+v0.8.0 = ilk kurulum sihirbazı + varsayılan feed adresi kaldırıldı ·
+⚠️ **v0.8.1 HİÇ YAYINLANMADI** — notları v0.8.2'ye taşındı (gerekçe aşağıda, "Yayın") ·
+v0.8.2 = feed değişikliği tespiti + Schema.org JSON-LD ·
+**v0.8.3 = "Neler değişti?" karşılaştırması + IdeaSoft'tan teknik tablo getirme**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, 81 test) + `src-tauri/src/` (ince Tauri katmanı: `commands.rs`, `lib.rs`).
+bağımlı DEĞİL, **137 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**13 test**; `commands/` 8 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
@@ -35,11 +42,26 @@ Sıra **kullanıcı kararı**, tahmini efor değil. **Kuyruk boş — üç kalem
 
 **K1. İlk kurulum sihirbazı** ✅ **TAMAMLANDI (v0.8.0)** — ayrıntı ve çıkan kusur 0ao/0ap'de.
 
-**K2. Feed değişikliği tespiti** ✅ **TAMAMLANDI (v0.8.1)** — ayrıntı 0aq'da.
+**K2. Feed değişikliği tespiti** ✅ **TAMAMLANDI** — kod v0.8.1'de yazıldı ama o sürüm hiç
+   yayınlanmadı, kullanıcıya **v0.8.2** ile ulaştı. Karşılaştırma ("Neler değişti?") v0.8.3'te
+   eklendi. Ayrıntı 0aq'da.
 
 **K3. Schema.org JSON-LD çıktısı** ✅ **TAMAMLANDI (v0.8.2)** — ayrıntı 0ar'de.
    ⚠️ Kuyruk tanımında `offers` da vardı; **ölçüm bunu çürüttü** — feed'de fiyat alanı yok,
    mağaza fiyatı zaten canlı basıyor. Gerekçe 0ar'de.
+
+### ✅ Kuyruk sonrası — saha testinden gelen işler (v0.8.3, 2026-08-07)
+
+Üçü de kullanıcının uygulamayı gerçek veriyle kullanırken bulduğu şeyler; ikisi kusur
+değil **eksik**ti, biri düpedüz tasarım hatasıydı.
+
+1. **"İçerik hâlâ doğru" diyecektim ama neye bakarak?"** → onay anındaki değerler saklanıp
+   karşılaştırma eklendi (0aq'nun sonu). *Karar vermesi istenen kişiye kararın dayanağı da
+   verilmeli.*
+2. **Uyarı şeridinin boşluğu** → üstte 0, altta 16px ölçüldü. *"Boşluk da bir özelliktir ve
+   uygulama genelinde bu tip hatalar yer almamalı"* (kullanıcı).
+3. **Teknik tablo IdeaSoft'ta duruyordu, uygulama göremiyordu** → 0as. Ölçüm: satıştaki
+   ürünlerin **%94'ünde** veri varmış.
 
 ### 🔍 Eski özellik listesinin denetimi (2026-07-31, kodda doğrulandı)
 
@@ -233,7 +255,7 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    söyleniyor (mesaj arka uçta kuruluyor: "yazıldı / korundu / IdeaSoft'ta yok" ayrımını
    yalnızca orası biliyor).
 
-0aq. ✅ **FEED DEĞİŞİKLİĞİ TESPİTİ (v0.8.1, K2).** Senkronda ürünün *üretimi besleyen*
+0aq. ✅ **FEED DEĞİŞİKLİĞİ TESPİTİ (kod v0.8.1, yayın v0.8.2 — K2).** Senkronda ürünün *üretimi besleyen*
    alanlarından parmak izi alınıyor (`products.feed_fp`); kullanıcı "tamamlandı" dediğinde o
    anki iz damgalanıyor (`seo_status.reviewed_fp`). İkisi ayrışırsa ürün *"feed verisi
    onayınızdan sonra değişti"* diye işaretleniyor. Mantık: `core/src/fingerprint.rs`.
@@ -1258,10 +1280,37 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 7. Türkçe karakter sayımı grapheme bazlı ✅
 
 ## 🗺️ Süreç / operasyon
-- **Testler:** `cd src-tauri && cargo test` (14 test) · gerçek feed: `SEO_FEED_FILE=... cargo test real_feed -- --ignored`
+
+⚠️ Bu bölüm 2026-08-07'de tazelendi; "repo push bekliyor" gibi aylar önce bitmiş maddeler
+duruyordu (repo 2026-07-26'dan beri public).
+
+- **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 13) ·
+  `cargo test -p seo-core` (137) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+  (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
-- **Repo push (bekliyor):** `git init` yapılıp https://github.com/mehmetakarim/seo-yoneticisi 'a push edilecek
-  - `.gitignore` scaffold ile geldi (node_modules, target/, dist/ hariç tutulmalı — kontrol et)
+- **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`
+  `dist/harness.html` · kipler: `?empty=1` `?setup=1` `?changed=1` `?nosnap=1`
+  ⚠️ `npm run build` `dist/`i siler → harness HER ZAMAN derlemeden sonra üretilir.
+
+### Yayın (sürüm çıkarma) — sırayla
+1. CHANGELOG'a `## vX.Y.Z` bölümü (CI **yalnızca etiketle eşleşen** bölümü çıkarır)
+2. Sürüm numarası **5 dosyada**: `package.json`, `package-lock.json` (2 yer),
+   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/core/Cargo.toml`
+3. Commit → `git push origin main` → `git tag -a vX.Y.Z` → `git push origin vX.Y.Z`
+4. CI'ın çıkaracağı notu **etiketlemeden önce** yerelde doğrula:
+   `awk -v tag="## vX.Y.Z" '$0==tag{f=1;next} f&&/^## v/{exit} f{print}' CHANGELOG.md`
+5. Bitince `latest.json`'ı kontrol et: sürüm doğru mu, 7 platformun imzası dolu mu, notlar tam mı
+
+⚠️ **İki sürümü arka arkaya etiketleme.** İki CI koşusu `latest.json`'ı yarıştırır; önce
+biten geç bitene ezdirir ve güncelleyici geriye işaret edebilir. v0.8.1 bu yüzden hiç
+yayınlanmadı, notları v0.8.2'ye taşındı.
+
+🔴 **Etiket push'u tetiklemeyebiliyor (v0.8.3'te yaşandı, 2026-08-07).** Etiket sunucuya
+gitti, Actions açıktı, iş akışı etkindi — ama koşu hiç oluşmadı. Çözüm:
+`gh workflow run release --ref vX.Y.Z`. İş akışı her yerde `github.ref_name` kullandığı için
+sonuç push tetikleyicisiyle **birebir aynı** (notlar, Release adı, varlıklar). Etiketledikten
+sonra koşunun gerçekten başladığını doğrula: `gh run list --limit 1`.
+
 - **Bu dosyayı güncelle:** her faz/önemli karar sonrası "Son güncelleme" + ilgili bölüm
 
 ## 🧩 Açık sorular / kullanıcı kararları bekleyen
