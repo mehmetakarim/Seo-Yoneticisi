@@ -8,7 +8,7 @@
 **Kaynak:** kullanıcının iki not belgesi (vizyon + kod değerlendirmesi) ve bu belgedeki
 iddiaların kodda tek tek doğrulanması.
 
-**Sıradaki faz: B (Tasarım bütünlüğü).**
+**Faz B ✅ tamamlandı (v0.9.0).** Sıradaki faz: **Ö (Ölçüm omurgası).**
 
 ---
 
@@ -93,14 +93,14 @@ dönük doldurulabilir** — "işe yaradı mı?" sorusunun ilk cevabı haftalar 
 
 ---
 
-### Faz B — Tasarım bütünlüğü
+### Faz B — Tasarım bütünlüğü ✅ (v0.9.0)
 
 **Amaç.** Araç ekranlarının tablo/liste yapısını tek ortak bileşende toplamak ve satır
 eylemlerini görünür, genişletilebilir bir yere oturtmak. Premium hissin sürmesi, ekrandan
 ekrana aynı ritmin korunmasına bağlı.
 
 **Kapsam.**
-- Ortak `ToolTable` (+ gerekirse `ToolList` varyantı): sütun tanımı veri-güdümlü, sayısal
+- Ortak `SeoTable` (gruplu varyant dahil): sütun tanımı veri-güdümlü, sayısal
   hizalama (`tabular-nums`), boş/yükleniyor/hata durumları, "daha fazla" davranışı.
 - **Sabit "İşlem" sütunu.** Eylemler veri-güdümlü tanımlanır (ikon + ipucu + görünürlük
   koşulu); satıra göre gizlenir veya pasifleşir; yıkıcı eylem onay ister; **sütun genişliği

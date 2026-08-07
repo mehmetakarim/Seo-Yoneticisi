@@ -17,6 +17,7 @@ import { useStore } from "../../store";
 import Icon from "../Icon.vue";
 import ModalShell from "../ModalShell.vue";
 import ToolShell from "./ToolShell.vue";
+import SeoTable, { type TableCol, type TableRow } from "./SeoTable.vue";
 
 const store = useStore();
 const rows = computed(() => store.opportunity?.eol ?? []);
@@ -33,6 +34,57 @@ const targetOf = (eolUrl: string) => {
   const s = store.successors[eolUrl];
   return s?.sku && s.url ? slugOf(s.url) : "";
 };
+
+const cols: TableCol[] = [
+  { key: "name", label: "Sayfa", type: "text" },
+  { key: "clk", label: "Tıklama", type: "num", emphasis: "down" },
+  { key: "imp", label: "Gösterim", type: "num" },
+  { key: "pos", label: "Konum", type: "num" },
+  { key: "act", label: "İşlem", type: "actions" },
+];
+
+const n = (x: number) => Math.round(x).toString();
+const tableRows = computed<TableRow[]>(() =>
+  rows.value.slice(0, limit.value).map((e) => {
+    const s = store.successors[e.url];
+    const bakiliyor = store.successorBusy === e.url;
+    return {
+      id: e.url,
+      name: e.slug,
+      // Halef sonucu ikincil satırda: eskiden ad hücresinin içine gömülü bir blok halindeydi
+      // ve satır yüksekliğini ekrandan ekrana bozuyordu.
+      sub: bakiliyor
+        ? "Halef aranıyor…"
+        : s
+          ? (s.sku ? `Halef: ${s.name}` : "Uygun halef bulunamadı")
+          : "",
+      subTip: s?.reason,
+      values: { clk: n(e.clicks), imp: n(e.impressions), pos: e.position.toFixed(1) },
+      actions: [
+        {
+          key: "successor",
+          disabled: !!store.successorBusy,
+          tip: bakiliyor ? "Bakılıyor…" : s ? "Halefi yeniden öner" : "Halef öner",
+        },
+        {
+          key: "canonical",
+          disabled: store.canonicalBusy,
+          // ⚠️ Halef bulunamasa da açık: modelin bulamaması hedefin olmadığı anlamına
+          // gelmiyor (saha geri bildirimi). Hedef yoksa seçim modali açılıyor.
+          tip: targetOf(e.url) ? "Canonical ayarla" : "Hedef seç ve ayarla",
+        },
+      ],
+    };
+  }),
+);
+
+/** İşlem sütunundan gelen eylemi ilgili akışa bağlar. */
+function eylem(p: { id: string; key: string }) {
+  const e = rows.value.find((x) => x.url === p.id);
+  if (!e) return;
+  if (p.key === "successor") store.suggestSuccessor(e.url);
+  else if (p.key === "canonical") store.startCanonical(e.slug, targetOf(e.url));
+}
 </script>
 
 <template>
@@ -41,18 +93,14 @@ const targetOf = (eolUrl: string) => {
     empty-text="Katalog dışı sayfa trafiği yok — Google'da sıralanan her ürün sayfası satışta."
   >
     <div class="head">
-      <div class="h-text">
-        <b>{{ rows.length }}</b> sayfa
-        <span class="cost">{{ clicks }} tıklama</span>
-        <p class="note">
-          Bu adresler kataloğunuzda yok ama Google'da hâlâ sıralanıyor — ziyaretçi geliyor,
-          ürünü satın alamıyor. Çözüm genelde güncel nesle <b>301 yönlendirme</b>;
-          yönlendirmeyi IdeaSoft panelinden tanımlamanız gerekir, uygulama bunu yapamaz.
-          Bazı sayfaları bilinçli tutuyor olabilirsiniz — liste öneridir, karar sizin.
-        </p>
-      </div>
+      <p class="note">
+        Bu adresler kataloğunuzda yok ama Google'da hâlâ sıralanıyor — ziyaretçi geliyor,
+        ürünü satın alamıyor. Çözüm genelde güncel nesle <b>301 yönlendirme</b>;
+        yönlendirmeyi IdeaSoft panelinden tanımlamanız gerekir, uygulama bunu yapamaz.
+        Bazı sayfaları bilinçli tutuyor olabilirsiniz — liste öneridir, karar sizin.
+      </p>
       <button
-        class="succ-btn cat-sync"
+        class="cat-sync"
         :disabled="store.catalogBusy"
         data-tip="Tüm kataloğu bir kez çeker (~7 dk). Canonical için GEREKMEZ — uygulama tek satırı anında bulur. Bu yalnızca listenin tamamını hızlandırır."
         @click="store.syncCatalog()"
@@ -66,68 +114,15 @@ const targetOf = (eolUrl: string) => {
       </button>
     </div>
 
-    <div class="card">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th class="c-name">Sayfa</th>
-            <th class="c-num">Tıklama</th>
-            <th class="c-num">Gösterim</th>
-            <th class="c-num">Konum</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="e in rows.slice(0, limit)" :key="e.url">
-            <td class="c-name">
-              <div class="nm">{{ e.slug }}</div>
-              <!-- Halef önerisi: İSTEK ÜZERİNE, tek sayfa için. 2.190 sayfanın tamamı için
-                   model çağırmak günlük kotayı (flash 20/gün) anında tüketirdi. -->
-              <div class="succ">
-                <button
-                  v-if="!store.successors[e.url]"
-                  class="succ-btn"
-                  :disabled="!!store.successorBusy"
-                  @click="store.suggestSuccessor(e.url)"
-                >
-                  <Icon
-                    :name="store.successorBusy === e.url ? 'loader' : 'sparkles'"
-                    :size="11"
-                    :class="{ spin: store.successorBusy === e.url }"
-                  />
-                  {{ store.successorBusy === e.url ? "Bakılıyor…" : "Halef öner" }}
-                </button>
-                <template v-else>
-                  <span v-if="store.successors[e.url].sku" class="succ-ok">
-                    <Icon name="check" :size="11" :stroke-width="2.6" />
-                    {{ store.successors[e.url].name }}
-                  </span>
-                  <span v-else class="succ-none">Uygun halef bulunamadı</span>
-                  <!-- Halef bulunmasa da buton görünür: modelin halef bulamaması hedefin
-                       olmadığı anlamına gelmiyor, karar zaten operatörde. -->
-                  <button
-                    class="succ-btn"
-                    :disabled="store.canonicalBusy"
-                    @click="store.startCanonical(e.slug, targetOf(e.url))"
-                  >
-                    <Icon name="upload" :size="11" />
-                    {{ targetOf(e.url) ? "Canonical ayarla" : "Hedef seç ve ayarla" }}
-                  </button>
-                  <span class="succ-why">{{ store.successors[e.url].reason }}</span>
-                </template>
-              </div>
-            </td>
-            <td class="c-num miss">{{ Math.round(e.clicks) }}</td>
-            <td class="c-num">{{ Math.round(e.impressions) }}</td>
-            <td class="c-num">{{ e.position.toFixed(1) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <div v-if="rows.length > limit" class="more">
-        <a class="link" @click="limit += 50">
-          Sonraki 50'yi göster ({{ rows.length - limit }} kaldı)
-        </a>
-      </div>
-    </div>
+    <SeoTable
+      :cols="cols"
+      :rows="tableRows"
+      :summary="`${rows.length} sayfa satışta değil · ${clicks} tıklama boşa gidiyor`"
+      :count-label="`${tableRows.length} / ${rows.length} satır`"
+      :more-label="rows.length > limit ? `Sonraki 50'yi göster (${rows.length - limit} kaldı)` : ''"
+      @action="eylem"
+      @more="limit += 50"
+    />
 
     <!-- Hedef seçme: halef önerisi boş çıktığında ya da öneri değiştirilmek istendiğinde.
          Yine TEK satır için — toplu seçim yok. -->
@@ -259,44 +254,13 @@ const targetOf = (eolUrl: string) => {
   font-size: 12.5px;
   color: var(--c-text);
 }
-.h-text {
-  min-width: 0;
-}
-.head b {
-  font-weight: 660;
-  font-variant-numeric: tabular-nums;
-}
-.cost {
-  margin-left: 8px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--warn-bg);
-  color: var(--warn-text);
-  font-size: 11px;
-  font-weight: 640;
-  font-variant-numeric: tabular-nums;
-}
 .note {
-  margin: 6px 0 0;
+  flex: 1;
+  margin: 0;
   max-width: 640px;
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--c-soft);
-}
-.more {
-  padding: 10px 16px;
-  border-top: 1px solid var(--c-border-soft);
-  font-size: 12px;
-}
-
-/* Halef önerisi + canonical eylem satırı */
-.succ {
-  margin-top: 5px;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 11px;
 }
 .succ-btn {
   display: inline-flex;
@@ -318,30 +282,20 @@ const targetOf = (eolUrl: string) => {
 .succ-btn:disabled {
   opacity: 0.5;
   cursor: default;
-}
-.succ-ok {
-  display: inline-flex;
-  /* Metin sarınca ikon ortada kalmasın — üste hizalı dursun. */
-  align-items: flex-start;
-  gap: 5px;
-  color: var(--green);
-  font-weight: 580;
-  line-height: 1.4;
-}
-.succ-ok svg {
-  flex: none;
-  margin-top: 2px;
-}
-/* "Halef yok" NÖTR renkte: başarısızlık değil, geçerli bir cevap. */
-.succ-none {
-  color: var(--c-soft);
-  font-weight: 560;
-}
-.succ-why {
-  color: var(--c-faint);
-  line-height: 1.4;
-}
+}/* "Halef yok" NÖTR renkte: başarısızlık değil, geçerli bir cevap. *//* Sayfa düzeyi eylem (satır eylemi DEĞİL) — bu yüzden işlem sütununda değil, başlıkta.
+   Geometri `.succ-btn` ile aynı; ikisi de modal içindeki arama düğmesiyle kardeş. */
 .cat-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px dashed var(--c-border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-soft);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
   flex: none;
   align-self: flex-start;
 }

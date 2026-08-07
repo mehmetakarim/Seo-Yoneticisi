@@ -13,6 +13,14 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.9.0
+- Yeni: SEO araç ekranlarındaki tüm tablolar **tek tasarıma** kavuştu — satır ritmi, sütun hizası ve başlık tipografisi artık ekrandan ekrana aynı
+- Yeni: her satırda **İşlem sütunu** — daha önce yalnızca satıra tıklayarak ulaşılan eylemler artık görünür düğmeler; mağazaya yazan eylemler (canonical) kırmızı
+- Satışta olmayanlar ekranında halef önerisi ve canonical ayarlama satırın sağındaki düğmelere taşındı; halef sonucu sayfa adının altında görünüyor
+- Fırsatlar ekranındaki filtreler etiketlendi (Kategori · Marka · İş durumu · Sebep) — hangi filtrenin ne olduğu artık belli
+- Yarışan sayfalar listesi diğer ekranlarla aynı tablo dilini kullanıyor; sorgu başlıkları altında yarışan sayfalar girintili
+- Uzun listelerde "daha fazla göster", boş filtre sonucu ve yükleniyor görünümü de aynı bileşenden geliyor
+
 ## v0.8.3
 - Yeni: feed değişikliği uyarısında **"Neler değişti?"** — onayladığınız hâl ile şu anki feed verisi yan yana gösteriliyor
 - Ad ve açıklama için eski/yeni metin, görseller için çıkan ve gelen küçük resimler; kaç karakterden kaça gittiği de yazıyor

@@ -226,7 +226,7 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    Teknik zemin hazır: gönderim modülü `extraDetails` alanına zaten yazıyor (teknik tablo
    oradan gidiyor), yani iş "yeni yetenek" değil, mevcut gönderime bir parça eklemek.
 
-0at. 🔴 **ARAÇ EKRANLARINDA STİL SAPMASI — ölçüldü (2026-08-07), Faz B'de kapanacak.**
+0at. ✅ **ARAÇ EKRANLARINDA STİL SAPMASI — ölçüldü ve kapatıldı (Faz B, v0.9.0).**
    Kalem 1/2'de ürün kartlarında düzeltilen hastalığın aynısı, bu kez SEO araç ekranlarında:
 
    | Ne | Durum |
@@ -241,6 +241,21 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    (`store.openProduct`); yalnızca EOL'de görünür düğme var, o da hücreye gömülü yerel
    `.succ-btn`. Kullanıcı tespiti: *"tasarım bütünlüğü için tablo/liste ekranları aynı ya da
    birbiri ile tutarlı olmalı"* + işlem sütunu önerisi.
+
+   **Çözüm:** `tools/SeoTable.vue` — tasarım handoff'undan (Claude Design "Tablo Sistemi")
+   birebir. Sütun türleri: metin · sayı · yüzde · rozet · **değişim** (önce→sonra) · işlem.
+   `<table>` değil **CSS grid**: sütun genişlikleri tür bazlı `minmax`, gruplu varyantta
+   başlık satırı tüm genişliği kaplıyor — tabloyla ikisi de zor.
+
+   🔬 **Doğrulama (tarayıcıda ölçüldü):** beş ekranda başlık hücresi `9px 12px / 11px / 620`,
+   veri hücresi `9px 12px / 12.5px`, ikincil satır üst boşluğu `1px`, **işlem sütunu tam
+   156px** — hepsi birebir aynı. Araç ekranlarında tablo/satır geometrisi tanımlayan yerel
+   CSS kuralı **sıfır**; `styles.css`'teki global `.tbl` bloğu da silindi.
+
+   ⚠️ **İşlem sütununa yalnızca BUGÜN VAR OLAN eylemler bağlandı** (ürünü aç · halef öner ·
+   canonical). `review`/`queue`/`redirect` bileşende tanımlı ama hiçbir ekranda kullanılmıyor:
+   olmayan özellik için kalıcı pasif düğme göstermek gürültüdür. Faz Ö/K/D geldiğinde ekranlar
+   yalnızca `actions` dizisine bir anahtar ekleyecek.
 
    **Ders (üçüncü kez aynı):** kopyalanan geometri sapıyor. Yeni ekran açarken ortak bileşen
    yoksa önce o yazılmalı — sonra toplamak iki kat iş.

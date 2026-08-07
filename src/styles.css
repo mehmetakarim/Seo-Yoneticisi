@@ -89,6 +89,20 @@ textarea, input, button { font-family: inherit; }
    scoped stillere gerek yok. Faz 3'ün dersi: aynı şeyi çok yerde yazmak zamanla sapıyor. */
 .spin { animation: spin 0.8s linear infinite; }
 
+/* Yatay kaydırma çubuğu (dar pencerede geniş tablolar). Dikey `.om-scroll` ile aynı dil;
+   ayrı kural çünkü yükseklik/genişlik farklı eksende. */
+.om-scroll-x::-webkit-scrollbar { height: 9px; }
+.om-scroll-x::-webkit-scrollbar-thumb {
+  background: rgba(140, 140, 150, 0.32);
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.om-scroll-x::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 140, 150, 0.5);
+  background-clip: padding-box;
+}
+
 /* Uyarı şeridi. 5 bileşende ~%90 aynı yazılıydı. Farklılıklar yerel override olarak duruyor
    (ör. uzun metin sarınca ikon üstte kalsın diye `align-items: flex-start`).
    ⚠️ Karıştırmayın: soluk bilgi metni için bu DEĞİL, `.hint` kullanılır. */
@@ -114,28 +128,10 @@ textarea, input, button { font-family: inherit; }
   color: var(--c-faint);
 }
 
-/* Analiz tablosu. Beş analiz ekranı da bu tabloyu kullanıyor; her biri ayrı bileşene
-   taşındığında `scoped` stiller yüzünden kural beş kez kopyalanmak zorunda kalırdı —
-   yani bölme, tam da kaçındığımız tekrarı üretirdi. Bu yüzden global. */
-.tbl { width: 100%; border-collapse: collapse; }
-.tbl th {
-  position: sticky; top: 0; z-index: 1;
-  background: var(--c-input);
-  border-bottom: 1px solid var(--c-border-soft);
-  padding: 9px 12px;
-  font-size: 11px; font-weight: 620; color: var(--c-soft);
-  text-align: left; white-space: nowrap;
-}
-.tbl td {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--c-border-soft);
-  font-size: 12.5px; color: var(--c-text);
-  vertical-align: middle;
-}
-.tbl .c-name { width: 36%; }
-.tbl .c-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-/* Satırın "bedeli" sütunu — kaçırılan tıklama, kayıp. */
-.tbl .miss { font-weight: 660; color: var(--c-text); }
+/* Analiz tablosu buradaydı. Faz B'de `tools/SeoTable.vue` bileşenine taşındı: global kural
+   geometriyi paylaştırıyordu ama her ekran yine kendi `.head`/`.note`/`.more`/`.sku`
+   kopyasını yazıyordu ve bunlar zamanla saptı (brain.md 0at). Artık hem geometri hem
+   işaretleme tek bileşende. */
 
 /* Ad/başlık satırı. ⚠️ Bilinçli olarak `.tbl` altında DEĞİL: tablo hücrelerinde de,
    tablo olmayan listelerde de (yarışan sayfalar, görünmeyenler) kullanılıyor.

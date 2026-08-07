@@ -14,9 +14,9 @@
 import { computed, ref } from "vue";
 import { useStore } from "../../store";
 import { workState, type Opportunity, type OpportunityReason, type WorkState } from "../../types";
-import Icon from "../Icon.vue";
 import AnalysisSection from "../AnalysisSection.vue";
 import ToolShell from "./ToolShell.vue";
+import SeoTable, { type Chip, type TableCol, type TableRow } from "./SeoTable.vue";
 
 const store = useStore();
 const report = computed(() => store.opportunity);
@@ -119,6 +119,89 @@ const REASON: Record<OpportunityReason, { label: string; badge: string; tip: str
   },
 };
 
+const cols: TableCol[] = [
+  { key: "name", label: "Ürün", type: "text" },
+  { key: "durum", label: "Durum", type: "badge" },
+  { key: "imp", label: "Gösterim", type: "num" },
+  { key: "clk", label: "Tıklama", type: "num" },
+  { key: "ctr", label: "CTR", type: "pct" },
+  { key: "pos", label: "Konum", type: "num" },
+  { key: "miss", label: "Kaçırılan", type: "num", emphasis: "down" },
+  { key: "sebep", label: "Sebep", type: "badge" },
+  { key: "act", label: "İşlem", type: "actions" },
+];
+
+const rows = computed<TableRow[]>(() =>
+  filtered.value.map((o) => {
+    const w = WORK[workState(o)];
+    const r = REASON[o.reason];
+    return {
+      id: o.sku,
+      name: o.name,
+      sub: o.sku,
+      badges: {
+        durum: { label: w.label, tone: w.badge, tip: w.tip },
+        sebep: { label: r.label, tone: r.badge, tip: r.tip },
+      },
+      values: {
+        imp: Math.round(o.impressions),
+        clk: Math.round(o.clicks),
+        ctr: `%${pct(o.ctr)}`,
+        pos: o.position.toFixed(1),
+        miss: Math.round(o.missed_clicks),
+      },
+      actions: [{ key: "open" as const }],
+    };
+  }),
+);
+
+/** Kesit çipi: aynı kesite ikinci tıklama filtreyi kaldırır. */
+function sliceChip(kind: "cat" | "brand", name: string, missed: number): Chip {
+  const key = `${kind}:${name}`;
+  return {
+    label: name,
+    count: Math.round(missed),
+    active: sliceFilter.value === key,
+    onClick: () => (sliceFilter.value = sliceFilter.value === key ? "" : key),
+  };
+}
+
+/**
+ * Üst şeritteki çip satırları. Eskiden iş durumu ve sebep tek satırda, aralarında görünmez
+ * bir ayraçla duruyordu; ayrı ve ETİKETLİ satırlar hem daha okunur hem kesitlerle tutarlı.
+ */
+const chipRows = computed(() => [
+  { label: "Kategori", items: topCats.value.map((c) => sliceChip("cat", c.name, c.missed)) },
+  { label: "Marka", items: topBrands.value.map((b) => sliceChip("brand", b.name, b.missed)) },
+  {
+    label: "İş durumu",
+    items: [
+      { label: "Hepsi", count: all.value.length, active: workFilter.value === "all",
+        onClick: () => (workFilter.value = "all") },
+      ...(["untouched", "partial", "worked"] as const).map((w) => ({
+        label: WORK[w].label,
+        count: workCounts.value[w],
+        active: workFilter.value === w,
+        onClick: () => (workFilter.value = workFilter.value === w ? "all" : w),
+      })),
+    ] as Chip[],
+  },
+  {
+    label: "Sebep",
+    items: [
+      ...(["low_ctr", "no_clicks", "second_page"] as const).map((r) => ({
+        label: REASON[r].label,
+        count: reasonCounts.value[r],
+        active: reasonFilter.value === r,
+        onClick: () => (reasonFilter.value = reasonFilter.value === r ? "all" : r),
+      })),
+      ...(anyFilter.value
+        ? [{ label: "Filtreyi temizle", onClick: () => clearFilters() } as Chip]
+        : []),
+    ] as Chip[],
+  },
+]);
+
 const totalMissed = computed(() =>
   Math.round(filtered.value.reduce((s, o) => s + o.missed_clicks, 0)),
 );
@@ -130,137 +213,19 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
     :empty="!all.length && !report?.invisible?.length"
     empty-text="Fırsat bulunamadı — Google'da bulunan ürünlerin tamamı konumuna göre beklenen performansta."
   >
-    <div v-if="all.length" class="head">
-      <b>{{ all.length }}</b> fırsat · yaklaşık <b>{{ totalMissed }}</b> tıklama kaçırılıyor
-    </div>
-
-    <!-- Kesitler: kayıp nerede toplanıyor? Tek tek yerine grup halinde çalışma imkânı. -->
-    <div v-if="all.length" class="slices">
-      <div class="slice-group">
-        <span class="slice-label">Kategori</span>
-        <button
-          v-for="c in topCats"
-          :key="'c' + c.name"
-          class="slice"
-          :class="{ on: sliceFilter === 'cat:' + c.name }"
-          @click="sliceFilter = sliceFilter === 'cat:' + c.name ? '' : 'cat:' + c.name"
-        >
-          {{ c.name }}<b>{{ Math.round(c.missed) }}</b>
-        </button>
-      </div>
-      <div class="slice-group">
-        <span class="slice-label">Marka</span>
-        <button
-          v-for="b in topBrands"
-          :key="'b' + b.name"
-          class="slice"
-          :class="{ on: sliceFilter === 'brand:' + b.name }"
-          @click="sliceFilter = sliceFilter === 'brand:' + b.name ? '' : 'brand:' + b.name"
-        >
-          {{ b.name }}<b>{{ Math.round(b.missed) }}</b>
-        </button>
-      </div>
-    </div>
-
-    <!-- Filtreler: iş durumu ve sebep. ProductList'teki çip deseninin aynısı. -->
-    <div v-if="all.length" class="filters">
-      <button class="filter" :class="{ on: workFilter === 'all' }" @click="workFilter = 'all'">
-        <span>Hepsi</span><span class="count">{{ all.length }}</span>
-      </button>
-      <button
-        v-for="w in (['untouched', 'partial', 'worked'] as const)"
-        :key="w"
-        class="filter"
-        :class="{ on: workFilter === w }"
-        :data-tip="WORK[w].tip"
-        @click="workFilter = w"
-      >
-        <span>{{ WORK[w].label }}</span><span class="count">{{ workCounts[w] }}</span>
-      </button>
-
-      <span class="fsep"></span>
-
-      <button
-        v-for="r in (['low_ctr', 'no_clicks', 'second_page'] as const)"
-        :key="r"
-        class="filter"
-        :class="{ on: reasonFilter === r }"
-        @click="reasonFilter = reasonFilter === r ? 'all' : r"
-      >
-        <span>{{ REASON[r].label }}</span><span class="count">{{ reasonCounts[r] }}</span>
-      </button>
-
-      <button v-if="anyFilter" class="filter clear" @click="clearFilters()">
-        <Icon name="x" :size="12" :stroke-width="2.4" /> Filtreyi temizle
-      </button>
-    </div>
-
-    <div v-if="filtered.length" class="card">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th class="c-name">Ürün</th>
-            <th class="c-work">Durum</th>
-            <th class="c-num">Gösterim</th>
-            <th class="c-num">Tıklama</th>
-            <th class="c-num">CTR</th>
-            <th class="c-num">Konum</th>
-            <th class="c-num">Kaçırılan</th>
-            <th class="c-reason">Sebep</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="o in filtered"
-            :key="o.sku"
-            class="row"
-            :title="`${o.name} — ürüne git`"
-            @click="store.openProduct(o.sku)"
-          >
-            <td class="c-name">
-              <div class="nm">{{ o.name }}</div>
-              <div class="sku">{{ o.sku }}</div>
-            </td>
-            <td class="c-work">
-              <span
-                class="status tip-below"
-                :style="{
-                  background: `var(--badge-${WORK[workState(o)].badge}-bg)`,
-                  color: `var(--badge-${WORK[workState(o)].badge}-c)`,
-                }"
-                :data-tip="WORK[workState(o)].tip"
-              >
-                {{ WORK[workState(o)].label }}
-              </span>
-            </td>
-            <td class="c-num">{{ Math.round(o.impressions) }}</td>
-            <td class="c-num">{{ Math.round(o.clicks) }}</td>
-            <td class="c-num">%{{ pct(o.ctr) }}</td>
-            <td class="c-num">{{ o.position.toFixed(1) }}</td>
-            <td class="c-num miss">{{ Math.round(o.missed_clicks) }}</td>
-            <td class="c-reason">
-              <span
-                class="status tip-below"
-                :style="{
-                  background: `var(--badge-${REASON[o.reason].badge}-bg)`,
-                  color: `var(--badge-${REASON[o.reason].badge}-c)`,
-                }"
-                :data-tip="REASON[o.reason].tip"
-              >
-                {{ REASON[o.reason].label }}
-              </span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Filtre hiçbir satır bırakmadı: sessiz boş tablo bırakma -->
-    <div v-else-if="all.length" class="clean">
-      <Icon name="search" :size="16" :stroke-width="2.2" style="color: var(--c-soft)" />
-      Bu filtrede fırsat yok.
-      <a class="link" @click="clearFilters()">Filtreyi temizle</a>
-    </div>
+    <SeoTable
+      v-if="all.length"
+      :cols="cols"
+      :rows="rows"
+      :chip-rows="chipRows"
+      :state="!rows.length ? 'empty' : 'normal'"
+      :summary="`${all.length} fırsat · yaklaşık ${totalMissed} tıklama kaçırılıyor`"
+      :count-label="`${rows.length} / ${all.length} satır`"
+      empty-label="Bu filtrede fırsat yok"
+      empty-hint="Filtreleri temizleyin veya başka bir kesit seçin."
+      @row="store.openProduct($event)"
+      @action="store.openProduct($event.id)"
+    />
 
     <!-- Google'da hiç görünmeyenler: farklı bir iş, bilinçli olarak ayrı bölüm -->
     <AnalysisSection
@@ -287,35 +252,15 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   </ToolShell>
 </template>
 
-<style scoped>
-.head {
-  margin-bottom: 12px;
-  font-size: 12.5px;
-  color: var(--c-text);
-}
-.head b {
+<style scoped>.head b {
   font-weight: 660;
   font-variant-numeric: tabular-nums;
-}
-.slices {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-.slice-group {
+}.slice-group {
   display: flex;
   align-items: center;
   gap: 5px;
   flex-wrap: wrap;
-}
-.slice-label {
-  font-size: 11px;
-  color: var(--c-faint);
-  width: 54px;
-  flex: none;
-}
-.slice {
+}.slice {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -328,31 +273,13 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   cursor: pointer;
   white-space: nowrap;
   font-family: inherit;
-}
-.slice:hover {
-  background: var(--c-hover);
-}
-.slice.on {
+}.slice.on {
   border-color: var(--accent);
   background: var(--accent-tint);
   color: var(--accent);
-}
-.slice b {
-  font-variant-numeric: tabular-nums;
-  color: var(--c-soft);
-  font-weight: 640;
-}
-.slice.on b {
+}.slice.on b {
   color: var(--accent);
-}
-.filters {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.filter {
+}.filter {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -367,71 +294,27 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   cursor: pointer;
   white-space: nowrap;
   font-family: inherit;
-}
-.filter:hover {
-  background: var(--c-hover);
-}
-.filter.on {
+}.filter.on {
   border-color: var(--accent);
   background: var(--accent-tint);
   color: var(--accent);
   font-weight: 580;
-}
-.filter .count {
-  font-size: 11px;
-  padding: 0 6px;
-  border-radius: 20px;
-  background: var(--c-chip);
-  color: var(--c-soft);
-  font-weight: 600;
-}
-.filter.on .count {
+}.filter.on .count {
   background: rgba(255, 255, 255, 0.55);
   color: var(--accent);
-}
-.fsep {
-  width: 1px;
-  height: 20px;
-  background: var(--c-border);
-  margin: 0 4px;
-}
-.status {
+}.status {
   display: inline-flex;
   align-items: center;
   padding: 3px 9px;
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 600;
-}
-.c-work {
-  white-space: nowrap;
-}
-.c-reason {
+}.c-reason {
   text-align: right;
   white-space: nowrap;
-}
-.row {
-  cursor: pointer;
-}
-.row:hover {
+}.row:hover {
   background: var(--c-hover);
-}
-.sku {
-  font-size: 10.5px;
-  color: var(--c-faint);
-  margin-top: 1px;
-}
-.clean {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 16px 18px;
-  font-size: 12.5px;
-  color: var(--c-mid);
-  background: var(--ok-soft-bg);
-  border-radius: 11px;
-}
-.link {
+}link {
   color: var(--accent);
   cursor: pointer;
   font-weight: 560;
