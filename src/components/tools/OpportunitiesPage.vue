@@ -11,7 +11,7 @@
  * edecek kadar büyük değil. Yine de ayrı bir bölüm, çünkü çözümü farklı: bu bir meta işi
  * değil, indeksleme işi.
  */
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useStore } from "../../store";
 import { workState, type Opportunity, type OpportunityReason, type WorkState } from "../../types";
 import AnalysisSection from "../AnalysisSection.vue";
@@ -20,6 +20,7 @@ import SeoTable, { type Chip, type TableCol, type TableRow } from "./SeoTable.vu
 
 const store = useStore();
 const report = computed(() => store.opportunity);
+onMounted(() => void store.loadOutcomes());
 const all = computed<Opportunity[]>(() => report.value?.opportunities ?? []);
 
 // --- Filtreler ---
@@ -128,6 +129,9 @@ const cols: TableCol[] = [
   { key: "pos", label: "Konum", type: "num" },
   { key: "miss", label: "Kaçırılan", type: "num", emphasis: "down" },
   { key: "sebep", label: "Sebep", type: "badge" },
+  // Ölçüm omurgası (Faz Ö): gönderim sonrası ne olduğu. Rozet sütunu Faz B'de hazırdı,
+  // ekran yalnızca bu satırı ve `sonuc` rozetini ekliyor.
+  { key: "sonuc", label: "Sonuç", type: "badge" },
   { key: "act", label: "İşlem", type: "actions" },
 ];
 
@@ -142,6 +146,14 @@ const rows = computed<TableRow[]>(() =>
       badges: {
         durum: { label: w.label, tone: w.badge, tip: w.tip },
         sebep: { label: r.label, tone: r.badge, tip: r.tip },
+        // Rozet yoksa "—": bu ürün için mağazaya gönderim kaydı yok, ölçülemiyor.
+        sonuc: store.outcomeBadges[o.sku]
+          ? {
+              label: store.outcomeBadges[o.sku].label,
+              tone: store.outcomeBadges[o.sku].tone,
+              tip: store.outcomeBadges[o.sku].tip,
+            }
+          : { label: "—", tone: "tamamlandi", tip: "Mağazaya gönderim kaydı yok — ölçülemiyor" },
       },
       values: {
         imp: Math.round(o.impressions),

@@ -21,7 +21,12 @@ const report = computed(() => store.opportunity);
 
 onMounted(() => {
   if (!store.opportunity) void store.loadOpportunityCache();
+  void store.loadOutcomes();
 });
+
+const sonuc = computed(() => store.outcomeSummary);
+/** Henüz hiç dönem yoksa kullanıcıya "geçmişi getir" düğmesi gösteriliyor. */
+const gecmisVar = computed(() => (sonuc.value?.snapshots ?? 0) > 0);
 
 const missed = computed(() =>
   Math.round((report.value?.opportunities ?? []).reduce((s, o) => s + o.missed_clicks, 0)),
@@ -138,6 +143,71 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
       </div>
     </div>
 
+    <!-- Sonuçlar: "yaptığımız iş işe yaradı mı?" — ölçüm omurgası (Faz Ö) -->
+    <div class="sum-card sonuc-card">
+      <div class="strip">
+        <div class="strip-main">
+          <template v-if="gecmisVar && sonuc">
+            <div class="metrics">
+              <div class="metric">
+                <span class="m-val">{{ sonuc.measured_events }}</span>
+                <span class="m-lab">gönderim izleniyor</span>
+              </div>
+              <span class="m-sep"></span>
+              <div class="metric">
+                <span class="m-val" :class="{ ok: sonuc.improved > 0 }">{{ sonuc.improved }}</span>
+                <span class="m-lab">iyileşti</span>
+              </div>
+              <div class="metric">
+                <span class="m-val">{{ sonuc.flat }}</span>
+                <span class="m-lab">değişmedi</span>
+              </div>
+              <div class="metric">
+                <span class="m-val" :class="{ loss: sonuc.worse > 0 }">{{ sonuc.worse }}</span>
+                <span class="m-lab">geriledi</span>
+              </div>
+              <span class="m-sep"></span>
+              <div class="metric">
+                <span class="m-val">{{ sonuc.measuring }}</span>
+                <span class="m-lab">ölçülüyor</span>
+              </div>
+            </div>
+            <div class="meta">
+              <!-- ⚠️ Nedensellik iddia edilmiyor: "sayesinde" değil, "sonrasında". -->
+              {{ sonuc.snapshots }} dönem kayıtlı ({{ sonuc.oldest_window }} tarihinden beri) ·
+              gönderim sonrası net
+              <b :class="sonuc.net_delta_clicks >= 0 ? 'ok' : 'loss'">
+                {{ sonuc.net_delta_clicks >= 0 ? "+" : "" }}{{ Math.round(sonuc.net_delta_clicks) }}
+              </b>
+              tıklama · etkinin görünmesi gönderimden sonra en az 21 gün alır
+            </div>
+          </template>
+          <template v-else>
+            <div class="metrics">
+              <div class="metric"><span class="m-lab strong">Sonuç takibi kapalı</span></div>
+            </div>
+            <div class="meta">
+              Search Console geçmişini bir kez getirin — yaptığınız gönderimlerin öncesi ve
+              sonrası karşılaştırılabilsin. Son 12 ay çekilir, yaklaşık yarım dakika sürer.
+            </div>
+          </template>
+        </div>
+        <button
+          v-if="!gecmisVar"
+          class="run"
+          :disabled="store.seedBusy"
+          @click="store.seedMetricHistory()"
+        >
+          <Icon
+            :name="store.seedBusy ? 'loader' : 'chartLine'"
+            :size="15"
+            :class="{ spin: store.seedBusy }"
+          />
+          {{ store.seedBusy ? "Geçmiş getiriliyor…" : "Geçmişi getir" }}
+        </button>
+      </div>
+    </div>
+
     <div v-if="store.opportunityError" class="err">
       <Icon name="alert" :size="14" />
       <span>{{ store.opportunityError }}</span>
@@ -222,6 +292,24 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
 }
 .m-val.loss {
   color: var(--red);
+}
+.m-val.ok {
+  color: var(--green);
+}
+.meta b.ok {
+  color: var(--green);
+}
+.meta b.loss {
+  color: var(--red);
+}
+.m-lab.strong {
+  font-weight: 620;
+  color: var(--c-text);
+}
+/* Sonuç şeridi özet şeridinin kardeşi; ayrı kart olması bilinçli — biri "bugün ne var",
+   diğeri "dün ne yaptık, ne oldu" sorusunu cevaplıyor. */
+.sonuc-card {
+  margin-bottom: 14px;
 }
 .m-lab {
   font-size: 12.5px;

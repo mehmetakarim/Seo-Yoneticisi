@@ -210,6 +210,8 @@ pub async fn ideasoft_push(
         params![sku, now_str()],
     )
     .map_err(|e| format!("Gönderim zamanı kaydedilemedi: {e}"))?;
+    // İçerik mağazada yayına çıktı → Google'ın göreceği değişiklik, ölçülebilir olay.
+    log_event(&conn, &sku, "ideasoft_push", true);
     read_detail(&conn, &sku)
 }
 
@@ -593,6 +595,17 @@ pub async fn apply_canonical(
         let _ = conn.execute(
             "UPDATE ideasoft_catalog SET canonical = ?2 WHERE slug = ?1",
             params![eol_slug.to_lowercase(), target],
+        );
+        // Mağazaya yazılan ikinci olay türü. ⚠️ Ölü sayfanın sku'su yok; olay HEDEF ürüne
+        // değil, canonical'ı değişen sayfaya ait — sonuç o adres üzerinden ölçülecek.
+        let _ = conn.execute(
+            "INSERT INTO work_events (at, sku, url, kind, reaches_store, payload_json)
+             VALUES (?1, NULL, (SELECT url FROM ideasoft_catalog WHERE slug = ?2), 'canonical_set', 1, ?3)",
+            params![
+                now_str(),
+                eol_slug.to_lowercase(),
+                serde_json::json!({ "target": target }).to_string()
+            ],
         );
     }
     Ok(target)

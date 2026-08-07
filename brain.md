@@ -226,6 +226,45 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    Teknik zemin hazır: gönderim modülü `extraDetails` alanına zaten yazıyor (teknik tablo
    oradan gidiyor), yani iş "yeni yetenek" değil, mevcut gönderime bir parça eklemek.
 
+0au. ✅ **ÖLÇÜM OMURGASI (v0.10.0, Faz Ö).** "İşe yaradı mı?" sorusu artık cevaplanıyor.
+   `metric_snapshots` + `metric_page_rows` (değiştirilemez GSC anlık görüntüleri) +
+   `work_events` (ne yaptık, ne zaman). Sonuç **saklanmıyor, istendiğinde hesaplanıyor**
+   (`core/src/metrics.rs::outcome`) — saklanan sonuç yeni görüntü gelince bayatlar.
+
+   🔑 **Merkezi kural: ölçülen olay, mağazaya ULAŞAN olaydır.** Yerel "tamamlandı"
+   işaretlemesi Google'ın gördüğünü değiştirmiyor; yalnızca `ideasoft_push` ve
+   `canonical_set` puanlanıyor. ⚠️ Yan etkisi dürüstçe söyleniyor: içeriği elle kopyalayıp
+   yapıştıran kullanıcı için olay oluşmuyor → o ürün "ölçülemiyor" diyor, sessizce boş
+   kalmıyor.
+
+   🔬 **Dört ölçüm, dördü de tasarımı değiştirdi (2026-08-07):**
+
+   1. **Yerel damgalar geriye dönük dolum için YETERSİZ.** Yol haritası "mevcut damgalardan
+      doldurulabilir" diyordu; gerçek: `*_history_json` **toplam 4 girdi**, `updated_at` tek
+      ve değişken alan. Gerçek olay damgası taşıyan tek alan `ideasoft_pushed_at`.
+   2. ✅ **Ama geçmiş GSC'de var:** `page_stats_range` ile **17 ay** geriye veri geliyor,
+      28 günlük pencere 1,3–2,2 sn. 12 pencere **30,7 saniyede** tohumlandı.
+   3. **Satır eşiği ölçülerek seçildi:** `tıklama > 0 VEYA gösterim ≥ 10` → satırların %34'ü,
+      tıklamaların **%100'ü**. Gerçek tohumlama: 35.062 satır, **DB 6,2 → 13,6 MB**
+      (planda +2,9 MB tahmin edilmişti; eski pencerelerde satır sayısı daha yüksek çıktı).
+   4. 🔴 **Çakışan pencere tuzağı:** ilk tasarım "son görüntü ≥7 günse yenisini al" diyordu.
+      28 günlük pencerelerle bu **%75 çakışan** pencereler ve yılda ~18 MB demek. Pencereler
+      **döşendi** (`next_window`): yılda ~5 MB ve iki pencere kıyaslaması elma-elma.
+
+   ⚠️ **İlk çalıştırmada 72 olayın hepsi "ölçülüyor" çıktı — kusur değil, gerçek.** Gönderimlerin
+   tamamı 26 Temmuz–7 Ağustos arasında yapılmış; takip penceresi için gönderimden 21 gün sonra
+   BAŞLAYAN bir pencere gerekiyor, o pencere Eylül ortasında oluşacak. Eşik kalibrasyonu
+   (iyileşti/geriledi sınırları) bu yüzden gerçek dağılımla değil, gerekçeli varsayılanla
+   bırakıldı: **ölçülecek veri oluşunca kalibre edilmeli.**
+
+   ⚠️ Eşikte **iki koşul birden** aranıyor (≥%20 VE ≥3 tıklama): yalnızca oran bakılsaydı
+   1→2 tıklama "%100 iyileşme", yalnızca mutlak fark bakılsaydı 400→403 "iyileşme" sayılırdı.
+
+   🔴 **Faz B'de kaldırdığım `min-width` modeli geri geldi ve yine ısırdı.** Fırsatlar 10.
+   sütuna (Sonuç) çıkınca elle hesaplanan toplam 972px dedi, gerçek içerik 865px'ti ve ekran
+   boşuna yatay kaydırma açtı. **Kaldırıldı:** grid izleri zaten `min-content` tabanlı, ikinci
+   bir model tutmak gereksiz ve yanlış. Ders: aynı kısıtı iki yerde modelleme.
+
 0at. ✅ **ARAÇ EKRANLARINDA STİL SAPMASI — ölçüldü ve kapatıldı (Faz B, v0.9.0).**
    Kalem 1/2'de ürün kartlarında düzeltilen hastalığın aynısı, bu kez SEO araç ekranlarında:
 

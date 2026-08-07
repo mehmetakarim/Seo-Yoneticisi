@@ -13,6 +13,15 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.10.0
+- Yeni: **sonuç takibi** — "yaptığım iş işe yaradı mı?" sorusu artık cevaplanıyor. Search Console geçmişi bir kez getiriliyor, mağazaya yaptığınız gönderimlerin öncesi ve sonrası karşılaştırılıyor
+- Genel Bakış'ta **Sonuçlar şeridi**: kaç gönderim izleniyor, kaçı iyileşti/değişmedi/geriledi, net kaç tıklama
+- Fırsatlar tablosuna **Sonuç sütunu** — hangi üründe gönderim sonrası ne olduğu satırda görünüyor
+- Ürün ekranında **Geçmiş ve sonuç** kartı: ne yaptınız, ne zaman, sonra ne oldu
+- Ölçülen olay **mağazaya ulaşan** olaydır: yerel "tamamlandı" işaretlemesi Google'ın gördüğünü değiştirmediği için puanlanmıyor, yalnızca geçmişte görünüyor
+- İçeriği elle kopyalayıp yapıştırdığınız ürünler **ölçülemiyor** ve bu açıkça yazılıyor — gönderim düğmesini kullanırsanız sonraki değişikliğin etkisi ölçülür
+- Nedensellik iddia edilmiyor: "bu iş sayesinde arttı" değil, "gönderimden sonraki dönemde arttı". Etkinin görünmesi en az 21 gün alıyor
+
 ## v0.9.0
 - Yeni: SEO araç ekranlarındaki tüm tablolar **tek tasarıma** kavuştu — satır ritmi, sütun hizası ve başlık tipografisi artık ekrandan ekrana aynı
 - Yeni: her satırda **İşlem sütunu** — daha önce yalnızca satıra tıklayarak ulaşılan eylemler artık görünür düğmeler; mağazaya yazan eylemler (canonical) kırmızı

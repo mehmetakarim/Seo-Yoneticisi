@@ -16,6 +16,8 @@ import type {
   CatalogMatch,
   ChatMessage,
   ChatSessionMeta,
+  OutcomeSummary,
+  OutcomeBadge,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -80,6 +82,10 @@ interface State {
   chatSessions: ChatSessionMeta[];
   techStructuring: boolean;
   techDropped: string[];
+  /** Ölçüm omurgası (Faz Ö) — sonuç özeti ve satır rozetleri. */
+  outcomeSummary: OutcomeSummary | null;
+  outcomeBadges: Record<string, OutcomeBadge>;
+  seedBusy: boolean;
   ideasoftBusy: boolean;
   ideasoftPreview: IdeasoftPreview | null;
   ideasoftParts: string[];
@@ -136,6 +142,9 @@ export const useStore = defineStore("app", {
     chatSessions: [],
     techStructuring: false,
     techDropped: [],
+    outcomeSummary: null,
+    outcomeBadges: {},
+    seedBusy: false,
     ideasoftBusy: false,
     ideasoftPreview: null,
     ideasoftParts: [],
@@ -904,6 +913,42 @@ export const useStore = defineStore("app", {
     },
 
     /// "Baktım, içerik hâlâ doğru" — bayrağı düşürür, içeriğe dokunmaz.
+    /**
+     * Sonuç verisini yükler. Ölçüm omurgası yerel veritabanından okunuyor — GSC çağrısı yok,
+     * bu yüzden ekran açılışında çağrılması ucuz.
+     */
+    async loadOutcomes() {
+      try {
+        const [ozet, rozetler] = await Promise.all([
+          api.getOutcomeSummary(),
+          api.getOutcomeBadges(),
+        ]);
+        this.outcomeSummary = ozet;
+        this.outcomeBadges = Object.fromEntries(rozetler.map((b) => [b.sku, b]));
+      } catch (e) {
+        // Sessiz: sonuç verisi yardımcı bir katman, ekranı düşürmemeli.
+        console.warn("sonuç verisi okunamadı", e);
+      }
+    },
+
+    /** Geçmişi GSC'den tohumlar (bir kez; tekrar çalıştırmak zararsız). */
+    async seedMetricHistory() {
+      if (this.seedBusy) return;
+      this.seedBusy = true;
+      try {
+        const r = await api.seedMetricHistory();
+        this.toast(
+          `${r.snapshots_added} dönem eklendi · ${r.events_backfilled} geçmiş gönderim işlendi`,
+          "ok",
+        );
+        await this.loadOutcomes();
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.seedBusy = false;
+      }
+    },
+
     async dismissFeedChange() {
       if (!this.selectedSku) return;
       await api.markFeedReviewed(this.selectedSku);

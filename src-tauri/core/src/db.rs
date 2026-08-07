@@ -58,6 +58,50 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           key TEXT PRIMARY KEY,
           value TEXT
         );
+
+        -- ===== Ölçüm omurgası (Faz Ö) =====
+        -- ⚠️ Anlık görüntüler DEĞİŞTİRİLEMEZ. Fırsat raporu tek bir `settings` anahtarına
+        -- yazılıyordu ve her analiz bir öncekini siliyordu; "işe yaradı mı?" sorusunun
+        -- cevapsız kalmasının sebebi buydu. Buraya yalnızca eklenir, güncellenmez.
+        CREATE TABLE IF NOT EXISTS metric_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          captured_at TEXT NOT NULL,
+          window_start TEXT NOT NULL,
+          window_end TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'gsc',
+          rows INTEGER NOT NULL DEFAULT 0,
+          clicks REAL NOT NULL DEFAULT 0,
+          impressions REAL NOT NULL DEFAULT 0,
+          UNIQUE (window_start, window_end)
+        );
+
+        -- Satır eşiği ÖLÇÜLEREK seçildi (bkz. `metrics::kept`): tıklama > 0 veya
+        -- gösterim >= 10. Gerçek veride satırların %34'ü tutuluyor ama tıklamaların
+        -- %100'ü kapsanıyor — 12 anlık görüntü 8,7 MB yerine 2,9 MB.
+        CREATE TABLE IF NOT EXISTS metric_page_rows (
+          snapshot_id INTEGER NOT NULL REFERENCES metric_snapshots(id) ON DELETE CASCADE,
+          url TEXT NOT NULL,
+          sku TEXT,
+          clicks REAL NOT NULL DEFAULT 0,
+          impressions REAL NOT NULL DEFAULT 0,
+          position REAL NOT NULL DEFAULT 0,
+          PRIMARY KEY (snapshot_id, url)
+        );
+        CREATE INDEX IF NOT EXISTS idx_page_rows_sku ON metric_page_rows(sku);
+
+        -- "Ne yaptık, ne zaman". ⚠️ `reaches_store` merkezi kural: yalnızca Google'ın
+        -- göreceği değişiklikler (gönderim, canonical) puanlanıyor; yerel "tamamlandı"
+        -- işaretleri zaman çizelgesinde bağlam olarak duruyor.
+        CREATE TABLE IF NOT EXISTS work_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          at TEXT NOT NULL,
+          sku TEXT,
+          url TEXT,
+          kind TEXT NOT NULL,
+          reaches_store INTEGER NOT NULL DEFAULT 0,
+          payload_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_work_events_sku ON work_events(sku, at);
         "#,
     )
     .map_err(|e| format!("Şema oluşturulamadı: {e}"))?;

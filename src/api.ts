@@ -19,11 +19,19 @@ import type {
   ChatSessionMeta,
   FeedDiff,
   IdeasoftPull,
+  OutcomeSummary,
+  OutcomeBadge,
+  ProductTimeline,
+  SeedResult,
 } from "./types";
 
 export const api = {
   syncFeed: () => invoke<SyncSummary>("sync_feed"),
   getLastSync: () => invoke<SyncSummary | null>("get_last_sync"),
+  seedMetricHistory: () => invoke<SeedResult>("seed_metric_history"),
+  getOutcomeSummary: () => invoke<OutcomeSummary>("get_outcome_summary"),
+  getOutcomeBadges: () => invoke<OutcomeBadge[]>("get_outcome_badges"),
+  getProductTimeline: (sku: string) => invoke<ProductTimeline>("get_product_timeline", { sku }),
   getFeedDiff: (sku: string) => invoke<FeedDiff>("get_feed_diff", { sku }),
   getJsonld: (sku: string) => invoke<string>("get_jsonld", { sku }),
   markFeedReviewed: (sku: string) => invoke<void>("mark_feed_reviewed", { sku }),

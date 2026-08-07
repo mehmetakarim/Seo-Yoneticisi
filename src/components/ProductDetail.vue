@@ -11,6 +11,7 @@ import ImageScoreCard from "./ImageScoreCard.vue";
 import TechTableCard from "./TechTableCard.vue";
 import SchemaCard from "./SchemaCard.vue";
 import FeedChangeNotice from "./FeedChangeNotice.vue";
+import OutcomeTimeline from "./OutcomeTimeline.vue";
 import IdeasoftPushModal from "./IdeasoftPushModal.vue";
 
 const store = useStore();
@@ -196,6 +197,9 @@ async function openProduct() {
 
       <!-- JSON-LD teknik tablodan besleniyor → hemen onun altında -->
       <SchemaCard />
+
+      <!-- "Ne yaptık, sonra ne oldu" — en altta: geçmiş, üretim kartlarının ardından okunur -->
+      <OutcomeTimeline />
     </div>
 
     <div v-else class="no-sel">

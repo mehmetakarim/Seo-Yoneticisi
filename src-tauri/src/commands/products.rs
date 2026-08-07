@@ -290,7 +290,9 @@ fn build_feed_diff(
 #[tauri::command]
 pub fn mark_feed_reviewed(state: State<'_, AppState>, sku: String) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
-    mark_reviewed(&conn, &sku)
+    mark_reviewed(&conn, &sku)?;
+    log_event(&conn, &sku, "feed_ack", false);
+    Ok(())
 }
 
 #[tauri::command]
@@ -308,6 +310,9 @@ pub fn mark_meta_done(state: State<'_, AppState>, sku: String) -> Result<String,
     .map_err(|e| format!("SEO durumu güncellenemedi: {e}"))?;
     if next == "done" {
         mark_reviewed(&conn, &sku)?;
+        // ⚠️ `reaches_store = false`: yerel işaretleme Google'ın gördüğünü değiştirmiyor.
+        // Zaman çizelgesinde bağlam olarak duruyor, sonuç puanlamasına girmiyor.
+        log_event(&conn, &sku, "meta_done", false);
     }
     Ok(next.to_string())
 }
@@ -327,6 +332,9 @@ pub fn mark_details_done(state: State<'_, AppState>, sku: String) -> Result<Stri
     .map_err(|e| format!("SEO durumu güncellenemedi: {e}"))?;
     if next == "done" {
         mark_reviewed(&conn, &sku)?;
+        // ⚠️ `reaches_store = false`: yerel işaretleme Google'ın gördüğünü değiştirmiyor.
+        // Zaman çizelgesinde bağlam olarak duruyor, sonuç puanlamasına girmiyor.
+        log_event(&conn, &sku, "details_done", false);
     }
     Ok(next.to_string())
 }

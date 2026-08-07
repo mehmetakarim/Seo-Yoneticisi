@@ -205,12 +205,36 @@ pub async fn page_stats_offset(
     offset_days: i64,
     limit: u32,
 ) -> Result<Vec<PageStat>, String> {
-    let token = access_token(client, sa_json).await?;
     let end = chrono::Utc::now().date_naive() - chrono::Duration::days(offset_days);
     let start = end - chrono::Duration::days(days);
+    page_stats_range(
+        client,
+        sa_json,
+        site_url,
+        &start.format("%Y-%m-%d").to_string(),
+        &end.format("%Y-%m-%d").to_string(),
+        limit,
+    )
+    .await
+}
+
+/// `page_stats`'ın **açık tarih aralıklı** sürümü — ölçüm omurgasının anlık görüntüleri için.
+///
+/// Kaydırma yerine doğrudan `start`/`end` alıyor: geçmişi tohumlarken pencereler
+/// `metrics::windows` tarafından hesaplanıyor ve buraya olduğu gibi veriliyor.
+/// ⚠️ Ölçüldü (2026-08-07): GSC **17 ay** geriye veri veriyor, 28 günlük pencere 1,3–2,2 sn.
+pub async fn page_stats_range(
+    client: &reqwest::Client,
+    sa_json: &str,
+    site_url: &str,
+    start: &str,
+    end: &str,
+    limit: u32,
+) -> Result<Vec<PageStat>, String> {
+    let token = access_token(client, sa_json).await?;
     let body = serde_json::json!({
-        "startDate": start.format("%Y-%m-%d").to_string(),
-        "endDate": end.format("%Y-%m-%d").to_string(),
+        "startDate": start,
+        "endDate": end,
         "dimensions": ["page"],
         "rowLimit": limit,
     });

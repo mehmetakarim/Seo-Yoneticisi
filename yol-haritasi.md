@@ -8,7 +8,7 @@
 **Kaynak:** kullanıcının iki not belgesi (vizyon + kod değerlendirmesi) ve bu belgedeki
 iddiaların kodda tek tek doğrulanması.
 
-**Faz B ✅ tamamlandı (v0.9.0).** Sıradaki faz: **Ö (Ölçüm omurgası).**
+**Faz B ✅ v0.9.0 · Faz Ö ✅ v0.10.0.** Sıradaki faz: **A (Asistan bağlam seçimi).**
 
 ---
 
@@ -124,7 +124,7 @@ promptu mevcut ekran görüntüleriyle birlikte verilecek.
 
 ---
 
-### Faz Ö — Ölçüm omurgası
+### Faz Ö — Ölçüm omurgası ✅ (v0.10.0)
 
 **Amaç.** "Bugün 60 fırsat var" diyebiliyoruz; "3 hafta önce 80'di, 20'sini kapattık, 12'si
 gerçekten iyileşti" diyemiyoruz. Anlık fotoğraf var, film yok.

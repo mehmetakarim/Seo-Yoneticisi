@@ -143,18 +143,25 @@ function track(col: TableCol): string {
   if (col.type === "actions") return "156px";
   if (col.w) return col.w;
   if (col.type === "text") return "minmax(180px, 36%)";
-  if (col.type === "badge") return "minmax(112px, max-content)";
+  // Rozet sütunu içeriği kadar: "—" ile "Dokunulmamış" arasında 70px fark var, sabit
+  // taban ikisinden birine haksızlık ediyor.
+  if (col.type === "badge") return "minmax(min-content, max-content)";
   if (col.type === "change") return "minmax(104px, 1fr)";
   return "minmax(min-content, 1fr)";
 }
 /** Yatay kaydırmanın devreye gireceği eşik için kaba alt sınırlar (min-content tahmini 60px). */
-const MIN: Record<string, number> = { actions: 156, text: 180, badge: 112, change: 104 };
-
 const grid = computed(() => props.cols.map(track).join(" "));
-/** Dar pencerede sütunlar ezilmesin: bu genişliğin altında yatay kaydırma devreye girer. */
-const minWidth = computed(
-  () => props.cols.reduce((s, c) => s + (MIN[c.type] ?? 60), 0) + "px",
-);
+
+/**
+ * ⚠️ Burada **`min-width` YOK** — bilinçli.
+ *
+ * Önce elle hesaplanan bir toplam (`sum(MIN[type])`) inline `min-width` olarak veriliyordu.
+ * Bu, grid'in zaten yaptığı işin ikinci ve DAHA KÖTÜ bir modeliydi: Fırsatlar ekranı 10
+ * sütuna çıkınca tahmin 972px dedi, gerçek içerik 865px'ti ve ekran boşuna yatay kaydırma
+ * açtı (ölçüldü, 2026-08-07). Grid izleri `min-content` tabanlı olduğu için sütunlar zaten
+ * içeriğin altına inemiyor; toplam kapsayıcıyı aşarsa `overflow-x` kendiliğinden devreye
+ * giriyor. Tek doğruluk kaynağı grid.
+ */
 
 const isNormal = computed(() => props.state === "normal" || props.state === "error");
 const isEmpty = computed(() => props.state === "empty");
@@ -264,7 +271,7 @@ const skeletons = computed(() =>
     </div>
 
     <div class="scroll om-scroll-x">
-      <div :style="{ minWidth }">
+      <div>
         <div v-if="!isEmpty" class="head" :style="{ gridTemplateColumns: grid }">
           <div
             v-for="col in cols"

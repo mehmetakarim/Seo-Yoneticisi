@@ -154,8 +154,38 @@ def main():
     )
     jsonld_stub = f'<script type="application/ld+json">\n{jsonld_stub}\n</script>'
 
+    # Ölçüm omurgası (Faz Ö) — temsilî veri. Gerçek değerler `metrics_cmd`'den geliyor;
+    # buradaki yalnızca rozet/şerit/zaman çizelgesi yerleşimini denemek için.
+    ilk_sku = (listing or {}).get("sku", "SKU-1")
+    outcome_summary = {
+        "snapshots": 12, "oldest_window": "2025-08-22", "measured_events": 41,
+        "improved": 9, "flat": 21, "worse": 4, "measuring": 5, "insufficient": 2,
+        "net_delta_clicks": 137.0,
+    }
+    outcome_badges = [
+        {"sku": ilk_sku, "label": "İyileşti", "tone": "uygun",
+         "tip": "2026-06-14 gönderimi · 18 → 34 (+16 tıklama) · 2026-05-10 → 2026-06-07 ile 2026-07-07 → 2026-08-04 karşılaştırıldı"},
+    ]
+    product_timeline = {
+        "has_store_event": True,
+        "items": [
+            {"at": "2026-06-14T11:20:00", "kind": "ideasoft_push", "label": "IdeaSoft'a gönderildi",
+             "outcome_label": "İyileşti", "outcome_tone": "uygun",
+             "outcome_tip": "2026-06-14 gönderimi · 18 → 34 (+16 tıklama)"},
+            {"at": "2026-06-14T11:02:00", "kind": "meta_done", "label": "Meta tamamlandı",
+             "outcome_label": None, "outcome_tone": None, "outcome_tip": None},
+            {"at": "2026-06-13T16:40:00", "kind": "details_done", "label": "Açıklama tamamlandı",
+             "outcome_label": None, "outcome_tone": None, "outcome_tip": None},
+            {"at": "2026-06-13T15:10:00", "kind": "tech_done", "label": "Teknik tablo tamamlandı",
+             "outcome_label": None, "outcome_tone": None, "outcome_tip": None},
+        ],
+    }
+
     handlers = {
         "get_jsonld": jsonld_stub,
+        "get_outcome_summary": outcome_summary,
+        "get_outcome_badges": outcome_badges,
+        "get_product_timeline": product_timeline,
         "get_opportunity_cache": report,
         "get_settings": {"theme": "light"},
         "get_last_sync": None,
@@ -257,6 +287,15 @@ def main():
         "          ? { has_snapshot: false, changed_fields: ['görseller'], fields: [],\n"
         "              images_old: [], images_new: DIFF.images_new }\n"
         "          : DIFF);\n"
+        "    }\n"
+        # `?nosonuc=1` → ölçüm geçmişi hiç yokken Genel Bakış'ın hâli (tohumlama düğmesi).
+        "    if (new URLSearchParams(location.search).has('nosonuc')) {\n"
+        "      if (cmd === 'get_outcome_summary') return Promise.resolve(\n"
+        "        { snapshots: 0, oldest_window: '', measured_events: 0, improved: 0, flat: 0,\n"
+        "          worse: 0, measuring: 0, insufficient: 0, net_delta_clicks: 0 });\n"
+        "      if (cmd === 'get_outcome_badges') return Promise.resolve([]);\n"
+        "      if (cmd === 'seed_metric_history') return Promise.resolve(\n"
+        "        { snapshots_added: 12, rows_written: 35062, events_backfilled: 72, skipped_existing: 0 });\n"
         "    }\n"
         "    if (cmd === 'assistant_ask') {\n"
         f"      const ANS = {json.dumps(fake_answer, ensure_ascii=False)};\n"

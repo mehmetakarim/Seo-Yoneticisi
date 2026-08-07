@@ -274,10 +274,16 @@ pub async fn analyze_opportunities(
     };
 
     // Önbelleğe al: GSC verisi günlük değişir, her sayfa açılışında API'ye gitmeye gerek yok.
+    // ⚠️ Bu önbellek ÜZERİNE YAZILIYOR — geçmiş burada tutulmuyor, `metric_snapshots`'ta.
     if let Ok(json) = serde_json::to_string(&report) {
         let conn = state.conn.lock().unwrap();
         let _ = db::set_setting(&conn, "opportunity_json", &json);
     }
+
+    // Ölçüm omurgası: son anlık görüntü ≥7 günse yenisini al. Hata yutuluyor — ölçüm
+    // kaydı alınamadı diye fırsat analizi başarısız sayılmamalı.
+    super::snapshot_if_due(&state, &gsc_json, gsc_site.trim(), &client).await;
+
     Ok(report)
 }
 

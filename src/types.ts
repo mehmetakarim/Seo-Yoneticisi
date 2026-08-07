@@ -398,3 +398,48 @@ export interface IdeasoftPull {
   detail: ProductDetail;
   message: string;
 }
+
+/** Genel Bakış'taki "Sonuçlar" şeridi — bkz. `get_outcome_summary`. */
+export interface OutcomeSummary {
+  snapshots: number;
+  oldest_window: string;
+  measured_events: number;
+  improved: number;
+  flat: number;
+  worse: number;
+  measuring: number;
+  insufficient: number;
+  net_delta_clicks: number;
+}
+
+/** Fırsatlar tablosundaki "Sonuç" rozeti. */
+export interface OutcomeBadge {
+  sku: string;
+  label: string;
+  tone: string;
+  tip: string;
+}
+
+export interface TimelineItem {
+  at: string;
+  kind: string;
+  label: string;
+  outcome_label: string | null;
+  outcome_tone: string | null;
+  outcome_tip: string | null;
+}
+
+/** Ürün detayındaki olay/sonuç zaman çizelgesi. */
+export interface ProductTimeline {
+  items: TimelineItem[];
+  /** false ise ürün ölçülemiyor — mağazaya gönderim kaydı yok. */
+  has_store_event: boolean;
+}
+
+/** Geçmiş tohumlama sonucu. */
+export interface SeedResult {
+  snapshots_added: number;
+  rows_written: number;
+  events_backfilled: number;
+  skipped_existing: number;
+}

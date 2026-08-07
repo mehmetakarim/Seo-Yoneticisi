@@ -20,6 +20,7 @@ pub mod gemini;
 pub mod history;
 pub mod ideasoft;
 pub mod jsonld;
+pub mod metrics;
 pub mod images;
 pub mod opportunity;
 pub mod seo_data;

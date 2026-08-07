@@ -212,6 +212,24 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         &["run_at", "active", "added", "updated", "deleted", "duplicate_skipped"],
     )?;
     let settings = dump(conn, "settings", &["key", "value"])?;
+    // ⚠️ Ölçüm omurgası (Faz Ö). `work_events` YENİDEN ÜRETİLEMEZ — hangi işi ne zaman
+    // yaptığımızın tek kaydı. Anlık görüntüler 16 aya kadar GSC'den tazelenebilir ama yine
+    // de taşınıyor: kısmi yedek "geri yükledim ama eksik" sınıfı bir sürpriz üretir (K2 dersi).
+    let events = dump(
+        conn,
+        "work_events",
+        &["id", "at", "sku", "url", "kind", "reaches_store", "payload_json"],
+    )?;
+    let snaps = dump(
+        conn,
+        "metric_snapshots",
+        &["id", "captured_at", "window_start", "window_end", "source", "rows", "clicks", "impressions"],
+    )?;
+    let snap_rows = dump(
+        conn,
+        "metric_page_rows",
+        &["snapshot_id", "url", "sku", "clicks", "impressions", "position"],
+    )?;
     // ⚠️ Sohbet geçmişi yedeğe DAHİL. Teknik tablo gibi yeniden üretilemeyen kullanıcı emeği;
     // yedekte olmazsa geri yüklemede sessizce kaybolur. (`ideasoft_catalog` bilinçli olarak
     // yedeklenmiyor — o tek komutla yeniden çekiliyor.)
@@ -228,6 +246,9 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         "sync_log": log,
         "settings": settings,
         "chat_sessions": chats,
+        "work_events": events,
+        "metric_snapshots": snaps,
+        "metric_page_rows": snap_rows,
     });
     serde_json::to_string_pretty(&root).map_err(|e| format!("JSON oluşturulamadı: {e}"))
 }
@@ -269,7 +290,8 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
     }
     let tx = conn.transaction().map_err(|e| format!("İşlem başlatılamadı: {e}"))?;
     tx.execute_batch(
-        "DELETE FROM seo_status; DELETE FROM products; DELETE FROM sync_log; DELETE FROM settings;",
+        "DELETE FROM seo_status; DELETE FROM products; DELETE FROM sync_log; DELETE FROM settings;
+         DELETE FROM work_events; DELETE FROM metric_page_rows; DELETE FROM metric_snapshots;",
     )
     .map_err(|e| format!("Mevcut veriler temizlenemedi: {e}"))?;
 
@@ -278,6 +300,9 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
     }
     fn i(v: &Value, key: &str) -> Option<i64> {
         v.get(key).and_then(|x| x.as_i64())
+    }
+    fn f(v: &Value, key: &str) -> f64 {
+        v.get(key).and_then(|x| x.as_f64()).unwrap_or(0.0)
     }
     let arr = |key: &str| -> Vec<Value> {
         obj.get(key).and_then(|x| x.as_array()).cloned().unwrap_or_default()
@@ -368,6 +393,41 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
         )
         .map_err(|e| format!("Sohbet geri yüklenemedi: {e}"))?;
     }
+    // Ölçüm omurgası. Sıra önemli: satırlar anlık görüntüye yabancı anahtarla bağlı.
+    for e in arr("work_events") {
+        let _ = tx.execute(
+            "INSERT OR REPLACE INTO work_events (id, at, sku, url, kind, reaches_store, payload_json)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                i(&e, "id"), s(&e, "at"), s(&e, "sku"), s(&e, "url"), s(&e, "kind"),
+                i(&e, "reaches_store").unwrap_or(0), s(&e, "payload_json")
+            ],
+        );
+    }
+    for sn in arr("metric_snapshots") {
+        let _ = tx.execute(
+            "INSERT OR REPLACE INTO metric_snapshots
+               (id, captured_at, window_start, window_end, source, rows, clicks, impressions)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![
+                i(&sn, "id"), s(&sn, "captured_at"), s(&sn, "window_start"), s(&sn, "window_end"),
+                s(&sn, "source").unwrap_or_else(|| "gsc".into()),
+                i(&sn, "rows").unwrap_or(0), f(&sn, "clicks"), f(&sn, "impressions")
+            ],
+        );
+    }
+    for r in arr("metric_page_rows") {
+        let _ = tx.execute(
+            "INSERT OR REPLACE INTO metric_page_rows
+               (snapshot_id, url, sku, clicks, impressions, position)
+             VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                i(&r, "snapshot_id"), s(&r, "url"), s(&r, "sku"),
+                f(&r, "clicks"), f(&r, "impressions"), f(&r, "position")
+            ],
+        );
+    }
+
     tx.commit().map_err(|e| format!("İşlem tamamlanamadı: {e}"))?;
     Ok(())
 }
@@ -375,6 +435,59 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 🔴 **`work_events` yeniden ÜRETİLEMEZ.** Hangi işi ne zaman yaptığımızın tek kaydı;
+    /// yedekte taşınmazsa geri yüklemede "işe yaradı mı?" sorusu kalıcı olarak cevapsız kalır.
+    /// Anlık görüntüler GSC'den tazelenebilir ama kısmi yedek "geri yükledim ama eksik"
+    /// sınıfı bir sürpriz üretir — üçü birden taşınıyor.
+    #[test]
+    fn yedek_olcum_omurgasini_tasiyor() {
+        let src = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&src).unwrap();
+        src.execute("INSERT INTO products (sku, name, url) VALUES ('A-1','Ürün','https://x/a')", [])
+            .unwrap();
+        src.execute(
+            "INSERT INTO work_events (at, sku, url, kind, reaches_store)
+             VALUES ('2026-06-01T10:00:00','A-1','https://x/a','ideasoft_push',1)",
+            [],
+        )
+        .unwrap();
+        src.execute(
+            "INSERT INTO metric_snapshots (captured_at, window_start, window_end, rows, clicks, impressions)
+             VALUES ('2026-07-01T00:00:00','2026-06-02','2026-06-30',1,42.0,900.0)",
+            [],
+        )
+        .unwrap();
+        src.execute(
+            "INSERT INTO metric_page_rows (snapshot_id, url, sku, clicks, impressions, position)
+             VALUES (1,'https://x/a','A-1',42.0,900.0,6.5)",
+            [],
+        )
+        .unwrap();
+
+        let json = export_json(&src).expect("dışa aktarılamadı");
+        let mut dst = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&dst).unwrap();
+        import_json(&mut dst, &json).expect("içe aktarılamadı");
+
+        let (kind, reaches): (String, i64) = dst
+            .query_row("SELECT kind, reaches_store FROM work_events WHERE sku='A-1'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("olay geri yüklenmedi");
+        assert_eq!(kind, "ideasoft_push");
+        assert_eq!(reaches, 1, "ölçülebilirlik bayrağı kayboldu");
+
+        let pencere: String = dst
+            .query_row("SELECT window_start FROM metric_snapshots", [], |r| r.get(0))
+            .expect("anlık görüntü geri yüklenmedi");
+        assert_eq!(pencere, "2026-06-02");
+
+        let tik: f64 = dst
+            .query_row("SELECT clicks FROM metric_page_rows WHERE url='https://x/a'", [], |r| r.get(0))
+            .expect("sayfa satırı geri yüklenmedi");
+        assert_eq!(tik, 42.0);
+    }
 
     /// 🔴 Yedekte `feed_fp`/`reviewed_fp` taşınmazsa oluşan hasar sessiz DEĞİL, gürültülü:
     /// geri yüklemeden sonraki ilk senkronda iz yeniden hesaplanır, damga ile ayrışır ve

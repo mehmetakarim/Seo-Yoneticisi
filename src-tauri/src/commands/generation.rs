@@ -338,6 +338,8 @@ pub fn mark_tech_done(state: State<'_, AppState>, sku: String) -> Result<String,
     .map_err(|e| format!("Durum güncellenemedi: {e}"))?;
     if next == "done" {
         super::mark_reviewed(&conn, &sku)?;
+        // Yerel işaretleme — ölçülmez, zaman çizelgesinde bağlam (bkz. metrics_cmd::log_event).
+        super::log_event(&conn, &sku, "tech_done", false);
     }
     Ok(next.to_string())
 }
