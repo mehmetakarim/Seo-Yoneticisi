@@ -16,7 +16,9 @@
  * ⚠️ Grup adı bilinçli olarak "SEO Ayarları" DEĞİL: "Ayarlar" zaten bir sayfa, iki "ayar"
  * kavramı kenar çubuğunda yan yana durunca karışıyor.
  */
-export const GROUPS = ["Katalog", "SEO Araçları", "Asistan", "Sistem"] as const;
+/// ⚠️ İlk grubun adı BOŞ (`""`) — Sidebar başlığı `v-if` ile atlıyor. "Bugün" menünün en
+/// üstünde tek başına duruyor; "BUGÜN" başlığı altında "Bugün" öğesi gibi bir tekrar olmuyor.
+export const GROUPS = ["", "Katalog", "SEO Araçları", "Asistan", "Sistem"] as const;
 export type Group = (typeof GROUPS)[number];
 
 export interface NavItem {
@@ -34,6 +36,17 @@ export interface NavItem {
 }
 
 export const NAV = [
+  // Menünün en üstü: sabah açan kişinin ilk gördüğü ekran. Diğer ekranlar "nerede ne var"
+  // sorusuna cevap verir, bu ekran "bugün ne yapayım" sorusuna.
+  {
+    key: "today",
+    label: "Bugün",
+    icon: "sun",
+    title: "Bugün",
+    sub: "Bugün dokunulacak işler — en çok kazandıracaklar önce",
+    group: "",
+  },
+
   { key: "products", label: "Ürünler", icon: "box", title: "Ürünler", group: "Katalog" },
 
   // SEO araçları: her analiz kendi ekranında. Sıra bilinçli — önce "nereye bakayım"

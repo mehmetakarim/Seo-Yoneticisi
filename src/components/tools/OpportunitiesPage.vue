@@ -16,6 +16,7 @@ import { useStore } from "../../store";
 import { workState, type Opportunity, type OpportunityReason, type WorkState } from "../../types";
 import AnalysisSection from "../AnalysisSection.vue";
 import ToolShell from "./ToolShell.vue";
+import { useRowFocus } from "../../useRowFocus";
 import SeoTable, { type Chip, type TableCol, type TableRow } from "./SeoTable.vue";
 
 const store = useStore();
@@ -135,12 +136,16 @@ const cols: TableCol[] = [
   { key: "act", label: "İşlem", type: "actions" },
 ];
 
+/** Bugün kuyruğundan gelen odak satırı. Bu ekran kırpmıyor, sınır gerekmiyor. */
+const focusId = useRowFocus("opportunities", () => []);
+
 const rows = computed<TableRow[]>(() =>
   filtered.value.map((o) => {
     const w = WORK[workState(o)];
     const r = REASON[o.reason];
     return {
       id: o.sku,
+      selected: o.sku === focusId.value,
       name: o.name,
       sub: o.sku,
       badges: {
@@ -264,6 +269,7 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
       v-if="all.length"
       :cols="cols"
       :rows="rows"
+      :focus-id="focusId"
       :chip-rows="chipRows"
       :state="!rows.length ? 'empty' : 'normal'"
       :summary="summary"

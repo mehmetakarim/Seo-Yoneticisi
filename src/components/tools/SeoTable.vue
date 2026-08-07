@@ -14,7 +14,7 @@
  * ⚠️ `<table>` değil **CSS grid**: sütun genişlikleri tür bazlı (`minmax`) tanımlanıyor ve
  * gruplu varyantta başlık satırı tüm genişliği kaplayabiliyor. Tabloyla ikisi de zor.
  */
-import { computed } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import Icon from "../Icon.vue";
 
 export type ColType = "text" | "num" | "pct" | "badge" | "change" | "actions";
@@ -91,6 +91,12 @@ const props = withDefaults(
      */
     chipRows?: { label?: string; items: Chip[] }[];
     moreLabel?: string;
+    /**
+     * Kuyruktan gelen odak satırı (Faz K). Verilirse bileşen o satırı görünür alana
+     * kaydırır. Satırın SEÇİLİ görünmesi çağıranın işi (`TableRow.selected`) — burada
+     * yalnızca kaydırma var, iki sorumluluk ayrı.
+     */
+    focusId?: string;
     emptyLabel?: string;
     emptyHint?: string;
     loadingLabel?: string;
@@ -105,6 +111,7 @@ const props = withDefaults(
     countLabel: "",
     chipRows: () => [],
     moreLabel: "",
+    focusId: "",
     emptyLabel: "Bu görünümde kayıt yok",
     emptyHint: "Filtreleri genişletin veya yeni bir analiz çalıştırın.",
     loadingLabel: "Analiz sürüyor…",
@@ -181,6 +188,43 @@ const grid = computed(() => props.cols.map(track).join(" "));
  * giriyor. Tek doğruluk kaynağı grid.
  */
 
+/**
+ * Odak satırını görünür alana kaydırır.
+ *
+ * 🔴 **Tek `nextTick` YETMİYOR** (ölçüldü, 2026-08-08): çağıran ekran aynı anda kırpma
+ * sınırını da yükseltiyor (EOL 25 satır çiziyor, hedef 40. satır olabilir) ve liste bir kez
+ * daha render ediliyor. İlk denemede satır DOM'da yoktu, `querySelector` null dönüyor ve
+ * kaydırma sessizce hiç olmuyordu — satır seçili görünüyor ama ekranın 2.228 piksel
+ * altında duruyordu. Bu yüzden satır belirene kadar birkaç kare deneniyor.
+ */
+const kok = ref<HTMLElement | null>(null);
+watch(
+  () => props.focusId,
+  async (id) => {
+    if (!id) return;
+    await nextTick();
+    const sec = `[data-row-id="${CSS.escape(id)}"]`;
+    // ⚠️ Satırı bulmak YETMİYOR: satır DOM'da olsa bile kaydırma kabı o anda henüz
+    // yerleşmemiş oluyor (ekran değişimiyle birlikte yeni oluşuyor) ve `scrollIntoView`
+    // sessizce hiçbir şey yapmıyor — ölçüldü, `scrollTop` 0'da kalıyordu. Bu yüzden
+    // kaydırmanın SONUCU doğrulanıyor; olmadıysa sonraki karede tekrar deneniyor.
+    // 20 kare ≈ 320ms; bulunamazsa sessizce vazgeçer (veri değişmiş olabilir —
+    // kullanıcıyı rastgele bir yere kaydırmaktansa hiç kaydırma).
+    for (let deneme = 0; deneme < 20; deneme++) {
+      const el = kok.value?.querySelector(sec);
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "auto" });
+        await new Promise((r) => requestAnimationFrame(r));
+        const r = el.getBoundingClientRect();
+        if (r.top >= 0 && r.bottom <= window.innerHeight) return;
+      } else {
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+    }
+  },
+  { immediate: true },
+);
+
 const isNormal = computed(() => props.state === "normal" || props.state === "error");
 const isEmpty = computed(() => props.state === "empty");
 const isLoading = computed(() => props.state === "loading");
@@ -255,7 +299,7 @@ const skeletons = computed(() =>
 </script>
 
 <template>
-  <div class="tbl-shell">
+  <div ref="kok" class="tbl-shell">
     <!-- üst şerit: özet + sayaç + filtre çipleri -->
     <div v-if="summary" class="strip">
       <div class="strip-top">
@@ -303,7 +347,7 @@ const skeletons = computed(() =>
 
         <template v-if="isNormal">
           <template v-for="(item, i) in body" :key="item.kind === 'row' ? item.row.id : `g${i}`">
-            <div v-if="item.kind === 'group'" class="group">
+            <div v-if="item.kind === 'group'" class="group" :data-row-id="item.label">
               <div class="group-left">
                 <Icon name="search" :size="13" :stroke-width="1.9" class="group-icon" />
                 <span class="group-label">{{ item.label }}</span>
@@ -315,6 +359,7 @@ const skeletons = computed(() =>
             <div
               v-else
               class="row"
+              :data-row-id="item.row.id"
               :class="{ sel: item.row.selected }"
               :style="{ gridTemplateColumns: grid }"
               @click="emit('row', item.row.id)"

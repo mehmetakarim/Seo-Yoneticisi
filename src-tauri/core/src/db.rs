@@ -102,6 +102,18 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           payload_json TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_work_events_sku ON work_events(sku, at);
+
+        -- Bugün kuyruğundan çıkarılan maddeler (Faz K).
+        -- ⚠️ Kuyruğun KENDİSİ saklanmıyor (her açılışta hesaplanıyor); kalıcı olan tek şey
+        -- kullanıcının kararı. `until` NULL ise kalıcı gizleme, doluysa o tarihe kadar erteleme.
+        -- `ref` ürün için sku, satışta olmayan sayfa için slug — EOL satırlarında sku YOK.
+        CREATE TABLE IF NOT EXISTS queue_dismissals (
+          kind TEXT NOT NULL,
+          ref TEXT NOT NULL,
+          until TEXT,
+          at TEXT NOT NULL,
+          PRIMARY KEY (kind, ref)
+        );
         "#,
     )
     .map_err(|e| format!("Şema oluşturulamadı: {e}"))?;

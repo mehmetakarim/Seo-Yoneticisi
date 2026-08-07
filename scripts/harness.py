@@ -202,6 +202,75 @@ def main():
     # Asistan akışı taklidi: gerçek Gemini çağrısı yapmadan arayüzü doğrulamak için.
     # Önce "düşünüyor" olayları, sonra parça parça cevap — canlı ölçümdeki sıranın aynısı
     # (Gemma önce muhakemesini yayınlıyor, cevap sonda geliyor).
+    _dec0, _dec1 = (report.get("decay") or [{}, {}])[:2]
+    _opp0 = (report.get("opportunities") or [{}])[0]
+    # EOL kırpmasının (25 satır) ÖTESİNDEN bir satır — derin link testinin anlamlı olması için.
+    _eol_ornek = (report.get("eol") or [{}])[40] if len(report.get("eol") or []) > 40 else (report.get("eol") or [{}])[0]
+
+    # Bugün kuyruğu için örnek maddeler (Faz K).
+    TODAY_Q = {
+        "analyzed_at": "2026-08-07T21:27:10",
+        "hidden": 0,
+        "review_ready_at": "2026-09-15",
+        "bucket_counts": [
+            {"bucket": "urgent", "label": "Acil", "candidates": 10},
+            {"bucket": "leverage", "label": "Yüksek kaldıraç", "candidates": 49},
+            {"bucket": "leak", "label": "Kaçak trafik", "candidates": 2115},
+            {"bucket": "review", "label": "Sonuç kontrolü", "candidates": 0},
+            {"bucket": "upkeep", "label": "Bakım", "candidates": 52},
+        ],
+        "items": [
+            # ⚠️ Kaçak maddesi GERÇEK rapordan ve bilerek **40. satırdan** alınıyor: EOL ekranı
+            # ilk 25 satırı çiziyor, yani bu madde odak mekanizmasının kırpmayı yükseltme
+            # yolunu gerçekten sınıyor. Uydurma bir URL kullanılsaydı derin link hiç
+            # eşleşmez ve test yanlış yere "çalışıyor" derdi.
+            {"reference": {"kind": "page", "ref": _eol_ornek["slug"]},
+             "bucket": "leak", "title": _eol_ornek["slug"],
+             "reason": f"{round(_eol_ornek['clicks'])} tıklama satın alınamayan bir sayfaya "
+                       f"gidiyor (konum {_eol_ornek['position']:.1f})",
+             "clicks": _eol_ornek["clicks"], "score": round(_eol_ornek["clicks"] * 0.6, 1),
+             "page": "eol", "focus_id": _eol_ornek["url"],
+             "minutes": 1, "also": []},
+            # ⚠️ Bakım maddeleri de GERÇEK rapordan: uydurma SKU'larla derin link hiçbir satıra
+            # denk gelmiyordu ve doğrulama yanlışlıkla "ekran doğru" deyip geçiyordu.
+            {"reference": {"kind": "product", "ref": _dec0["sku"]},
+             "bucket": "upkeep", "title": _dec0["name"],
+             "reason": f"tıklama {round(_dec0['clicks_before'])}→{round(_dec0['clicks_now'])}, "
+                       f"konum {_dec0['position_before']:.1f}→{_dec0['position_now']:.1f}",
+             "clicks": _dec0["clicks_lost"], "score": round(_dec0["clicks_lost"] * 0.8, 1),
+             "page": "decay", "focus_id": _dec0["sku"], "minutes": 2, "also": []},
+            {"reference": {"kind": "product", "ref": _dec1["sku"]},
+             "bucket": "upkeep", "title": _dec1["name"],
+             "reason": f"tıklama {round(_dec1['clicks_before'])}→{round(_dec1['clicks_now'])}, "
+                       f"konum {_dec1['position_before']:.1f}→{_dec1['position_now']:.1f}",
+             "clicks": _dec1["clicks_lost"], "score": round(_dec1["clicks_lost"] * 0.8, 1),
+             "page": "decay", "focus_id": _dec1["sku"], "minutes": 2,
+             # Birden çok kovada görünen ürünün "ayrıca" satırları (ölçüm: 12 ürün 2+ kovada).
+             "also": ["mağazaya gönderildikten sonra feed değişti (açıklama) — canlıdaki metin bayat",
+                      "konum 9.3, 1074 gösterim ama 11 tıklama — 19 tıklama kaçıyor"]},
+            {"reference": {"kind": "product", "ref": "NB.LEN.21SX007CTX"},
+             "bucket": "urgent", "title": "Lenovo ThinkPad E14 G7 21SX007CTX U7-255H 16G 512G",
+             "reason": "mağazaya gönderildikten sonra feed değişti (açıklama) — canlıdaki metin bayat",
+             "clicks": 17, "score": 57, "page": "products", "focus_id": "NB.LEN.21SX007CTX",
+             "minutes": 2,
+             "also": ["konum 6.8, 891 gösterim ama 17 tıklama — 19 tıklama kaçıyor"]},
+            {"reference": {"kind": "product", "ref": "ADP.ARB.R9M79A"},
+             "bucket": "urgent", "title": "Aruba R9M79A Instant On 12V/18W RW Güç Adaptörü",
+             "reason": "mağazaya gönderildikten sonra feed değişti (açıklama) — canlıdaki metin bayat",
+             "clicks": 0, "score": 40, "page": "products", "focus_id": "ADP.ARB.R9M79A",
+             "minutes": 2, "also": []},
+            {"reference": {"kind": "product", "ref": _opp0["sku"]},
+             "bucket": "leverage", "title": _opp0["name"],
+             "reason": f"konum {_opp0['position']:.1f}, {round(_opp0['impressions'])} gösterim ama "
+                       f"{round(_opp0['clicks'])} tıklama — {round(_opp0['missed_clicks'])} tıklama kaçıyor",
+             "clicks": _opp0["missed_clicks"], "score": round(_opp0["missed_clicks"], 1),
+             "page": "opportunities", "focus_id": _opp0["sku"], "minutes": 2, "also": []},
+        ],
+    }
+    # ⚠️ Arka uç kuyruğu skora göre sıralı döndürüyor; stub elle yazıldığı için burada
+    # sıralanıyor. Sırasız bir önizleme ekranı olduğundan farklı gösterirdi.
+    TODAY_Q["items"].sort(key=lambda i: -i["score"])
+
     fake_answer = (
         "Bu ekrandaki veriye göre en çok tıklama kaçıran üç sayfa şunlar:\n"
         "- **Ergotron WorkFit-T 33-397-062** — 474 gösterim, 2 tıklama, konum 4.1. "
@@ -321,6 +390,22 @@ def main():
         # Halef → canonical akışı (Satışta olmayanlar). Gerçek akış modeli ve IdeaSoft'u
         # çağırıyor; burada taklit ediliyor ki modal zinciri ağsız denenebilsin.
         # ⚠️ `?halefyok=1` → model uygun halef bulamamış hâli (hedef SEÇME modali yolu).
+        # Bugün kuyruğu (Faz K). Maddeler gerçek `kuyruk_real` çıktısının şeklinde:
+        # dört kova, birleştirilmiş "ayrıca" satırları, tıklamasız bir acil madde.
+        # ⚠️ `?boskuyruk=1` → "bugün için seçilecek iş yok" hâli.
+        "    if (cmd === 'get_today_queue') {\n"
+        f"      const Q = {json.dumps(TODAY_Q, ensure_ascii=False)};\n"
+        "      if (new URLSearchParams(location.search).has('boskuyruk'))\n"
+        "        return Promise.resolve({ ...Q, items: [], hidden: 2 });\n"
+        "      const gizli = (window.__GIZLI__ = window.__GIZLI__ || []);\n"
+        "      return Promise.resolve({ ...Q, hidden: gizli.length,\n"
+        "        items: Q.items.filter(i => !gizli.includes(i.reference.ref)) });\n"
+        "    }\n"
+        "    if (cmd === 'dismiss_queue_item') {\n"
+        "      (window.__GIZLI__ = window.__GIZLI__ || []).push(args.reference);\n"
+        "      return Promise.resolve(null);\n"
+        "    }\n"
+        "    if (cmd === 'restore_queue_items') { window.__GIZLI__ = []; return Promise.resolve(null); }\n"
         "    if (cmd === 'suggest_eol_successor') {\n"
         "      const yok = new URLSearchParams(location.search).has('halefyok');\n"
         "      return new Promise(r => setTimeout(() => r(yok\n"

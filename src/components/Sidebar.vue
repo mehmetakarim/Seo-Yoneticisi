@@ -32,7 +32,7 @@ function fmtSync(): string {
 
     <nav class="nav om-scroll">
       <div v-for="g in groups" :key="g.group" class="nav-group">
-        <div class="nav-cap">{{ g.group }}</div>
+        <div v-if="g.group" class="nav-cap">{{ g.group }}</div>
         <div
           v-for="item in g.items"
           :key="item.key"

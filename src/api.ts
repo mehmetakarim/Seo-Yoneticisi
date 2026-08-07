@@ -23,6 +23,7 @@ import type {
   OutcomeBadge,
   ProductTimeline,
   SeedResult,
+  TodayQueue,
 } from "./types";
 
 export const api = {
@@ -152,4 +153,11 @@ export const api = {
   exportDb: (path: string, format: "db" | "json") =>
     invoke<void>("export_db", { path, format }),
   importDb: (path: string) => invoke<void>("import_db", { path }),
+
+  // --- Bugün kuyruğu (Faz K) ---
+  getTodayQueue: () => invoke<TodayQueue>("get_today_queue"),
+  /** `until` yoksa kalıcı gizleme, varsa (YYYY-AA-GG) o tarihe kadar erteleme. */
+  dismissQueueItem: (kind: string, reference: string, until: string | null) =>
+    invoke<void>("dismiss_queue_item", { kind, reference, until }),
+  restoreQueueItems: () => invoke<void>("restore_queue_items"),
 };

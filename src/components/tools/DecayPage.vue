@@ -10,6 +10,7 @@ import { computed, ref } from "vue";
 import { useStore } from "../../store";
 import ToolShell from "./ToolShell.vue";
 import SeoTable, { type TableCol, type TableRow } from "./SeoTable.vue";
+import { useRowFocus } from "../../useRowFocus";
 
 const store = useStore();
 const veri = computed(() => store.opportunity?.decay ?? []);
@@ -18,6 +19,7 @@ const lost = computed(() => Math.round(veri.value.reduce((a, d) => a + d.clicks_
 
 /** Uzun listede önce en çok kaybedeni göster. */
 const limit = ref(30);
+const focusId = useRowFocus("decay", () => veri.value.map((d) => d.sku), limit);
 
 const cols: TableCol[] = [
   { key: "name", label: "Ürün", type: "text" },
@@ -31,6 +33,7 @@ const n = (x: number) => Math.round(x).toString();
 const rows = computed<TableRow[]>(() =>
   veri.value.slice(0, limit.value).map((d) => ({
     id: d.sku,
+    selected: d.sku === focusId.value,
     name: d.name,
     sub: d.sku,
     // Konum düşüşü sayı olarak ARTIŞ demek (3.4 → 9.8 kötüleşme) — ikisi de "down".
@@ -57,6 +60,7 @@ const rows = computed<TableRow[]>(() =>
     <SeoTable
       :cols="cols"
       :rows="rows"
+      :focus-id="focusId"
       :summary="`${veri.length} sayfa geriledi · ${lost} tıklama kaybı`"
       :count-label="`${rows.length} / ${veri.length} satır`"
       :more-label="veri.length > limit ? `Sonraki 30'u göster (${veri.length - limit} kaldı)` : ''"

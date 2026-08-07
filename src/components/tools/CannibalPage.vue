@@ -15,6 +15,7 @@
 import { computed } from "vue";
 import { useStore } from "../../store";
 import ToolShell from "./ToolShell.vue";
+import { useRowFocus } from "../../useRowFocus";
 import SeoTable, { type TableCol, type TableGroup } from "./SeoTable.vue";
 
 const store = useStore();
@@ -28,6 +29,10 @@ const cols: TableCol[] = [
 ];
 
 const n = (x: number) => Math.round(x).toString();
+/** ⚠️ Burada odak bir SATIRA değil GRUBA gidiyor: kuyruk maddesi bir sorgu, satırlar ise
+ *  o sorguda yarışan sayfalar. SeoTable grup başlıklarını da `data-row-id` ile işaretliyor. */
+const focusId = useRowFocus("cannibal", () => []);
+
 const groups = computed<TableGroup[]>(() =>
   veri.value.map((c) => ({
     label: c.query,
@@ -57,6 +62,7 @@ const groups = computed<TableGroup[]>(() =>
     <SeoTable
       :cols="cols"
       :groups="groups"
+      :focus-id="focusId"
       :summary="`${veri.length} aramada ${groups.reduce((a, g) => a + g.rows.length, 0)} sayfa yarışıyor`"
       @row="store.openProduct($event)"
       @action="store.openProduct($event.id)"

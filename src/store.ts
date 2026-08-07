@@ -20,6 +20,7 @@ import type {
   ChatSessionMeta,
   OutcomeSummary,
   OutcomeBadge,
+  TodayQueue,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -90,6 +91,18 @@ interface State {
   chatSessions: ChatSessionMeta[];
   techStructuring: boolean;
   techDropped: string[];
+  /** Bugünün iş kuyruğu (Faz K). Saklanmıyor, her açılışta hesaplanıyor. */
+  today: TodayQueue | null;
+  todayBusy: boolean;
+  /**
+   * Kuyruktan bir maddeye tıklanınca hedef araç ekranında **hangi satırın** öne
+   * çıkarılacağı. Ekran onu çizdikten sonra temizleniyor.
+   *
+   * ⚠️ Faz K'ye kadar ekranlar arası satır hedefleme YOKTU; yalnızca `openProduct(sku)`
+   * vardı ve o da ürün ekranına gidiyordu. Üstelik üç araç ekranı listeyi kırpıyor
+   * (EOL 25, Düşüşte 30, Yükselmeye yakın 40) — hedef satır render edilmemiş olabiliyor.
+   */
+  focus: { page: string; id: string } | null;
   /** Ölçüm omurgası (Faz Ö) — sonuç özeti ve satır rozetleri. */
   outcomeSummary: OutcomeSummary | null;
   outcomeBadges: Record<string, OutcomeBadge>;
@@ -114,7 +127,10 @@ let toastSeq = 1;
 
 export const useStore = defineStore("app", {
   state: (): State => ({
-    page: "products",
+    // ⚠️ Açılış ekranı Faz K'de "products"tan "today"e alındı: fazın amacı sabah açan
+    // kişinin karar vermek zorunda kalmadan işe başlaması. Analiz yoksa ekran bunu
+    // söylüyor ve Genel Bakış'a yönlendiriyor, boş kalmıyor.
+    page: "today",
     theme: "light",
     allRows: [],
     filter: "tumu",
@@ -151,6 +167,9 @@ export const useStore = defineStore("app", {
     chatSessions: [],
     techStructuring: false,
     techDropped: [],
+    today: null,
+    todayBusy: false,
+    focus: null,
     outcomeSummary: null,
     outcomeBadges: {},
     seedBusy: false,
@@ -923,6 +942,59 @@ export const useStore = defineStore("app", {
      * Sonuç verisini yükler. Ölçüm omurgası yerel veritabanından okunuyor — GSC çağrısı yok,
      * bu yüzden ekran açılışında çağrılması ucuz.
      */
+    /** Bugünün kuyruğunu tazeler. Ek GSC çağrısı YOK — mevcut önbellekten hesaplanıyor. */
+    async loadToday() {
+      this.todayBusy = true;
+      try {
+        this.today = await api.getTodayQueue();
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.todayBusy = false;
+      }
+    },
+
+    /**
+     * Kuyruk maddesini açar: doğru ekrana gider ve o satırı öne çıkarır.
+     *
+     * Ürün maddeleri ürün ekranında seçiliyor (mevcut `openProduct`); araç ekranı
+     * maddeleri `focus` üzerinden hedefleniyor.
+     */
+    async openQueueItem(page: string, id: string) {
+      if (page === "products") {
+        await this.openProduct(id);
+        return;
+      }
+      this.focus = { page, id };
+      this.page = page as Page;
+    },
+
+    /** Hedef satır çizildikten sonra ekran bunu çağırır — odak yapışkan olmamalı. */
+    clearFocus() {
+      this.focus = null;
+    },
+
+    /** Maddeyi kuyruktan çıkarır. `until` yoksa kalıcı, varsa o tarihe kadar. */
+    async dismissQueueItem(kind: string, reference: string, until: string | null) {
+      try {
+        await api.dismissQueueItem(kind, reference, until);
+        await this.loadToday();
+        this.toast(until ? "Madde yarına ertelendi." : "Madde kuyruktan gizlendi.", "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    /** Gizlenen/ertelenen maddelerin tamamını geri getirir. */
+    async restoreQueueItems() {
+      try {
+        await api.restoreQueueItems();
+        await this.loadToday();
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
     async loadOutcomes() {
       try {
         const [ozet, rozetler] = await Promise.all([

@@ -7,6 +7,7 @@ import ProductsPage from "./components/ProductsPage.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 // SEO araçları: her analiz kendi ekranında (v0.7.0). Hepsi TEK `opportunity_json`
 // önbelleğinin dilimlerini okur — ekran başına GSC çağrısı yok.
+import TodayPage from "./components/tools/TodayPage.vue";
 import OverviewPage from "./components/tools/OverviewPage.vue";
 import OpportunitiesPage from "./components/tools/OpportunitiesPage.vue";
 import StrikingPage from "./components/tools/StrikingPage.vue";
@@ -28,6 +29,7 @@ const pageRef = ref<{ focusSearch?: () => void } | null>(null);
 
 /** navigation.ts'teki kayda karşılık gelen bileşenler. Yeni sayfa → buraya bir satır. */
 const PAGES: Record<Page, Component> = {
+  today: TodayPage,
   products: ProductsPage,
   overview: OverviewPage,
   opportunities: OpportunitiesPage,

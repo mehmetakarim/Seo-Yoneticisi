@@ -443,3 +443,50 @@ export interface SeedResult {
   events_backfilled: number;
   skipped_existing: number;
 }
+
+// ---------------------------------------------------------------------------
+// Bugün kuyruğu (Faz K)
+// ---------------------------------------------------------------------------
+
+/** İş türü kovası. Rust `seo_core::queue::Bucket` ile birebir. */
+export type Bucket = "urgent" | "leverage" | "leak" | "review" | "upkeep";
+
+/** Madde kimliği: ürün maddeleri sku, satışta olmayan sayfalar slug taşır.
+ *  ⚠️ EOL satırlarında sku YOK — bu yüzden iki ayrı kimlik uzayı var. */
+export interface ItemRef {
+  kind: "product" | "page";
+  ref: string;
+}
+
+export interface QueueItem {
+  reference: ItemRef;
+  bucket: Bucket;
+  title: string;
+  /** Tek cümlelik gerekçe — her zaman gerçek bir metrikten türer. */
+  reason: string;
+  clicks: number;
+  score: number;
+  /** Maddeyi açacak ekran. */
+  page: string;
+  /** O ekranda odaklanacak satırın kimliği. */
+  focus_id: string;
+  /** ⚠️ Tahmin, ölçüm değil — üretim süreleri loglanmıyor. */
+  minutes: number;
+  /** Aynı ürünün diğer kovalardaki sebepleri. */
+  also: string[];
+}
+
+export interface BucketCount {
+  bucket: Bucket;
+  label: string;
+  candidates: number;
+}
+
+export interface TodayQueue {
+  items: QueueItem[];
+  analyzed_at: string;
+  hidden: number;
+  bucket_counts: BucketCount[];
+  /** Sonuç kontrolü kovası boşsa en erken dolacağı tarih; doluysa "". */
+  review_ready_at: string;
+}

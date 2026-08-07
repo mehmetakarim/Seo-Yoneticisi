@@ -19,6 +19,7 @@ mod metrics_cmd;
 mod opportunities;
 mod products;
 mod settings;
+mod today;
 mod versions;
 
 // Komut adları DEĞİŞMEDİ: `lib.rs`'teki `invoke_handler` listesi ve ön yüzdeki `invoke`
@@ -30,6 +31,7 @@ pub use metrics_cmd::*;
 pub use opportunities::*;
 pub use products::*;
 pub use settings::*;
+pub use today::*;
 pub use versions::*;
 
 pub struct AppState {

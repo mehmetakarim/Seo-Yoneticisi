@@ -23,6 +23,7 @@ pub mod jsonld;
 pub mod metrics;
 pub mod images;
 pub mod opportunity;
+pub mod queue;
 pub mod seo_data;
 pub mod sync;
 pub mod validation;

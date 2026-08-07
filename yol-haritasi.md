@@ -194,7 +194,7 @@ token'larla kuruldu, ayrı tasarım turu yapılmadı. `.chip` global'e taşınd�
 
 ---
 
-### Faz K — Bugün + iş kuyruğu
+### Faz K — Bugün + iş kuyruğu ✅ (tamamlandı)
 
 **Amaç.** Sabah uygulamayı açan kişi 5–10 net aksiyon görsün; hangi ekrana gideceğine karar
 vermek zorunda kalmasın.
@@ -207,8 +207,17 @@ bakım (decay, kanibalizasyon). Şeffaf skor (formül kullanıcıya gösterilir)
 **Başlama koşulu.** Faz Ö bitmiş olmalı — "sonuç kontrolü" kovası ve "yakın zamanda işlendi,
 ölçülüyor" cezası ölçüm verisine dayanıyor.
 
-**Bitti sayılır.** Gerçek veriyle açıldığında beş kovadan en az üçü dolu; her maddenin "neden"
-cümlesi gerçek bir metrikten türetiliyor; madde tıklanınca doğru ekranda doğru satıra gidiyor.
+🔬 **Ölçüldü (gerçek veri):** 2.226 aday → 10 madde, **4 kova** temsil ediliyor, tekrar eden
+ürün **sıfır**. Üç ölçüm tasarımı değiştirdi: feed bayrağının %87'si yalnızca görsel (70 → 9
+gerçek acil) · ham skor sırası GSC fırsatlarını kuyruğa hiç sokmuyordu (kova başına 3 sınırı
+kondu) · 12 ürün birden çok kovada (106 ham satır → 90 benzersiz, tekilleştirme eklendi).
+
+**Bitti sayılır.**
+- [x] Gerçek veriyle beş kovadan en az üçü dolu (**dördü dolu**; sonuç kontrolü boş ve bunu
+      "en erken 2026-09-15" diye söylüyor).
+- [x] Her maddenin "neden" cümlesi gerçek bir metrikten türüyor.
+- [x] Madde tıklanınca doğru ekranda doğru satıra gidiyor — altı maddenin altısı doğrulandı,
+      EOL'de 25 satırlık kırpmanın ötesindeki bir satır dahil.
 
 **Ekran gerekiyor mu.** Evet — yeni ana ekran ("Bugün"), menünün en üstüne gelir.
 

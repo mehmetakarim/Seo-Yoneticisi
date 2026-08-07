@@ -18,6 +18,7 @@ import Icon from "../Icon.vue";
 import ModalShell from "../ModalShell.vue";
 import ToolShell from "./ToolShell.vue";
 import SeoTable, { type TableCol, type TableRow } from "./SeoTable.vue";
+import { useRowFocus } from "../../useRowFocus";
 
 const store = useStore();
 const rows = computed(() => store.opportunity?.eol ?? []);
@@ -25,6 +26,9 @@ const clicks = computed(() => Math.round(store.opportunity?.eol_clicks ?? 0));
 
 /** Liste uzun olabilir (bu mağazada 2.190 sayfa) — önce en değerlileri. */
 const limit = ref(25);
+
+/** Bugün kuyruğundan gelen odak satırı; hedef kırpmanın ötesindeyse liste açılıyor. */
+const focusId = useRowFocus("eol", () => rows.value.map((e) => e.url), limit);
 
 /** Tam URL'den son yol parçası — canonical hedefi olarak gönderilir. */
 const slugOf = (u: string) => u.trim().replace(/\/$/, "").split("/").pop() ?? "";
@@ -50,6 +54,7 @@ const tableRows = computed<TableRow[]>(() =>
     const bakiliyor = !!store.successorBusy[e.url];
     return {
       id: e.url,
+      selected: e.url === focusId.value,
       name: e.slug,
       // Halef sonucu ikincil satırda: eskiden ad hücresinin içine gömülü bir blok halindeydi
       // ve satır yüksekliğini ekrandan ekrana bozuyordu.
@@ -125,6 +130,7 @@ function eylem(p: { id: string; key: string }) {
     <SeoTable
       :cols="cols"
       :rows="tableRows"
+      :focus-id="focusId"
       :summary="`${rows.length} sayfa satışta değil · ${clicks} tıklama boşa gidiyor`"
       :count-label="`${tableRows.length} / ${rows.length} satır`"
       :more-label="rows.length > limit ? `Sonraki 50'yi göster (${rows.length - limit} kaldı)` : ''"
