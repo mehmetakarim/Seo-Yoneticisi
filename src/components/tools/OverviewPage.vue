@@ -38,6 +38,11 @@ interface Card {
   desc: string;
   count: number;
   cost: string;
+  /**
+   * ⚠️ Bedel her zaman kayıp değil. Eskiden beşinin de rengi kehribardı; "elle inceleme
+   * gerekir" bir uyarı değil, yalnızca bir not. Renk anlam taşımalı, süs olmamalı.
+   */
+  tone: "loss" | "note";
 }
 
 const cards = computed<Card[]>(() => {
@@ -52,6 +57,7 @@ const cards = computed<Card[]>(() => {
       desc: "Konumunun getirmesi gereken tıklamayı alamayan ürünler.",
       count: r.opportunities?.length ?? 0,
       cost: `${missed.value} tıklama kaçıyor`,
+      tone: "loss",
     },
     {
       page: "eol",
@@ -60,6 +66,7 @@ const cards = computed<Card[]>(() => {
       desc: "Google'da sıralanan ama katalogda olmayan sayfalar.",
       count: r.eol?.length ?? 0,
       cost: `${Math.round(r.eol_clicks ?? 0)} tıklama ölü sayfaya gidiyor`,
+      tone: "loss",
     },
     {
       page: "striking",
@@ -68,6 +75,7 @@ const cards = computed<Card[]>(() => {
       desc: "4–20. sıradaki aramalar; hedef kelime adayı.",
       count: r.striking?.length ?? 0,
       cost: "sorgu düzeyinde fırsat",
+      tone: "note",
     },
     {
       page: "decay",
@@ -76,6 +84,7 @@ const cards = computed<Card[]>(() => {
       desc: "Önceki döneme göre gerileyen sayfalar.",
       count: r.decay?.length ?? 0,
       cost: decayLost ? `${decayLost} tıklama kaybedildi` : "kayıp yok",
+      tone: decayLost ? "loss" : "note",
     },
     {
       page: "cannibal",
@@ -84,6 +93,7 @@ const cards = computed<Card[]>(() => {
       desc: "Aynı aramada birden çok sayfanız görünüyor.",
       count: r.cannibalization?.length ?? 0,
       cost: "elle inceleme gerekir",
+      tone: "note",
     },
   ];
 });
@@ -93,26 +103,39 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
 
 <template>
   <div class="page om-scroll">
-    <div class="top">
-      <div class="sum">
-        <template v-if="report">
-          <b>{{ missed }}</b> tıklama kaçırılıyor · <b>{{ report.eol?.length ?? 0 }}</b> sayfa
-          satışta değil
-          <span class="dim">
-            · son {{ report.days }} gün · {{ report.matched }}/{{ report.total_products }} ürün
-            Google'da bulundu · {{ fmtDate(report.analyzed_at) }}
-          </span>
-        </template>
-        <span v-else class="dim">Henüz analiz çalıştırılmadı.</span>
+    <!-- Özet şeridi: tablo bileşenindeki `.strip` ile aynı dil (kart kabuğu + --c-list zemin).
+         Faz B'de tablolar bu dile geçti, bu ekran atlanmıştı. -->
+    <div class="sum-card">
+      <div class="strip">
+        <div class="strip-main">
+          <template v-if="report">
+            <div class="metrics">
+              <div class="metric">
+                <span class="m-val loss">{{ missed }}</span>
+                <span class="m-lab">tıklama kaçırılıyor</span>
+              </div>
+              <span class="m-sep"></span>
+              <div class="metric">
+                <span class="m-val loss">{{ report.eol?.length ?? 0 }}</span>
+                <span class="m-lab">sayfa satışta değil</span>
+              </div>
+            </div>
+            <div class="meta">
+              son {{ report.days }} gün · {{ report.matched }}/{{ report.total_products }} ürün
+              Google'da bulundu · {{ fmtDate(report.analyzed_at) }}
+            </div>
+          </template>
+          <span v-else class="meta">Henüz analiz çalıştırılmadı.</span>
+        </div>
+        <button class="run" :disabled="store.opportunityBusy" @click="store.runOpportunityAnalysis()">
+          <Icon
+            :name="store.opportunityBusy ? 'loader' : 'refresh'"
+            :size="15"
+            :class="{ spin: store.opportunityBusy }"
+          />
+          {{ store.opportunityBusy ? "Analiz ediliyor…" : report ? "Yenile" : "Analizi çalıştır" }}
+        </button>
       </div>
-      <button class="run" :disabled="store.opportunityBusy" @click="store.runOpportunityAnalysis()">
-        <Icon
-          :name="store.opportunityBusy ? 'loader' : 'refresh'"
-          :size="15"
-          :class="{ spin: store.opportunityBusy }"
-        />
-        {{ store.opportunityBusy ? "Analiz ediliyor…" : report ? "Yenile" : "Analizi çalıştır" }}
-      </button>
     </div>
 
     <div v-if="store.opportunityError" class="err">
@@ -133,14 +156,20 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
 
     <!-- Araç kartları: hangi araca önce bakılacağı KAYBA göre okunur, sayıya göre değil. -->
     <div v-else-if="report" class="grid">
-      <button v-for="c in cards" :key="c.page" class="tool" @click="store.page = c.page">
+      <button
+        v-for="(c, i) in cards"
+        :key="c.page"
+        class="tool"
+        :class="{ wide: i < 2 }"
+        @click="store.page = c.page"
+      >
         <div class="t-head">
           <div class="icon-badge"><Icon :name="c.icon" :size="15" /></div>
           <span class="t-count">{{ c.count }}</span>
         </div>
         <div class="t-title">{{ c.title }}</div>
         <div class="t-desc">{{ c.desc }}</div>
-        <div class="t-cost">{{ c.cost }}</div>
+        <div class="t-cost" :class="c.tone">{{ c.cost }}</div>
       </button>
     </div>
   </div>
@@ -153,26 +182,64 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
   overflow-y: auto;
   padding: 18px 22px 28px;
 }
-.top {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+
+/* ---- özet şeridi: SeoTable'ın kabuk + strip dilinin aynısı ---- */
+.sum-card {
+  border: 1px solid var(--c-border-soft);
+  border-radius: 12px;
+  background: var(--c-card);
+  overflow: hidden;
   margin-bottom: 14px;
 }
-.sum {
-  font-size: 12.5px;
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px;
+  background: var(--c-list);
+}
+.strip-main {
+  flex: 1;
+  min-width: 0;
+}
+.metrics {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.metric {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.m-val {
+  font-size: 19px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
   color: var(--c-text);
+}
+.m-val.loss {
+  color: var(--red);
+}
+.m-lab {
+  font-size: 12.5px;
+  color: var(--c-mid);
+}
+.m-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--c-border);
+  align-self: center;
+}
+.meta {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--c-soft);
   line-height: 1.5;
 }
-.sum b {
-  font-weight: 660;
-  font-variant-numeric: tabular-nums;
-}
-.dim {
-  color: var(--c-soft);
-}
 .run {
-  margin-left: auto;
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -186,7 +253,7 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
   font-size: 13px;
   font-weight: 590;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  font-family: inherit;
 }
 .run:hover:not(:disabled) {
   filter: brightness(1.06);
@@ -195,6 +262,7 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
   opacity: 0.8;
   cursor: default;
 }
+
 .err {
   display: flex;
   align-items: flex-start;
@@ -230,33 +298,48 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
   line-height: 1.6;
 }
 
-/* Beş kart. `max-width` bilinçli: sınırsız bırakılınca geniş ekranda 4+1 gibi dengesiz bir
-   satır oluşuyordu; 3 sütunda 3+2 kasıtlı görünüyor. Ayrıca kartlar okunamayacak kadar
-   genişlemiyor — açıklama satırı kısa kalıyor. */
+/* ---- araç kartları ----
+   Düzen 2+3: ilk iki araç (Fırsatlar · Satışta olmayanlar) gerçek tıklama kaybı taşıyor,
+   geniş yuvayı onlar alıyor. 6 sütunluk ızgara boşluk bırakmadan 2+3'e bölünüyor —
+   `auto-fill` ile 4+1 gibi dengesiz satırlar oluşuyordu.
+   Kart kabuğu tablo kabuğuyla aynı: 12px yarıçap, --c-border-soft, --c-card. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
-  max-width: 900px;
 }
 .tool {
+  grid-column: span 2;
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 14px 15px 13px;
   text-align: left;
   background: var(--c-card);
-  border: 1px solid var(--c-border);
-  border-radius: 13px;
+  border: 1px solid var(--c-border-soft);
+  border-radius: 12px;
   cursor: pointer;
   font-family: inherit;
   transition:
-    border-color 0.16s cubic-bezier(0.32, 0.72, 0, 1),
-    transform 0.16s cubic-bezier(0.32, 0.72, 0, 1);
+    border-color 0.18s cubic-bezier(0.32, 0.72, 0, 1),
+    background 0.18s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.tool.wide {
+  grid-column: span 3;
 }
 .tool:hover {
   border-color: var(--accent);
-  transform: translateY(-1px);
+  background: var(--c-hover);
+}
+/* Dar pencerede 2+3 anlamını yitiriyor; tek sütuna iniyor. */
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .tool,
+  .tool.wide {
+    grid-column: span 1;
+  }
 }
 .t-head {
   display: flex;
@@ -285,6 +368,12 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
   margin-top: 6px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--warn-text);
+}
+/* Renk anlam taşır: gerçek kayıp kırmızı, bilgi notu sessiz. */
+.t-cost.loss {
+  color: var(--red);
+}
+.t-cost.note {
+  color: var(--c-soft);
 }
 </style>

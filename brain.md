@@ -257,6 +257,25 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    olmayan özellik için kalıcı pasif düğme göstermek gürültüdür. Faz Ö/K/D geldiğinde ekranlar
    yalnızca `actions` dizisine bir anahtar ekleyecek.
 
+   🔴 **Faz B sonrası saha geri bildirimi (aynı gün) — üç kusur, üçü de ölçülerek bulundu:**
+
+   1. **Çip sayıları iki farklı birim taşıyordu.** Kategori/marka çipleri *kaçırılan tıklama*,
+      iş durumu/sebep çipleri *ürün adedi* gösteriyordu — görünüşleri aynı. Kullanıcı
+      "Creality 24" görüp tıklıyor, 5 satır geliyordu. Artık **hepsi ürün adedi**; kaçırılan
+      tıklama ipucunda, sıralama ölçütü olarak korunuyor. Dört çipte rozet = satır sayısı
+      olarak doğrulandı.
+   2. 🔴 **Hayalet dikey kaydırma çubuğu — CSS tuzağı.** `overflow-x: auto` yazınca tarayıcı
+      `overflow-y`'yi de `auto` yapıyor (spec: bir eksen `visible` değilse diğeri de olamaz).
+      Yatay çubuğun kapladığı 17px dikey taşma doğuruyor → **ikinci çubuk**. Çözüm:
+      `overflow-y: hidden` açıkça yazılmalı. Ölçüm: 28px yatay taşma → 17px dikey taşma.
+   3. **Üçüncü kaydırma:** "Google'da görünmeyenler" listesi kendi `max-height: 260px`
+      kaydırmasını taşıyordu (içerik 575px) ve Faz B'de bileşene alınmamıştı. Ortak bileşene
+      geçirildi.
+
+   ⚠️ Ayrıca sayısal sütunların sabit 78px alt sınırı Fırsatlar'da (9 sütun) 12px taşma
+   yaratıyordu. Ölçüldü: başlıklar "CTR" 47px, "Konum" 62px, "Gösterim" 75px istiyor →
+   alt sınır **`min-content`** yapıldı, `1fr` artan yeri eşit dağıtıyor. Yatay taşma 0.
+
    **Ders (üçüncü kez aynı):** kopyalanan geometri sapıyor. Yeni ekran açarken ortak bileşen
    yoksa önce o yazılmalı — sonra toplamak iki kat iş.
 

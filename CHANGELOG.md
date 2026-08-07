@@ -20,6 +20,11 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 - Fırsatlar ekranındaki filtreler etiketlendi (Kategori · Marka · İş durumu · Sebep) — hangi filtrenin ne olduğu artık belli
 - Yarışan sayfalar listesi diğer ekranlarla aynı tablo dilini kullanıyor; sorgu başlıkları altında yarışan sayfalar girintili
 - Uzun listelerde "daha fazla göster", boş filtre sonucu ve yükleniyor görünümü de aynı bileşenden geliyor
+- Yeni: **Genel Bakış** ekranı da aynı tasarıma alındı — özet şeridi kart diline uydu, araç kartları 2+3 düzeninde tam genişlikte
+- Düzeltme: Fırsatlar ekranındaki kategori ve marka filtrelerinin yanındaki sayı **kaçırılan tıklamayı** gösteriyordu, ürün sayısı sanılıyordu. Artık her filtrede sayı **ürün adedi**; kaçırılan tıklama bilgisi üzerine gelince çıkıyor
+- Düzeltme: Fırsatlar özet satırı iki farklı kümeden sayı okuyordu ("51 fırsat · 24 tıklama"); filtre etkinken artık ikisi de aynı kümeden ve toplam ayrıca yazıyor
+- Düzeltme: Fırsatlar ekranında sayfanın içinde iki ayrı kaydırma çubuğu daha vardı — tablonun kendi dikey çubuğu ve "Google'da görünmeyenler" listesinin çubuğu. İkisi de kaldırıldı; kaydırma yalnızca sayfada
+- Düzeltme: geniş tablo dar pencerede gereksiz yatay kaydırma açıyordu; sütun genişlikleri başlık içeriğine göre hesaplanıyor
 
 ## v0.8.3
 - Yeni: feed değişikliği uyarısında **"Neler değişti?"** — onayladığınız hâl ile şu anki feed verisi yan yana gösteriliyor

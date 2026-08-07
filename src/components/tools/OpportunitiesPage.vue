@@ -155,12 +155,20 @@ const rows = computed<TableRow[]>(() =>
   }),
 );
 
-/** Kesit çipi: aynı kesite ikinci tıklama filtreyi kaldırır. */
-function sliceChip(kind: "cat" | "brand", name: string, missed: number): Chip {
-  const key = `${kind}:${name}`;
+/**
+ * Kesit çipi: aynı kesite ikinci tıklama filtreyi kaldırır.
+ *
+ * 🔴 **Rozetteki sayı ÜRÜN ADEDİ** — eskiden kaçırılan tıklamaydı ve saha hatasına yol açtı:
+ * "Creality 24" görüp tıklayan kullanıcı 24 satır bekliyor, 5 satır geliyordu. Aynı görünen
+ * rozetin bir satırda tıklama, diğerinde ürün sayısı göstermesi tutarsızlıktı.
+ * Sıralama hâlâ kaçırılan tıklamaya göre (öncelik mantığı korunuyor), o bilgi ipucunda.
+ */
+function sliceChip(kind: "cat" | "brand", s: { name: string; n: number; missed: number }): Chip {
+  const key = `${kind}:${s.name}`;
   return {
-    label: name,
-    count: Math.round(missed),
+    label: s.name,
+    count: s.n,
+    tip: `${s.n} ürün · ${Math.round(s.missed)} tıklama kaçırılıyor`,
     active: sliceFilter.value === key,
     onClick: () => (sliceFilter.value = sliceFilter.value === key ? "" : key),
   };
@@ -171,8 +179,8 @@ function sliceChip(kind: "cat" | "brand", name: string, missed: number): Chip {
  * bir ayraçla duruyordu; ayrı ve ETİKETLİ satırlar hem daha okunur hem kesitlerle tutarlı.
  */
 const chipRows = computed(() => [
-  { label: "Kategori", items: topCats.value.map((c) => sliceChip("cat", c.name, c.missed)) },
-  { label: "Marka", items: topBrands.value.map((b) => sliceChip("brand", b.name, b.missed)) },
+  { label: "Kategori", items: topCats.value.map((c) => sliceChip("cat", c)) },
+  { label: "Marka", items: topBrands.value.map((b) => sliceChip("brand", b)) },
   {
     label: "İş durumu",
     items: [
@@ -181,6 +189,7 @@ const chipRows = computed(() => [
       ...(["untouched", "partial", "worked"] as const).map((w) => ({
         label: WORK[w].label,
         count: workCounts.value[w],
+        tip: WORK[w].tip,
         active: workFilter.value === w,
         onClick: () => (workFilter.value = workFilter.value === w ? "all" : w),
       })),
@@ -192,6 +201,7 @@ const chipRows = computed(() => [
       ...(["low_ctr", "no_clicks", "second_page"] as const).map((r) => ({
         label: REASON[r].label,
         count: reasonCounts.value[r],
+        tip: REASON[r].tip,
         active: reasonFilter.value === r,
         onClick: () => (reasonFilter.value = reasonFilter.value === r ? "all" : r),
       })),
@@ -204,6 +214,31 @@ const chipRows = computed(() => [
 
 const totalMissed = computed(() =>
   Math.round(filtered.value.reduce((s, o) => s + o.missed_clicks, 0)),
+);
+
+/**
+ * Özet satırı. ⚠️ Eskiden ürün sayısı TÜM listeden, tıklama FİLTRELİ listeden okunuyordu —
+ * "51 fırsat · 24 tıklama" gibi iki farklı kümeden gelen bir cümle çıkıyordu. İkisi de aynı
+ * kümeden; filtre varsa toplam ayrıca söyleniyor.
+ */
+const summary = computed(() =>
+  anyFilter.value
+    ? `${filtered.value.length} fırsat · yaklaşık ${totalMissed.value} tıklama kaçırılıyor · ${all.value.length} fırsat içinden`
+    : `${all.value.length} fırsat · yaklaşık ${totalMissed.value} tıklama kaçırılıyor`,
+);
+
+/** "Google'da görünmeyenler" — meta işi değil indeksleme işi, o yüzden ayrı bölüm. */
+const invisibleCols: TableCol[] = [
+  { key: "name", label: "Ürün", type: "text" },
+  { key: "act", label: "İşlem", type: "actions" },
+];
+const invisibleRows = computed<TableRow[]>(() =>
+  (report.value?.invisible ?? []).map((p) => ({
+    id: p.sku,
+    name: p.name,
+    sub: p.sku,
+    actions: [{ key: "open" as const }],
+  })),
 );
 const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
 </script>
@@ -219,7 +254,7 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
       :rows="rows"
       :chip-rows="chipRows"
       :state="!rows.length ? 'empty' : 'normal'"
-      :summary="`${all.length} fırsat · yaklaşık ${totalMissed} tıklama kaçırılıyor`"
+      :summary="summary"
       :count-label="`${rows.length} / ${all.length} satır`"
       empty-label="Bu filtrede fırsat yok"
       empty-hint="Filtreleri temizleyin veya başka bir kesit seçin."
@@ -237,17 +272,15 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
         Son {{ report.days }} günde hiç gösterim almamışlar. Bu bir meta sorunu değil —
         indeksleme veya görünürlük işi; içerik üretmek tek başına çözmez.
       </template>
-      <div class="inv-list">
-        <div
-          v-for="p in report.invisible"
-          :key="p.sku"
-          class="inv-row"
-          @click="store.openProduct(p.sku)"
-        >
-          <span class="nm">{{ p.name }}</span>
-          <span class="sku">{{ p.sku }}</span>
-        </div>
-      </div>
+      <!-- ⚠️ Bu liste kendi `max-height: 260px` kaydırmasına sahipti: Fırsatlar ekranında
+           sayfa + tablo + bu liste = ÜÇ kaydırma çubuğu oluyordu (saha geri bildirimi).
+           Ortak bileşene alındı; kaydırma yalnızca sayfada. -->
+      <SeoTable
+        :cols="invisibleCols"
+        :rows="invisibleRows"
+        @row="store.openProduct($event)"
+        @action="store.openProduct($event.id)"
+      />
     </AnalysisSection>
   </ToolShell>
 </template>
@@ -318,12 +351,7 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   color: var(--accent);
   cursor: pointer;
   font-weight: 560;
-}
-.inv-list {
-  max-height: 260px;
-  overflow-y: auto;
-}
-.inv-row {
+}.inv-row {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -331,14 +359,7 @@ const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",");
   border-bottom: 1px solid var(--c-border-soft);
   cursor: pointer;
   font-size: 12.5px;
-}
-.inv-row:last-child {
-  border-bottom: 0;
-}
-.inv-row:hover {
-  background: var(--c-hover);
-}
-.inv-row .nm {
+}inv-row .nm {
   -webkit-line-clamp: 1;
   line-clamp: 1;
 }

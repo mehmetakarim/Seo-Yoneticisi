@@ -52,7 +52,11 @@ export interface TableRow {
 }
 export interface Chip {
   label: string;
+  /** Rozetteki sayı — **her zaman satır adedi**. Başka bir birim konursa kullanıcı
+   *  çipe tıklayınca beklediği kadar satır göremez (saha hatası, 2026-08-07). */
   count?: number;
+  /** Sıralama ölçütü gibi ek bilgi buraya; rozete karışmaz. */
+  tip?: string;
   active?: boolean;
   onClick?: () => void;
 }
@@ -127,21 +131,29 @@ const MAX_SLOTS = 5;
 
 const sagaYasla = (t: ColType) => t === "num" || t === "pct" || t === "change" || t === "actions";
 
-/** Sütun türüne göre grid izi. İşlem sütunu SABİT: eylem sayısı ritmi bozmasın. */
+/**
+ * Sütun türüne göre grid izi. İşlem sütunu SABİT: eylem sayısı ritmi bozmasın.
+ *
+ * ⚠️ Sayısal sütunlarda alt sınır **`min-content`** — sabit 78px değil. Ölçüldü: başlıklar
+ * "CTR" 47px, "Konum" 62px, "Gösterim" 75px istiyor; hepsine 78px vermek Fırsatlar ekranında
+ * (9 sütun) gereksiz 12px taşma yaratıp yatay çubuğu tetikliyordu. `1fr` payı artan yeri
+ * eşit dağıttığı için sütunlar yine hizalı görünüyor.
+ */
 function track(col: TableCol): string {
   if (col.type === "actions") return "156px";
   if (col.w) return col.w;
   if (col.type === "text") return "minmax(180px, 36%)";
-  if (col.type === "badge") return "minmax(120px, max-content)";
+  if (col.type === "badge") return "minmax(112px, max-content)";
   if (col.type === "change") return "minmax(104px, 1fr)";
-  return "minmax(78px, 1fr)";
+  return "minmax(min-content, 1fr)";
 }
-const MIN: Record<string, number> = { actions: 156, text: 180, badge: 120, change: 104 };
+/** Yatay kaydırmanın devreye gireceği eşik için kaba alt sınırlar (min-content tahmini 60px). */
+const MIN: Record<string, number> = { actions: 156, text: 180, badge: 112, change: 104 };
 
 const grid = computed(() => props.cols.map(track).join(" "));
 /** Dar pencerede sütunlar ezilmesin: bu genişliğin altında yatay kaydırma devreye girer. */
 const minWidth = computed(
-  () => props.cols.reduce((s, c) => s + (MIN[c.type] ?? 78), 0) + "px",
+  () => props.cols.reduce((s, c) => s + (MIN[c.type] ?? 60), 0) + "px",
 );
 
 const isNormal = computed(() => props.state === "normal" || props.state === "error");
@@ -231,7 +243,8 @@ const skeletons = computed(() =>
           v-for="ch in cr.items"
           :key="ch.label"
           class="chip"
-          :class="{ on: ch.active }"
+          :class="{ on: ch.active, 'tip-below': !!ch.tip }"
+          :data-tip="ch.tip"
           @click="ch.onClick?.()"
         >
           <span>{{ ch.label }}</span>
@@ -505,8 +518,13 @@ const skeletons = computed(() =>
 }
 
 /* ---- gövde ---- */
+/* ⚠️ `overflow-y: hidden` ZORUNLU. CSS'te bir eksen `visible` değilse diğeri de `visible`
+   kalamaz: yalnızca `overflow-x: auto` yazınca tarayıcı `overflow-y`'yi de `auto` yapıyor ve
+   yatay çubuğun kapladığı 17px yüzünden İKİNCİ bir dikey çubuk beliriyor (ölçüldü: Fırsatlar
+   ekranında 28px yatay taşma → 17px dikey taşma). Dikey kaydırma sayfanın işi, tablonun değil. */
 .scroll {
   overflow-x: auto;
+  overflow-y: hidden;
 }
 .head {
   display: grid;
