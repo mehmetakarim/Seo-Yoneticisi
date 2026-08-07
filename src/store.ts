@@ -1,5 +1,7 @@
 import { defineStore } from "pinia";
 import { api } from "./api";
+import { SOURCES, buildContext, sourceByKey } from "./assistantSources";
+import type { ContextSource, SourceData } from "./assistantSources";
 import type {
   FilterKey,
   ImageCheck,
@@ -64,9 +66,13 @@ interface State {
   /** Kurulum sihirbazı açık mı. İlk çalıştırmada kendiliğinden açılır; Ayarlar'dan da
    *  elle açılabilir. */
   setupOpen: boolean;
-  /** Asistanın bağlam kaynağı: kullanıcı asistana geçmeden ÖNCE hangi araç ekranındaydı.
-   *  `page` asistana geçince değiştiği için ayrı tutuluyor. App.vue güncelliyor. */
+  /** Kullanıcı asistana geçmeden ÖNCE hangi araç ekranındaydı. `page` asistana geçince
+   *  değiştiği için ayrı tutuluyor. App.vue güncelliyor. Faz A'dan beri yalnızca
+   *  VARSAYILAN kaynak seçimini belirliyor; bağlamı artık `assistantSources` belirliyor. */
   lastToolPage: Page | "";
+  /** Asistanın konuşacağı veri kaynakları ("+" menüsünden seçiliyor, Faz A).
+   *  Anahtarlar `assistantSources.ts`'teki `SOURCES` kaydından. */
+  assistantSources: string[];
   /** Açık sohbetin mesajları. v0.7.2'den beri her turdan sonra `chat_sessions` tablosuna
    *  kaydediliyor — uygulama kapanınca kaybolmuyor. */
   chat: ChatMessage[];
@@ -134,6 +140,7 @@ export const useStore = defineStore("app", {
     canonicalSearching: false,
     setupOpen: false,
     lastToolPage: "",
+    assistantSources: [],
     chat: [],
     chatBusy: false,
     chatThinking: false,
@@ -384,80 +391,57 @@ export const useStore = defineStore("app", {
       }
     },
 
+    /** Bağlam kaynaklarının okuyacağı veri — tek yerden toplanıyor. */
+    sourceData(): SourceData {
+      return {
+        report: this.opportunity,
+        products: this.allRows,
+        outcomeSummary: this.outcomeSummary,
+        outcomeBadges: this.outcomeBadges,
+      };
+    },
+
     /**
-     * Asistanın göreceği bağlam: kullanıcının O AN baktığı ekranın satırları + rapor özeti.
+     * Asistanın göreceği bağlam: SEÇİLİ kaynakların satırları + rapor özeti.
      *
-     * ⚠️ Kullanıcı kararı buydu — tüm raporu (2.190 EOL satırı dahil) her mesajda göndermek
-     * gecikmeyi artırır ve uzun bağlamda model detayı karıştırmaya daha yatkın olur.
-     * Satır sayısı bilinçli olarak sınırlı; asistan "listenin tamamı" iddiasında bulunmasın
-     * diye kaç satır gördüğü de bağlama yazılıyor.
+     * ⚠️ v0.11.0'a (Faz A) kadar burada `switch (lastToolPage)` vardı; asistan son gezilen
+     * ekrana kilitliydi. Artık kullanıcı "+" menüsünden birden çok kaynak seçebiliyor;
+     * satır üretimi `assistantSources.ts` kayıt tablosunda.
+     *
+     * Satır sayısı hâlâ bilinçli olarak sınırlı (toplam bütçe paylaştırılıyor) ve asistan
+     * "listenin tamamı" iddiasında bulunmasın diye kaç satır gördüğü bağlama yazılıyor.
      */
     assistantContext(): string {
-      const r = this.opportunity;
-      if (!r) return "Henüz analiz çalıştırılmamış — elimizde Search Console verisi yok.";
-      const N = 50;
-      const n = (x: number) => Math.round(x);
-      const lines: string[] = [
-        `Analiz tarihi: ${r.analyzed_at} · son ${r.days} gün`,
-        `Katalog: ${r.total_products} ürün, ${r.matched} tanesi Google'da bulundu`,
-        `Fırsat: ${r.opportunities?.length ?? 0} · Satışta olmayan sayfa: ${r.eol?.length ?? 0} ` +
-          `(${n(r.eol_clicks ?? 0)} tıklama) · Yükselmeye yakın sorgu: ${r.striking?.length ?? 0} ` +
-          `· Yarışan arama: ${r.cannibalization?.length ?? 0} · Düşüşte: ${r.decay?.length ?? 0}`,
-        "",
-      ];
+      return buildContext(this.sourceData(), this.assistantSources);
+    },
 
-      const take = <T>(a: T[] | undefined) => (a ?? []).slice(0, N);
-      const more = (a: unknown[] | undefined) =>
-        (a?.length ?? 0) > N ? ` (ilk ${N} satır; toplam ${a!.length})` : "";
+    /** Seçili kaynaklardan yalnızca verisi olanlar — menü ve şerit bunu gösteriyor. */
+    activeSources(): ContextSource[] {
+      const d = this.sourceData();
+      return this.assistantSources
+        .map(sourceByKey)
+        .filter((s): s is ContextSource => !!s && s.available(d));
+    },
 
-      // Aktif ekranın verisi ayrıntılı, diğerleri yalnızca yukarıdaki özet satırında.
-      switch (this.lastToolPage) {
-        case "opportunities":
-          lines.push(`FIRSATLAR${more(r.opportunities)}:`);
-          for (const o of take(r.opportunities))
-            lines.push(
-              `- ${o.name} [${o.sku}] gösterim=${n(o.impressions)} tıklama=${n(o.clicks)} ` +
-                `konum=${o.position.toFixed(1)} kaçırılan=${n(o.missed_clicks)} sebep=${o.reason} ` +
-                `kategori=${o.category || "-"} marka=${o.brand || "-"}`,
-            );
-          break;
-        case "eol":
-          lines.push(`SATIŞTA OLMAYAN AMA TRAFİK ALAN SAYFALAR${more(r.eol)}:`);
-          for (const e of take(r.eol))
-            lines.push(
-              `- ${e.slug} tıklama=${n(e.clicks)} gösterim=${n(e.impressions)} konum=${e.position.toFixed(1)}`,
-            );
-          break;
-        case "striking":
-          lines.push(`YÜKSELMEYE YAKIN SORGULAR${more(r.striking)}:`);
-          for (const q of take(r.striking))
-            lines.push(
-              `- "${q.query}" → ${q.name} gösterim=${n(q.impressions)} tıklama=${n(q.clicks)} ` +
-                `konum=${q.position.toFixed(1)} kaçırılan=${n(q.missed_clicks)}`,
-            );
-          break;
-        case "cannibal":
-          lines.push("BİRBİRİYLE YARIŞAN SAYFALAR:");
-          for (const c of take(r.cannibalization)) {
-            lines.push(`- "${c.query}" gösterim=${n(c.impressions)} tıklama=${n(c.clicks)}`);
-            for (const pg of c.pages)
-              lines.push(`    · ${pg.name} konum=${pg.position.toFixed(1)} tıklama=${n(pg.clicks)}`);
-          }
-          break;
-        case "decay":
-          lines.push(`DÜŞÜŞTE OLANLAR${more(r.decay)}:`);
-          for (const d of take(r.decay))
-            lines.push(
-              `- ${d.name} [${d.sku}] tıklama ${n(d.clicks_before)}→${n(d.clicks_now)} ` +
-                `konum ${d.position_before.toFixed(1)}→${d.position_now.toFixed(1)} kayıp=${n(d.clicks_lost)}`,
-            );
-          break;
-        default:
-          lines.push(
-            "Kullanıcı şu an bir araç ekranında değil; yalnızca yukarıdaki özet elimizde.",
-          );
-      }
-      return lines.join("\n");
+    /** Bir kaynağı ekler/çıkarır. Verisi olmayan kaynak seçilemez. */
+    toggleSource(key: string) {
+      const s = sourceByKey(key);
+      if (!s || !s.available(this.sourceData())) return;
+      const i = this.assistantSources.indexOf(key);
+      if (i >= 0) this.assistantSources.splice(i, 1);
+      else this.assistantSources.push(key);
+    },
+
+    /**
+     * Varsayılan seçim: geldiğiniz araç ekranı; o da yoksa verisi olan ilk kaynak.
+     * Böylece "ekrandan gelip soru sor" alışkanlığı Faz A'dan sonra da aynı sonucu veriyor.
+     */
+    defaultSources(): string[] {
+      const d = this.sourceData();
+      const gelinen = sourceByKey(this.lastToolPage);
+      if (gelinen && gelinen.available(d)) return [gelinen.key];
+      const ilk = SOURCES.find((s) => s.available(d));
+      return ilk ? [ilk.key] : [];
     },
 
     /** Asistana bir soru gönderir; yanıt akarken `chat`teki son mesaj büyür. */
@@ -475,7 +459,10 @@ export const useStore = defineStore("app", {
       try {
         // Boş cevap balonu geçmişe gönderilmez — model onu kendi turu sanır.
         const history = this.chat.slice(0, -1);
-        const model = await api.assistantAsk(history, this.assistantContext(), (e) => {
+        const yuklu = this.activeSources()
+          .map((s) => s.label)
+          .join(", ");
+        const model = await api.assistantAsk(history, this.assistantContext(), yuklu, (e) => {
           if (e.kind === "thinking") return;
           this.chatThinking = false;
           this.chat[slot].text += e.text;
@@ -503,7 +490,9 @@ export const useStore = defineStore("app", {
         this.chatId = await api.saveChatSession(
           this.chatId,
           this.chat,
-          this.lastToolPage || "",
+          // ⚠️ Faz A'dan beri VİRGÜLLE AYRILMIŞ LİSTE. Şema değişmedi: tek değerli eski
+          // kayıtlar tek elemanlı liste olarak okunuyor (bkz. openChatSession).
+          this.assistantSources.join(","),
           this.chatModel,
         );
         await this.loadChatSessions();
@@ -549,7 +538,15 @@ export const useStore = defineStore("app", {
       try {
         this.chat = await api.getChatSession(id);
         this.chatId = id;
-        this.chatModel = this.chatSessions.find((s) => s.id === id)?.model ?? "";
+        const oturum = this.chatSessions.find((s) => s.id === id);
+        this.chatModel = oturum?.model ?? "";
+        // Kaynak seçimi de geri geliyor. Tek değerli eski kayıt ("opportunities") tek
+        // elemanlı listeye çözülüyor; artık tanınmayan anahtarlar sessizce eleniyor.
+        const kayitli = (oturum?.tool_page ?? "")
+          .split(",")
+          .map((k) => k.trim())
+          .filter((k) => !!sourceByKey(k));
+        this.assistantSources = kayitli.length ? kayitli : this.defaultSources();
       } catch (e) {
         this.toast(String(e), "error");
         await this.loadChatSessions();
@@ -565,6 +562,7 @@ export const useStore = defineStore("app", {
       this.chat = [];
       this.chatModel = "";
       this.chatId = null;
+      this.assistantSources = this.defaultSources();
     },
 
     /** Tek bir sohbeti siler — kullanıcı eylemi. */

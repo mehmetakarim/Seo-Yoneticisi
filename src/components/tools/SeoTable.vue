@@ -453,43 +453,10 @@ const skeletons = computed(() =>
   align-self: center;
   min-width: 52px;
 }
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border: 1px solid var(--c-border);
-  border-radius: 7px;
-  background: var(--c-input);
-  color: var(--c-mid);
-  font-size: 11.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.18s cubic-bezier(0.32, 0.72, 0, 1),
-    border-color 0.18s cubic-bezier(0.32, 0.72, 0, 1);
-}
-.chip:hover {
-  background: var(--c-hover);
-}
-.chip.on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
-.chip-count {
-  font-size: 10.5px;
-  padding: 0 5px;
-  border-radius: 20px;
-  background: var(--c-chip);
-  color: var(--c-soft);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.chip.on .chip-count {
-  background: rgba(255, 255, 255, 0.22);
-  color: #fff;
-}
+/* ⚠️ `.chip` / `.chip-count` burada DEĞİL, `styles.css`te — asistanın kaynak çipleriyle
+   aynı geometriyi paylaşıyorlar. Buraya kopyalanırsa iki tanım zamanla ayrışır; bu oturumda
+   kopyalanan ölçülerin saptığı üç kez ölçüldü (`.sku`, elle hesaplanan `min-width`,
+   içeriğe bağlı grid izleri). Değişiklik gerekiyorsa global tanımda yapın. */
 
 /* ---- hata ---- */
 .err {

@@ -76,14 +76,17 @@ export const api = {
    * Asistan turu. Yanıt `onEvent` ile parça parça gelir; söz verilen değer kullanılan
    * modelin adı. Uygulamada Tauri kanalının ilk kullanımı.
    */
+  /** `sources`: yüklü kaynakların okunur adları ("Fırsatlar, Katalog") — prompt'ta
+   *  "seçili değil" ile "veride yok" ayrımını kurmak için. */
   assistantAsk: (
     history: ChatMessage[],
     context: string,
+    sources: string,
     onEvent: (e: AssistantEvent) => void,
   ) => {
     const ch = new Channel<AssistantEvent>();
     ch.onmessage = onEvent;
-    return invoke<string>("assistant_ask", { history, context, onEvent: ch });
+    return invoke<string>("assistant_ask", { history, context, sources, onEvent: ch });
   },
   listChatSessions: () => invoke<ChatSessionMeta[]>("list_chat_sessions"),
   getChatSession: (id: number) => invoke<ChatMessage[]>("get_chat_session", { id }),

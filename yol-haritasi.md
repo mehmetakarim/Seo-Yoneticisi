@@ -157,7 +157,7 @@ yerden). Genel Bakış'a "sonuçlar" bölümü eklenir → küçük bir design p
 
 ---
 
-### Faz A — Asistan bağlam seçimi
+### Faz A — Asistan bağlam seçimi ✅ (tamamlandı)
 
 **Amaç.** Bugün asistan **son gezilen ekrana** kilitli; aynı sohbette A ekranını konuşup
 B ekranına geçmek mümkün değil. Kullanıcı hangi verinin gönderildiğini de göremiyor.
@@ -173,17 +173,24 @@ B ekranına geçmek mümkün değil. Kullanıcı hangi verinin gönderildiğini 
 olur, hem kota hem cevabın odağı bozulur. Faz A bir bütçe ölçümüyle başlar: toplam üst sınır +
 kaynak başına pay.
 
+🔬 **Ölçüldü (gerçek veri):** beş kaynak 50'şer satırla 27.000 karakter (~6.750 token) —
+endişe yumuşadı ama sınır kondu: `clamp(floor(150 / kaynakSayısı), 20, 50)` (tek yerde,
+`assistantSources.ts`). 1–3 kaynakta bugünkü 50 satır korunuyor. Menüye kullanıcı kararıyla
+**Sonuçlar (Faz Ö)** ve **Katalog** da eklendi → 7 kaynak.
+
 **Dürüstlük kuralı.** Seçilmemiş bir ekran sorulduğunda asistan *"bu ekranın verisi seçili
 değil"* der — mevcut "veride yoksa uydurma" kuralının doğal devamı.
 
 **Başlama koşulu.** Yok; Ö'den bağımsız. (Ö bitmişse asistan sonuç verisini de konuşabilir.)
 
 **Bitti sayılır.**
-- Tek sohbet penceresinde en az iki farklı kaynak arka arkaya konuşuldu.
-- Seçilmemiş kaynak sorulduğunda model uydurmuyor, seçili olmadığını söylüyor.
-- Bağlam bütçesi ölçüldü ve üst sınır kodda **tek yerde** tanımlı.
+- [x] Tek sohbet penceresinde en az iki farklı kaynak arka arkaya konuşuldu.
+- [x] Seçilmemiş kaynak sorulduğunda model uydurmuyor, seçili olmadığını söylüyor (prompt kuralı
+      + birim test).
+- [x] Bağlam bütçesi ölçüldü ve üst sınır kodda **tek yerde** tanımlı.
 
-**Ekran gerekiyor mu.** Evet — giriş şeridi + açılır menü + çip alanı → design promptu.
+**Ekran gerekiyor mu.** ~~Evet — design promptu.~~ → **Hayır:** kullanıcı kararıyla mevcut
+token'larla kuruldu, ayrı tasarım turu yapılmadı. `.chip` global'e taşındı (SeoTable ile ortak).
 
 ---
 

@@ -226,6 +226,44 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    Teknik zemin hazır: gönderim modülü `extraDetails` alanına zaten yazıyor (teknik tablo
    oradan gidiyor), yani iş "yeni yetenek" değil, mevcut gönderime bir parça eklemek.
 
+0av. ✅ **ASİSTAN BAĞLAM SEÇİMİ (Faz A).** Asistan artık son gezilen ekrana kilitli değil.
+   Girişin solundaki **"+"** menüsünden **7 kaynak** seçiliyor (5 SEO aracı + Sonuçlar +
+   Katalog), seçim **sohbetin ortasında değiştirilebiliyor** ve seçili kaynaklar çip olarak
+   görünüyor. Eski hâl kendini ekranda itiraf ediyordu: *"başka bir aracın verisini sormak
+   için önce o ekrana gidin"*.
+
+   Kaynaklar **veri-güdümlü bir kayıt tablosunda** (`src/assistantSources.ts`); `store.ts`
+   içindeki `switch (lastToolPage)` kalktı. Yeni kaynak eklemek = tabloya bir girdi.
+
+   🔬 **Bağlam bütçesi ölçüldü (gerçek veri, 2026-08-07):** beş kaynağın tamamı 50'şer
+   satırla **27.000 karakter (~6.750 token)** — plandaki "kota bozulur" endişesi ölçümle
+   yumuşadı. Yine de üst sınır kondu: `clamp(floor(150 / kaynakSayısı), 20, 50)`.
+   Ölçülen sonuç: 1 kaynak 9.028 · 3 kaynak 20.253 · 5 kaynak 17.417 · 7 kaynak 18.731 karakter.
+   ⚠️ **En kötü durum 7 kaynak DEĞİL, 3 kaynak** (~5.063 token): 1–3'te bugünkü 50 satır
+   bilinçli olarak korunuyor, ancak 4'ten sonra bütçe paylaşılmaya başlıyor.
+
+   ⚠️ **Dürüstlük ayrımı prompt'a yazıldı: "seçili değil" ≠ "veride yok".** Yüklü olmayan bir
+   ekran sorulduğunda model "bu veride yok" derse kullanıcıyı yanıltır — veri duruyor, yalnızca
+   yüklenmemiş. Doğru cevap eylem içeriyor: "+ menüsünden ekleyin".
+
+   **Katalog kaynağı sayaç + eksik listesidir, rastgele dilim değil.** Ölçüm: 279 üründen
+   meta'sı eksik 208, açıklaması 211, tekniği 228. 279'un rastgele 21'ini göndermek "hangi
+   üründe ne eksik" sorusunu cevaplayamazdı.
+
+   **Kalıcılık şema değiştirmeden:** `chat_sessions.tool_page` artık **virgüllü liste**.
+   Gerçek veritabanındaki eski tek değerli kayıtlar (`eol`, `striking`) tek elemanlı liste
+   olarak okunuyor; tanınmayan anahtar eleniyor ve varsayılana düşülüyor — dördü de denendi.
+   ⚠️ `UPDATE`e de eklendi: seçim sohbet ortasında değişiyor, sadece `INSERT`te yazmak yetmezdi.
+
+   ✅ **Dördüncü kopya-geometri hatası baştan engellendi.** `.chip`/`.chip-count` `SeoTable.vue`
+   içindeki scoped tanımdan **`styles.css`'e global taşındı**; asistan kopyalamak yerine aynı
+   tanımı kullanıyor. (Bu oturumda kopyalanan ölçülerin saptığı üç kez ölçülmüştü.)
+
+   🔴 **Popover kontrol ettiği şeyin üstünü örtüyordu.** Menü "+" düğmesine çapalanınca
+   seçili çipleri kapatıyordu; sabit bir kaydırma da çipler iki satıra sardığında yetmezdi.
+   **Yapısal çözüm:** çipler + giriş tek `.dock` kabına alındı, menü `bottom: calc(100% + 8px)`
+   ile o kaba çapalandı. Ölçüm: menü altı 602px, çipler 610px'te başlıyor.
+
 0au. ✅ **ÖLÇÜM OMURGASI (v0.10.0, Faz Ö).** "İşe yaradı mı?" sorusu artık cevaplanıyor.
    `metric_snapshots` + `metric_page_rows` (değiştirilemez GSC anlık görüntüleri) +
    `work_events` (ne yaptık, ne zaman). Sonuç **saklanmıyor, istendiğinde hesaplanıyor**

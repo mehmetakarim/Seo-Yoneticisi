@@ -23,14 +23,19 @@ pub enum AssistantEvent {
 /// Sohbet turu. Yanıt `on_event` kanalından parça parça akar; komut biterken kullanılan
 /// modeli döndürür (arayüz rozetinde gösteriliyor — hangi modelin cevapladığı görünsün).
 ///
-/// ⚠️ Bağlamı ÖN YÜZ derliyor: kullanıcının o an baktığı ekranın satırları + rapor özeti.
-/// Kullanıcı kararı buydu — tüm raporu (2.190 EOL satırı dahil) her mesajda göndermek
-/// gecikmeyi artırır ve uzun bağlamda model detayı karıştırmaya daha yatkın olur.
+/// ⚠️ Bağlamı ÖN YÜZ derliyor: kullanıcının **+ menüsünden seçtiği** kaynakların satırları
+/// + rapor özeti (`src/assistantSources.ts`). Kullanıcı kararı buydu — tüm raporu (2.190 EOL
+/// satırı dahil) her mesajda göndermek gecikmeyi artırır ve uzun bağlamda model detayı
+/// karıştırmaya daha yatkın olur.
+///
+/// `sources`: yüklü kaynakların okunur adları ("Fırsatlar, Katalog"). Prompt'a yazılıyor ki
+/// model **"seçili değil"** ile **"veride yok"**u ayırt edebilsin.
 #[tauri::command]
 pub async fn assistant_ask(
     state: State<'_, AppState>,
     history: Vec<gemini::ChatMessage>,
     context: String,
+    sources: String,
     on_event: Channel<AssistantEvent>,
 ) -> Result<String, String> {
     let key = {
@@ -38,7 +43,8 @@ pub async fn assistant_ask(
         db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default()
     };
 
-    let produced = gemini::chat_stream(&key, &gemini::assistant_system_prompt(&context), &history, |e| {
+    let system = gemini::assistant_system_prompt(&context, &sources);
+    let produced = gemini::chat_stream(&key, &system, &history, |e| {
         // Kanal hatası (pencere kapandı vb.) sohbeti düşürmesin: kullanıcı zaten gitmiş.
         let _ = match e {
             gemini::ChatEvent::Thinking => on_event.send(AssistantEvent::Thinking),
@@ -55,7 +61,12 @@ pub async fn assistant_ask(
 pub struct ChatSessionMeta {
     pub id: i64,
     pub title: String,
-    /// Hangi araç ekranının verisiyle konuşulduğu (boş olabilir).
+    /// Sohbetin bağlam kaynakları — **virgülle ayrılmış anahtar listesi**
+    /// ("opportunities,catalog"). Boş olabilir.
+    ///
+    /// ⚠️ Adı tarihsel: v0.11.0'a (Faz A) kadar tek bir ekran anahtarı tutuyordu. Şema
+    /// değiştirilmedi, çünkü tek değerli eski kayıtlar tek elemanlı liste olarak
+    /// okunuyor — yeni sütun açmak göç ve yedekleme yüzeyini büyütürdü.
     pub tool_page: String,
     pub messages: i64,
     pub model: String,
@@ -123,6 +134,7 @@ pub fn save_chat_session(
     state: State<'_, AppState>,
     id: Option<i64>,
     messages: Vec<gemini::ChatMessage>,
+    // Virgüllü kaynak listesi — bkz. `ChatSessionMeta::tool_page`.
     tool_page: String,
     model: String,
 ) -> Result<i64, String> {
@@ -137,9 +149,13 @@ pub fn save_chat_session(
     if let Some(id) = id {
         let n = conn
             .execute(
-                "UPDATE chat_sessions SET messages_json = ?2, model = ?3, updated_at = ?4
+                // ⚠️ `tool_page` de güncelleniyor: kullanıcı kaynak seçimini sohbetin
+                // ortasında değiştirebiliyor (Faz A) ve sohbet yeniden açıldığında
+                // SON seçim geri gelmeli.
+                "UPDATE chat_sessions SET messages_json = ?2, model = ?3, updated_at = ?4,
+                        tool_page = ?5
                  WHERE id = ?1",
-                params![id, json, model, now],
+                params![id, json, model, now, tool_page],
             )
             .map_err(|e| format!("Sohbet kaydedilemedi: {e}"))?;
         // Kullanıcı sohbeti başka bir yerden silmişse güncelleme 0 satır etkiler → yeni kayıt aç.

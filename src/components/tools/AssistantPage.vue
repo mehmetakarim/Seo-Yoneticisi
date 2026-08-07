@@ -6,13 +6,15 @@
  * onaylı akışlarında kalıyor. Kullanıcının "toplu değil, tek tek, onayla" kuralı bir sohbet
  * arayüzüyle delinmez. Asistan okur, yorumlar, önceliklendirir; uygular kullanıcı.
  *
- * ⚠️ Bağlam **bulunulan ekranın** verisi (store.assistantContext). Bu yüzden üstte hangi
- * ekranın verisiyle konuşulduğu açıkça yazıyor — kullanıcı asistanın neyi "gördüğünü"
- * bilmeden sorduğu soruya güvenemez.
+ * ⚠️ Bağlamı kullanıcı **girişin solundaki "+" menüsünden** seçiyor (Faz A). Önceden
+ * bulunulan ekrana kilitliydi ve şerit bunu itiraf ediyordu: *"başka bir aracın verisini
+ * sormak için önce o ekrana gidin"*. Seçili kaynaklar çip olarak görünür — kullanıcı
+ * asistanın neyi "gördüğünü" bilmeden sorduğu soruya güvenemez.
  */
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useStore } from "../../store";
 import { NAV } from "../../navigation";
+import { SOURCES, TOTAL_LINE_BUDGET, linesPerSource, sourceByKey } from "../../assistantSources";
 import Icon from "../Icon.vue";
 import ModalShell from "../ModalShell.vue";
 import MarkdownText from "../MarkdownText.vue";
@@ -31,8 +33,42 @@ const deletingTitle = computed(
   () => store.chatSessions.find((s) => s.id === pendingDelete.value)?.title ?? "",
 );
 
-const toolLabel = (key: string) => NAV.find((n) => n.key === key)?.label ?? "";
+/** Geçmiş satırındaki kaynak etiketi. `tool_page` artık virgüllü liste olabiliyor. */
+function toolLabel(key: string): string {
+  return key
+    .split(",")
+    .map((k) => sourceByKey(k.trim())?.label ?? NAV.find((n) => n.key === k.trim())?.label ?? "")
+    .filter(Boolean)
+    .join(", ");
+}
 const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
+
+// --- Bağlam kaynakları ("+" menüsü) ---
+const menuOpen = ref(false);
+const menuWrap = ref<HTMLElement | null>(null);
+
+/** Menüde gösterilen liste: her kaynağın etiketi, satır sayısı ve seçilebilirliği. */
+const menuItems = computed(() =>
+  SOURCES.map((s) => ({
+    key: s.key,
+    label: s.label,
+    hint: s.hint,
+    total: s.total(store.sourceData()),
+    ready: s.available(store.sourceData()),
+    on: store.assistantSources.includes(s.key),
+  })),
+);
+/** Seçili VE verisi olan kaynaklar — çipler ve bütçe bunu sayıyor. */
+const chosen = computed(() => store.activeSources());
+/** Kaynak başına düşen satır — kullanıcı bütçenin paylaştığını görebilmeli. */
+const perSource = computed(() => linesPerSource(chosen.value.length));
+
+// Dışarı tıklayınca kapansın; menü küçük bir popover, modal değil.
+function onDocClick(e: MouseEvent) {
+  if (menuWrap.value && !menuWrap.value.contains(e.target as Node)) menuOpen.value = false;
+}
+onMounted(() => document.addEventListener("click", onDocClick));
+onUnmounted(() => document.removeEventListener("click", onDocClick));
 
 async function openSession(id: number) {
   await store.openChatSession(id);
@@ -55,11 +91,6 @@ async function doDelete() {
   if (!store.chatSessions.length) histOpen.value = false;
 }
 
-/** Bağlamın hangi ekrandan geldiği. Araç ekranı değilse asistanın eli boş. */
-const source = computed(() => {
-  const item = NAV.find((n) => n.key === store.lastToolPage);
-  return item?.title ?? "";
-});
 const hasReport = computed(() => !!store.opportunity);
 
 /**
@@ -67,10 +98,16 @@ const hasReport = computed(() => !!store.opportunity);
  * kullanıcı "veri yok" görüyor — oysa analiz veritabanında duruyor. (Doğrulama sırasında
  * yakalandı: araç ekranlarına uğramadan gelince asistan boş kalıyordu.)
  */
-onMounted(() => {
-  if (!store.opportunity) void store.loadOpportunityCache();
+onMounted(async () => {
+  if (!store.opportunity) await store.loadOpportunityCache();
+  // Sonuçlar ve Katalog kaynakları da menüde seçilebilir olmalı; verileri burada hazırlanıyor.
+  if (!store.outcomeSummary) void store.loadOutcomes();
+  if (!store.allRows.length) void store.reload();
   // Geçmiş her açılışta tazelenir — uygulama yeniden başlatıldığında sohbetler burada olmalı.
   void store.loadChatSessions();
+  // Varsayılan seçim: geldiğiniz araç ekranı. Rapor yüklendikten SONRA hesaplanıyor,
+  // yoksa `available()` her kaynak için false döner ve seçim boş kalırdı.
+  if (!store.assistantSources.length) store.assistantSources = store.defaultSources();
 });
 
 const SUGGESTIONS = [
@@ -116,11 +153,14 @@ watch(
         Henüz analiz çalıştırılmadı — asistanın elinde veri yok.
         <a class="link" @click="store.page = 'overview'">Genel Bakış</a>'tan çalıştırın.
       </span>
-      <span v-else-if="source">
-        <b>{{ source }}</b> ekranının verisiyle konuşuyorsunuz. Başka bir aracın verisini
-        sormak için önce o ekrana gidin.
+      <span v-else-if="chosen.length">
+        <b>{{ chosen.length }} veri kaynağı</b> yüklü · kaynak başına {{ perSource }} satır
+        (toplam bütçe {{ TOTAL_LINE_BUDGET }})
       </span>
-      <span v-else>Genel özet verisiyle konuşuyorsunuz.</span>
+      <span v-else>
+        Hiçbir kaynak seçili değil — asistan yalnızca genel özeti görüyor. Girişteki
+        <b>+</b> ile ekleyin.
+      </span>
       <div style="flex: 1"></div>
       <span v-if="store.chatModel" class="model-tag">{{ store.chatModel }}</span>
       <a
@@ -224,7 +264,57 @@ watch(
       </div>
     </div>
 
+    <!-- ⚠️ Çipler ve giriş TEK kapta: "+" menüsü bu kaba göre konumlanıyor, düğmeye göre
+         değil. Düğmeye çapalanınca menü kontrol ettiği çiplerin üstünü örtüyordu; çipler
+         iki satıra sardığında sabit bir kaydırma da yetmezdi. -->
+    <div class="dock">
+    <!-- Seçili kaynaklar: asistanın neyi gördüğü girişin hemen üstünde, gözden kaçmasın. -->
+    <div v-if="chosen.length" class="src-chips">
+      <button
+        v-for="s in chosen"
+        :key="s.key"
+        class="chip on"
+        :title="`${s.label} — bağlamdan çıkar`"
+        @click="store.toggleSource(s.key)"
+      >
+        {{ s.label }}
+        <Icon name="x" :size="11" :stroke-width="2.4" />
+      </button>
+    </div>
+
     <div class="composer">
+      <!-- "+" — hangi ekranların verisiyle konuşulacağı buradan seçiliyor (Faz A). -->
+      <div ref="menuWrap" class="src-wrap">
+        <button
+          class="plus"
+          :class="{ on: menuOpen }"
+          :disabled="!hasReport"
+          title="Veri kaynağı ekle"
+          @click="menuOpen = !menuOpen"
+        >
+          <Icon name="plus" :size="16" :stroke-width="2.2" />
+        </button>
+        <div v-if="menuOpen" class="menu">
+          <div class="m-head">Hangi verilerle konuşulsun?</div>
+          <button
+            v-for="m in menuItems"
+            :key="m.key"
+            class="m-row"
+            :class="{ on: m.on }"
+            :disabled="!m.ready"
+            :data-tip="m.ready ? m.hint : 'Bu ekranın verisi henüz yok'"
+            @click="store.toggleSource(m.key)"
+          >
+            <span class="m-box"><Icon v-if="m.on" name="check" :size="11" :stroke-width="3" /></span>
+            <span class="m-label">{{ m.label }}</span>
+            <span v-if="m.ready" class="chip-count">{{ m.total }}</span>
+          </button>
+          <div class="m-foot">
+            Seçili kaynak başına {{ perSource }} satır gönderilir; toplam bütçe
+            {{ TOTAL_LINE_BUDGET }} satır.
+          </div>
+        </div>
+      </div>
       <textarea
         v-model="draft"
         class="input"
@@ -239,6 +329,7 @@ watch(
         <Icon :name="store.chatBusy ? 'loader' : 'sparkles'" :size="15" :class="{ spin: store.chatBusy }" />
         {{ store.chatBusy ? "Yanıtlanıyor…" : "Sor" }}
       </button>
+    </div>
     </div>
   </div>
 </template>
@@ -496,12 +587,124 @@ watch(
   30% { opacity: 1; }
 }
 
-.composer {
+/* ---- bağlam kaynakları ---- */
+/* ⚠️ `.chip` / `.chip-count` global (styles.css) — SeoTable'ın filtre çipleriyle aynı
+   geometri. Buraya kopyalanmasın; iki tanım zamanla ayrışır. */
+/* Çipler + giriş tek kap. Menü buna çapalanıyor (bkz. `.menu`). */
+.dock {
   flex: none;
+  position: relative;
+  margin-top: 12px;
+}
+.src-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.composer {
   display: flex;
   align-items: flex-end;
   gap: 9px;
-  margin-top: 12px;
+  margin-top: 8px;
+}
+/* ⚠️ `position: static` BİLİNÇLİ: menü `.dock`a çapalansın diye. Buraya `relative`
+   koyulursa menü yeniden çiplerin üstünü örter. */
+.src-wrap {
+  flex: none;
+}
+.plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-input);
+  color: var(--c-mid);
+  cursor: pointer;
+  transition: background 0.18s cubic-bezier(0.32, 0.72, 0, 1),
+    border-color 0.18s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.plus:hover:not(:disabled) {
+  background: var(--c-hover);
+}
+.plus.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.plus:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Menü yukarı açılıyor: giriş kutusu ekranın altında, aşağı açılsa kırpılırdı.
+   `.dock`un TAMAMININ üstünde duruyor — çipler iki satıra sarsa bile örtmüyor. */
+.menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: 268px;
+  padding: 6px;
+  border: 1px solid var(--c-border);
+  border-radius: 11px;
+  background: var(--c-card);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.13);
+}
+.m-head {
+  padding: 6px 8px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-faint);
+}
+.m-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-text);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.m-row:hover:not(:disabled) {
+  background: var(--c-hover);
+}
+.m-row:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.m-box {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--c-border);
+  border-radius: 5px;
+  color: #fff;
+}
+.m-row.on .m-box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.m-label {
+  flex: 1;
+  min-width: 0;
+}
+.m-foot {
+  padding: 8px 8px 4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--c-border-soft);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--c-faint);
 }
 .input {
   flex: 1;

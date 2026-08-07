@@ -44,17 +44,29 @@ pub const CHAT_CHAIN: &[&str] = &[
 ///
 /// Üç kural da halüsinasyona karşı:
 /// veriye bağlı kal, bilmediğini söyle, sayı uydurma.
-pub fn assistant_system_prompt(context: &str) -> String {
+pub fn assistant_system_prompt(context: &str, sources: &str) -> String {
+    // Hiç kaynak seçilmemişse bunu da açıkça yaz: model "veri boş" ile "seçim boş"u
+    // ayırt edemezse kullanıcıya yanlış tabloyu anlatır.
+    let yuklu = if sources.trim().is_empty() {
+        "(hiçbiri seçili değil)".to_string()
+    } else {
+        sources.to_string()
+    };
     format!(
         "Sen bu SEO yönetim uygulamasının içinde çalışan bir analiz asistanısın. \
 Kullanıcı bir e-ticaret kataloğunun SEO'sunu yönetiyor ve Google Search Console verisine bakıyor.\n\n\
+YÜKLÜ VERİ KAYNAKLARI: {yuklu}\n\
+Kullanıcı bu kaynakları sohbet girişindeki + menüsünden seçiyor ve istediği an değiştirebilir.\n\n\
 KURALLAR:\n\
 1. YALNIZCA aşağıdaki VERİ bölümüne dayan. Orada olmayan bir sayfa, sorgu veya sayı hakkında konuşma.\n\
 2. Sorulan şey veride yoksa açıkça \"bu veride yok\" de. Tahmin yürütme.\n\
 3. Sayı UYDURMA. Verideki sayıları aynen kullan; kendin hesap yapacaksan nasıl hesapladığını söyle.\n\
 4. Türkçe, kısa ve somut yaz. Genel SEO tavsiyesi değil, BU veriye dayalı öneri ver.\n\
 5. Bir işlem yapamazsın (canonical yazma, içerik üretme gibi); kullanıcıya hangi ekrandan \
-yapabileceğini söyle.\n\n\
+yapabileceğini söyle.\n\
+6. YÜKLÜ OLMAYAN bir ekranın verisi sorulursa \"bu veride yok\" DEME — o ekranın verisinin \
+seçili olmadığını söyle ve girişteki + menüsünden eklenebileceğini belirt. \
+\"Seçili değil\" ile \"veride yok\" farklı şeylerdir; ilki eksik seçim, ikincisi eksik veridir.\n\n\
 Biçim: düz metin. Vurgu için **kalın**, listeler için satır başına \"- \" kullanabilirsin.\n\n\
 === VERİ ===\n{context}"
     )
@@ -287,7 +299,7 @@ mod tests {
     /// yorum yapar. Kurallar prompt'tan düşerse halüsinasyon kapısı açılır.
     #[test]
     fn sistem_talimati_halusinasyon_sinirini_kuruyor() {
-        let p = assistant_system_prompt("sayfa=urun/abc tiklama=36");
+        let p = assistant_system_prompt("sayfa=urun/abc tiklama=36", "Fırsatlar, Katalog");
         assert!(p.contains("YALNIZCA"), "veriye bağlı kalma kuralı yok");
         assert!(p.contains("bu veride yok"), "bilmediğini söyleme kuralı yok");
         assert!(p.contains("UYDURMA"), "sayı uydurmama kuralı yok");
@@ -295,6 +307,23 @@ mod tests {
         // Bağlam prompt'un İÇİNDE olmalı; ayrı mesaj olarak gönderilirse model onu
         // kullanıcı isteği sanıp yönergeymiş gibi davranabilir.
         assert!(p.ends_with("sayfa=urun/abc tiklama=36"));
+    }
+
+    /// ⚠️ Faz A'nın dürüstlük ayrımı: **"seçili değil" ≠ "veride yok"**.
+    ///
+    /// Kullanıcı artık bağlam kaynaklarını + menüsünden seçiyor. Seçilmemiş bir ekran
+    /// sorulduğunda model "bu veride yok" derse kullanıcıyı yanıltır — veri duruyor,
+    /// yalnızca yüklenmemiş. Doğru cevap eylem içermeli: "+ menüsünden ekleyin".
+    #[test]
+    fn yuklu_kaynaklar_promptta_ve_secili_degil_ayrimi_kurulu() {
+        let p = assistant_system_prompt("FIRSATLAR:\n- x", "Fırsatlar, Katalog");
+        assert!(p.contains("Fırsatlar, Katalog"), "yüklü kaynak listesi prompt'ta yok");
+        assert!(p.contains("YÜKLÜ OLMAYAN"), "seçili olmayan kaynak kuralı yok");
+        assert!(p.contains("+ menüsünden"), "kullanıcıya eylem gösterilmiyor");
+
+        // Hiç kaynak seçilmemişse bu da açıkça yazılmalı; boş dize sessizce geçmemeli.
+        let bos = assistant_system_prompt("özet", "");
+        assert!(bos.contains("(hiçbiri seçili değil)"), "boş seçim belirtilmemiş");
     }
 
     #[test]
@@ -337,7 +366,7 @@ mod tests {
         let ctx = "FIRSATLAR:\n- Ergotron WorkFit-T [DGR.AKS.33-397] gösterim=474 tıklama=2 konum=4.1";
         let out = chat_stream(
             &key,
-            &assistant_system_prompt(ctx),
+            &assistant_system_prompt(ctx, "Fırsatlar"),
             &[ChatMessage {
                 role: "user".into(),
                 text: "Geçen yılın toplam cirosu ne kadardı?".into(),
