@@ -226,6 +226,27 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    Teknik zemin hazır: gönderim modülü `extraDetails` alanına zaten yazıyor (teknik tablo
    oradan gidiyor), yani iş "yeni yetenek" değil, mevcut gönderime bir parça eklemek.
 
+0aw. 🔴 **İSİMSİZ İKON, SIRADAKİ ADIMI GİZLER — Faz B'nin gecikmiş bedeli (saha, 2026-08-07).**
+   Kullanıcı "Satışta olmayanlar'da halef seçim modali gelmiyor, seçim yapılamıyor" dedi ve
+   bunu bir kod çakışması sandı. **Modal çalışıyordu** — harness'te her iki yolda da açıldığı
+   ölçüldü (öneri varsa onay modali, yoksa hedef seçme modali). Bulunamıyordu.
+
+   Sebep: Faz B'de etiketli **"Hedef seç ve ayarla"** düğmesi isimsiz bir zincir ikonuna
+   çevrildi. Eski akışta "Halef öner" düğmesi sonuç gelince YERİNİ etiketli bir sonraki-adım
+   düğmesine bırakıyordu; yeni tabloda iki ikon da hep orada duruyor ve öneri geldiğinde
+   İşlem sütununda **hiçbir şey değişmiyor**. Ders: ikon sütunu eylemleri *taşır*, ama
+   **"şimdi şunu yap" sinyalini taşımaz**.
+
+   Çözüm: `TableRow.subAction` — sonucun YAZDIĞI ikincil satır tıklanabilir hâle geliyor
+   ("Uygun halef bulunamadı — hedef seçin"). Sonucun göründüğü yer, eylemin de durduğu yer.
+
+   Aynı ekranda iki kusur daha çıktı, ikisi de Faz B'den eski:
+   - **Tek `successorBusy` dizesi "hepsini pasifleştir" diye okunuyordu.** Ölçüldü: bir satıra
+     basınca **50 düğmenin 25'i** (her satırın halef düğmesi) sönüyordu. Durum URL başına
+     kaydırıldı → ölçüm 25 → **1**. Kota koruması isteğe bağlılıktır, çağrıları sıraya dizmek değil.
+   - **"Halefi yeniden öner" ipucu yalan söylüyordu:** `successors[url]` doluysa fonksiyon
+     sessizce dönüyordu. Artık gerçekten yeniden istiyor.
+
 0av. ✅ **ASİSTAN BAĞLAM SEÇİMİ (Faz A).** Asistan artık son gezilen ekrana kilitli değil.
    Girişin solundaki **"+"** menüsünden **7 kaynak** seçiliyor (5 SEO aracı + Sonuçlar +
    Katalog), seçim **sohbetin ortasında değiştirilebiliyor** ve seçili kaynaklar çip olarak

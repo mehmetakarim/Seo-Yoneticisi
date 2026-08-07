@@ -51,7 +51,9 @@ interface State {
   opportunityError: string;
   /** EOL url → halef önerisi. İstek üzerine dolar, önbelleklenir. */
   successors: Record<string, SuccessorSuggestion>;
-  successorBusy: string;
+  /** Halef önerisi beklenen EOL url'leri. ⚠️ Tek dize DEĞİL, URL başına: tek bir dize
+   *  ekranda "hepsini pasifleştir" diye okunuyordu (saha hatası, 2026-08-07). */
+  successorBusy: Record<string, boolean>;
   catalogBusy: boolean;
   /** Açık onay bekleyen canonical işlemi. Tek seferde YALNIZCA BİR tane —
    *  kullanıcı kararı: toplu değil, gerektiğinde ve tek tek. */
@@ -130,7 +132,7 @@ export const useStore = defineStore("app", {
     opportunityBusy: false,
     opportunityError: "",
     successors: {},
-    successorBusy: "",
+    successorBusy: {},
     catalogBusy: false,
     canonicalPending: null,
     canonicalBusy: false,
@@ -376,18 +378,24 @@ export const useStore = defineStore("app", {
      * Satışta olmayan bir sayfa için halef önerisi al.
      *
      * İSTEK ÜZERİNE, tek sayfa için: 1.073 EOL sayfanın tamamı için model çağırmak günlük
-     * kotayı (flash modellerde 20/gün) anında tüketirdi. Sonuç bellekte tutulur, aynı sayfa
-     * için ikinci kez çağrılmaz.
+     * kotayı (flash modellerde 20/gün) anında tüketirdi. Kota koruması **isteğe bağlılıktır**,
+     * çağrıları sıraya dizmek değil.
+     *
+     * 🔴 Saha geri bildirimi (2026-08-07): eskiden tek bir `successorBusy` dizesi vardı ve
+     * ekran onu "herhangi biri meşgulse HEPSİNİ pasifleştir" diye okuyordu — bir satıra
+     * basınca 25 satırın düğmesi birden sönüyordu. Ayrıca `successors[url]` doluysa fonksiyon
+     * sessizce dönüyordu; oysa düğmenin ipucu "Halefi yeniden öner" diyordu. İkisi de düzeldi:
+     * durum artık **URL başına**, ve mevcut öneri yeniden istenebiliyor.
      */
     async suggestSuccessor(url: string) {
-      if (this.successorBusy || this.successors[url]) return;
-      this.successorBusy = url;
+      if (this.successorBusy[url]) return;
+      this.successorBusy[url] = true;
       try {
         this.successors[url] = await api.suggestEolSuccessor(url);
       } catch (e) {
         this.toast(String(e), "error");
       } finally {
-        this.successorBusy = "";
+        delete this.successorBusy[url];
       }
     },
 

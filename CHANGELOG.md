@@ -13,6 +13,16 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.11.0
+- Yeni: **AI Asistanı artık hangi verilerle konuşacağınızı size sorduruyor** — giriş kutusunun solundaki **+** düğmesinden veri kaynağı seçiliyor. Beş SEO aracı, Sonuçlar ve Katalog listede
+- Seçim **sohbetin ortasında değiştirilebiliyor**: aynı pencerede önce Fırsatlar'ı, sonra Satışta olmayanlar'ı konuşabilirsiniz. Yeni sohbet açmaya gerek yok
+- Seçili kaynaklar girişin üstünde **çip** olarak duruyor — asistanın neyi gördüğünü görüyorsunuz. Eski "önce o ekrana gidin" uyarısı kalktı
+- Asistan, seçili olmayan bir ekranın verisi sorulduğunda artık "bu veride yok" demiyor; o kaynağın seçili olmadığını söyleyip **+** menüsünü gösteriyor
+- Kaydedilen sohbetler kaynak seçimini de hatırlıyor; eski sohbetleriniz olduğu gibi açılıyor
+- Düzeltme (**Satışta olmayanlar**): bir sayfa için "Halef öner"e basıldığında listedeki **tüm** satırların düğmesi pasifleşiyordu. Artık yalnızca o satır bekliyor, diğer satırlarla aynı anda çalışabiliyorsunuz
+- Düzeltme: halef sonucu geldiğinde sıradaki adım görünmüyordu. Sonuç yazısı artık tıklanabilir — "Uygun halef bulunamadı — hedef seçin" doğrudan seçim ekranını açıyor
+- Düzeltme: "Halefi yeniden öner" düğmesi hiçbir şey yapmıyordu; artık gerçekten yeniden öneriyor
+
 ## v0.10.0
 - Yeni: **sonuç takibi** — "yaptığım iş işe yaradı mı?" sorusu artık cevaplanıyor. Search Console geçmişi bir kez getiriliyor, mağazaya yaptığınız gönderimlerin öncesi ve sonrası karşılaştırılıyor
 - Genel Bakış'ta **Sonuçlar şeridi**: kaç gönderim izleniyor, kaçı iyileşti/değişmedi/geriledi, net kaç tıklama

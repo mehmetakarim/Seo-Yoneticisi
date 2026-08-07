@@ -43,6 +43,15 @@ export interface TableRow {
   sub?: string;
   /** İkincil satırın baloncuğu — uzun gerekçe metni satıra sığmadığında. */
   subTip?: string;
+  /**
+   * Verilirse ikincil satır TIKLANABİLİR olur ve bu eylemi yayar.
+   *
+   * ⚠️ Neden var: İşlem sütunu isimsiz ikonlardan oluşuyor ve bir satırda "sıradaki adım"
+   * belirdiğinde (örn. halef önerisi geldi → şimdi canonical ayarlanacak) hangi ikona
+   * basılacağı görünmüyordu. Sonucun YAZDIĞI yer, eylemin de durduğu yer olmalı.
+   * (Satışta olmayanlar ekranında saha hatası, 2026-08-07.)
+   */
+  subAction?: ActionKey;
   values?: Record<string, string | number | null | undefined>;
   /** `tip` verilirse mevcut `[data-tip]` baloncuk sistemi kullanılır. */
   badges?: Record<string, { label: string; tone: string; tip?: string }>;
@@ -320,14 +329,19 @@ const skeletons = computed(() =>
                 <template v-if="col.type === 'text'">
                   <div :class="{ indent: ci === 0 && item.indent }">
                     <div class="cell-name">{{ metin(item.row, col, ci === 0) }}</div>
-                    <div
+                    <component
+                      :is="item.row.subAction ? 'button' : 'div'"
                       v-if="ci === 0 && item.row.sub"
                       class="cell-sub"
-                      :class="{ 'tip-below': !!item.row.subTip }"
+                      :class="{ 'tip-below': !!item.row.subTip, link: !!item.row.subAction }"
                       :data-tip="item.row.subTip"
+                      @click.stop="
+                        item.row.subAction &&
+                          emit('action', { id: item.row.id, key: item.row.subAction, danger: false })
+                      "
                     >
                       {{ item.row.sub }}
-                    </div>
+                    </component>
                   </div>
                 </template>
 
@@ -561,6 +575,25 @@ const skeletons = computed(() =>
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Tıklanabilir sonuç satırı — `subAction` verilmişse. Düğme görünümü değil, bağlantı
+   görünümü: satırın içinde ikinci bir düğme gövdesi gürültü olurdu. */
+button.cell-sub {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+}
+.cell-sub.link {
+  color: var(--accent);
+  font-weight: 560;
+  cursor: pointer;
+}
+.cell-sub.link:hover {
+  text-decoration: underline;
 }
 .cell-num {
   font-size: 12.5px;

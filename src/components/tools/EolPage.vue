@@ -47,23 +47,31 @@ const n = (x: number) => Math.round(x).toString();
 const tableRows = computed<TableRow[]>(() =>
   rows.value.slice(0, limit.value).map((e) => {
     const s = store.successors[e.url];
-    const bakiliyor = store.successorBusy === e.url;
+    const bakiliyor = !!store.successorBusy[e.url];
     return {
       id: e.url,
       name: e.slug,
       // Halef sonucu ikincil satırda: eskiden ad hücresinin içine gömülü bir blok halindeydi
       // ve satır yüksekliğini ekrandan ekrana bozuyordu.
+      //
+      // 🔴 Sonuç metni ARTIK TIKLANABİLİR (saha geri bildirimi, 2026-08-07). Faz B'de etiketli
+      // "Hedef seç ve ayarla" düğmesini isimsiz bir zincir ikonuna çevirmiştim; öneri gelince
+      // ekranda "sıradaki adım burada" diyen hiçbir işaret kalmamıştı ve kullanıcı seçim
+      // modalinin kaybolduğunu düşündü. Modal duruyordu — bulunamıyordu.
       sub: bakiliyor
         ? "Halef aranıyor…"
         : s
-          ? (s.sku ? `Halef: ${s.name}` : "Uygun halef bulunamadı")
+          ? (s.sku ? `Halef: ${s.name} — canonical ayarla` : "Uygun halef bulunamadı — hedef seçin")
           : "",
       subTip: s?.reason,
+      subAction: s && !bakiliyor ? ("canonical" as const) : undefined,
       values: { clk: n(e.clicks), imp: n(e.impressions), pos: e.position.toFixed(1) },
       actions: [
         {
           key: "successor",
-          disabled: !!store.successorBusy,
+          // ⚠️ YALNIZCA bu satır pasif. Eskiden `!!store.successorBusy` idi ve bir satıra
+          // basınca 25 satırın düğmesi birden sönüyordu (saha hatası).
+          disabled: bakiliyor,
           tip: bakiliyor ? "Bakılıyor…" : s ? "Halefi yeniden öner" : "Halef öner",
         },
         {

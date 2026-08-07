@@ -318,6 +318,23 @@ def main():
         "    }\n"
         # Sohbet geçmişi: bellekte tutulan minik bir taklit tablo. Kaydet → listele → aç →
         # sil akışının tamamı gerçek Gemini/SQLite'a dokunmadan doğrulanabiliyor.
+        # Halef → canonical akışı (Satışta olmayanlar). Gerçek akış modeli ve IdeaSoft'u
+        # çağırıyor; burada taklit ediliyor ki modal zinciri ağsız denenebilsin.
+        # ⚠️ `?halefyok=1` → model uygun halef bulamamış hâli (hedef SEÇME modali yolu).
+        "    if (cmd === 'suggest_eol_successor') {\n"
+        "      const yok = new URLSearchParams(location.search).has('halefyok');\n"
+        "      return new Promise(r => setTimeout(() => r(yok\n"
+        "        ? { sku: '', name: '', url: '', reason: 'Katalogda yeterince yakın bir ürün yok.' }\n"
+        "        : { sku: 'NB.LEN.21QC00CKTX', name: 'Lenovo ThinkPad T14 G6 21QC00CKTX U7-255U 32GB 1TB DOS 14\\'\\'',\n"
+        "            url: 'https://ornek.example/lenovo-thinkpad-t14-g6-21qc00cktx',\n"
+        "            reason: 'Aynı seri, bir üst nesil.' }), 900));\n"
+        "    }\n"
+        "    if (cmd === 'preview_canonical') {\n"
+        "      return Promise.resolve({ eolSlug: args.eolSlug, product_id: 4211,\n"
+        "        product_name: 'Lenovo ThinkPad T14 G6 21QC00CKTX U7-255U 32GB 1TB DOS 14\\'\\'',\n"
+        "        target_slug: args.targetSlug, current_canonical: '', new_canonical: args.targetSlug });\n"
+        "    }\n"
+        "    if (cmd === 'apply_canonical') return Promise.resolve(null);\n"
         "    if (cmd === 'search_live_products') {\n"
         f"      const LIVE = {live_json};\n"
         "      const q = (args.term || '').trim().toLowerCase();\n"
