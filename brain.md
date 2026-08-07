@@ -4,15 +4,13 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-08-07
-**Aktif faz:** **v0.8.3 yayında.** Üç kalemlik kuyruk tamamen bitti: kurulum sihirbazı (K1),
-feed değişikliği tespiti + karşılaştırma (K2), Schema.org JSON-LD (K3). Üstüne saha
-geri bildirimiyle gelen iki iş: "Neler değişti?" karşılaştırması ve IdeaSoft'tan teknik
-tablo getirme (0as — ölçüme göre satıştaki ürünlerin **%94'ünde** uygulamanın göremediği
-tablo verisi varmış).
-**Yön ve fazlar artık `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
+**Aktif faz:** **v0.11.0 yayında.** Yol haritasının ilk üç fazı bitti:
+**B** (ortak tablo + İşlem sütunu, v0.9.0) · **Ö** (ölçüm omurgası — "işe yaradı mı?", v0.10.0) ·
+**A** (asistan bağlam seçimi — "+" menüsü, v0.11.0).
+**Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
-**Sıradaki faz: B (tasarım bütünlüğü — araç ekranlarında ortak tablo + İşlem sütunu).**
+**Sıradaki faz: K (Bugün + iş kuyruğu).** Ardından S · D · C · T · P (+ serbest G).
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -27,17 +25,33 @@ v0.7.2 = sohbet geçmişi kalıcı + canonical hedefi satıştaki ürünler ·
 v0.8.0 = ilk kurulum sihirbazı + varsayılan feed adresi kaldırıldı ·
 ⚠️ **v0.8.1 HİÇ YAYINLANMADI** — notları v0.8.2'ye taşındı (gerekçe aşağıda, "Yayın") ·
 v0.8.2 = feed değişikliği tespiti + Schema.org JSON-LD ·
-**v0.8.3 = "Neler değişti?" karşılaştırması + IdeaSoft'tan teknik tablo getirme**
+v0.8.3 = "Neler değişti?" karşılaştırması + IdeaSoft'tan teknik tablo getirme ·
+v0.9.0 = Faz B: araç ekranlarında ortak tablo + İşlem sütunu ·
+v0.10.0 = Faz Ö: ölçüm omurgası (GSC geçmişi + olay günlüğü + sonuç rozetleri) ·
+**v0.11.0 = Faz A: asistan bağlam seçimi ("+" menüsü, çoklu kaynak) + Satışta olmayanlar
+halef akışı düzeltmeleri**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **137 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**13 test**; `commands/` 8 dosyaya bölünmüş durumda).
+bağımlı DEĞİL, **147 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**14 test**; `commands/` 9 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
 
-### 📋 KUYRUK — kullanıcı önceliğiyle (2026-07-31)
+### 🧭 Durum (2026-08-07 akşamı)
+
+**v0.11.0 yayında ve doğrulandı** (CI success · `latest.json` 0.11.0 · 7 platform imzalı ·
+8 not satırı). Yol haritasının **B · Ö · A** fazları bitti; sıradaki **K (Bugün + iş kuyruğu)**.
+
+⚠️ **Eylül ortasında yapılacak, unutulmamalı:** sonuç eşiklerinin (iyileşti/geriledi)
+kalibrasyonu. Şu an gerekçeli varsayılanla duruyor çünkü 72 gönderimin hepsi 26 Temmuz–7 Ağustos
+arasında yapıldı ve takip penceresi gönderimden 21 gün SONRA başlamak zorunda. Gerekçe 0au'da.
+
+Fazların **ne olduğu** aşağıdaki numaralı girdilerde (B → 0at, Ö → 0au, A → 0av, halef
+düzeltmeleri → 0aw); **nereye gittiğimiz** `yol-haritasi.md`'de.
+
+### 📋 Eski kuyruk — kullanıcı önceliğiyle (2026-07-31), tamamı bitti
 
 Sıra **kullanıcı kararı**, tahmini efor değil. **Kuyruk boş — üç kalem de bitti.**
 
@@ -226,7 +240,8 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    Teknik zemin hazır: gönderim modülü `extraDetails` alanına zaten yazıyor (teknik tablo
    oradan gidiyor), yani iş "yeni yetenek" değil, mevcut gönderime bir parça eklemek.
 
-0aw. 🔴 **İSİMSİZ İKON, SIRADAKİ ADIMI GİZLER — Faz B'nin gecikmiş bedeli (saha, 2026-08-07).**
+0aw. 🔴 **İSİMSİZ İKON, SIRADAKİ ADIMI GİZLER — Faz B'nin gecikmiş bedeli**
+   (saha geri bildirimi 2026-08-07, düzeltme **v0.11.0**).
    Kullanıcı "Satışta olmayanlar'da halef seçim modali gelmiyor, seçim yapılamıyor" dedi ve
    bunu bir kod çakışması sandı. **Modal çalışıyordu** — harness'te her iki yolda da açıldığı
    ölçüldü (öneri varsa onay modali, yoksa hedef seçme modali). Bulunamıyordu.
@@ -247,7 +262,7 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    - **"Halefi yeniden öner" ipucu yalan söylüyordu:** `successors[url]` doluysa fonksiyon
      sessizce dönüyordu. Artık gerçekten yeniden istiyor.
 
-0av. ✅ **ASİSTAN BAĞLAM SEÇİMİ (Faz A).** Asistan artık son gezilen ekrana kilitli değil.
+0av. ✅ **ASİSTAN BAĞLAM SEÇİMİ (v0.11.0, Faz A).** Asistan artık son gezilen ekrana kilitli değil.
    Girişin solundaki **"+"** menüsünden **7 kaynak** seçiliyor (5 SEO aracı + Sonuçlar +
    Katalog), seçim **sohbetin ortasında değiştirilebiliyor** ve seçili kaynaklar çip olarak
    görünüyor. Eski hâl kendini ekranda itiraf ediyordu: *"başka bir aracın verisini sormak
@@ -1449,13 +1464,17 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 ⚠️ Bu bölüm 2026-08-07'de tazelendi; "repo push bekliyor" gibi aylar önce bitmiş maddeler
 duruyordu (repo 2026-07-26'dan beri public).
 
-- **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 13) ·
-  `cargo test -p seo-core` (137) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+- **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 14) ·
+  `cargo test -p seo-core` (147) · canlı testler `-- --ignored` ile ve env değişkenleriyle
   (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
 - **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`
-  `dist/harness.html` · kipler: `?empty=1` `?setup=1` `?changed=1` `?nosnap=1`
+  `dist/harness.html` · kipler: `?empty=1` `?setup=1` `?changed=1` `?nosnap=1` `?nosonuc=1`
+  `?nav=<ekran>` `&tema=koyu` · `?halefyok=1` (halef bulunamadı yolu)
   ⚠️ `npm run build` `dist/`i siler → harness HER ZAMAN derlemeden sonra üretilir.
+  🔴 **`file://` ile AÇILMAZ** — derlenen `index.html` varlıkları `/assets/...` mutlak yolundan
+  istiyor ve dosya protokolünde bunlar bulunamıyor, sayfa sessizce boş açılıyor. HTTP üzerinden
+  servis edilmeli (`npx vite preview --port 4173`). Bir kez bu tuzağa düşüldü (2026-08-07).
 
 ### Yayın (sürüm çıkarma) — sırayla
 1. CHANGELOG'a `## vX.Y.Z` bölümü (CI **yalnızca etiketle eşleşen** bölümü çıkarır)
@@ -1475,6 +1494,8 @@ gitti, Actions açıktı, iş akışı etkindi — ama koşu hiç oluşmadı. Ç
 `gh workflow run release --ref vX.Y.Z`. İş akışı her yerde `github.ref_name` kullandığı için
 sonuç push tetikleyicisiyle **birebir aynı** (notlar, Release adı, varlıklar). Etiketledikten
 sonra koşunun gerçekten başladığını doğrula: `gh run list --limit 1`.
+   ℹ️ v0.9.0 · v0.10.0 · v0.11.0 etiketleri **normal tetikledi** — sorun kalıcı değil, ama
+   doğrulama adımı yine de atlanmamalı.
 
 - **Bu dosyayı güncelle:** her faz/önemli karar sonrası "Son güncelleme" + ilgili bölüm
 
