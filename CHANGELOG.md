@@ -20,6 +20,7 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 - Ürün ekranında **Geçmiş ve sonuç** kartı: ne yaptınız, ne zaman, sonra ne oldu
 - Ölçülen olay **mağazaya ulaşan** olaydır: yerel "tamamlandı" işaretlemesi Google'ın gördüğünü değiştirmediği için puanlanmıyor, yalnızca geçmişte görünüyor
 - İçeriği elle kopyalayıp yapıştırdığınız ürünler **ölçülemiyor** ve bu açıkça yazılıyor — gönderim düğmesini kullanırsanız sonraki değişikliğin etkisi ölçülür
+- Düzeltme: Fırsatlar tablosunda sütunlar satırdan satıra kayıyordu (rozet uzunluğu sütun genişliğini değiştiriyordu); başlıklar ve değerler artık her satırda aynı hizada
 - Nedensellik iddia edilmiyor: "bu iş sayesinde arttı" değil, "gönderimden sonraki dönemde arttı". Etkinin görünmesi en az 21 gün alıyor
 
 ## v0.9.0

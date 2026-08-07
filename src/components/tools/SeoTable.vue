@@ -132,22 +132,31 @@ const MAX_SLOTS = 5;
 const sagaYasla = (t: ColType) => t === "num" || t === "pct" || t === "change" || t === "actions";
 
 /**
- * Sütun türüne göre grid izi. İşlem sütunu SABİT: eylem sayısı ritmi bozmasın.
+ * Sütun türüne göre grid izi.
  *
- * ⚠️ Sayısal sütunlarda alt sınır **`min-content`** — sabit 78px değil. Ölçüldü: başlıklar
- * "CTR" 47px, "Konum" 62px, "Gösterim" 75px istiyor; hepsine 78px vermek Fırsatlar ekranında
- * (9 sütun) gereksiz 12px taşma yaratıp yatay çubuğu tetikliyordu. `1fr` payı artan yeri
- * eşit dağıttığı için sütunlar yine hizalı görünüyor.
+ * 🔴 **KURAL: hiçbir iz içeriğe bağlı olamaz** (`min-content` · `max-content` · `auto` YOK).
+ *
+ * Sebebi yapısal: **her satır kendi grid konteyneri.** İçeriğe bağlı bir iz, her satırda O
+ * SATIRIN içeriğine göre çözülür — "Çalışıldı" rozetli satırla "Dokunulmamış" rozetli satır
+ * farklı genişlik alır ve tablo kayar. Başlık satırı da ayrı bir grid olduğu için sütun
+ * başlıkları verinin üstüne oturmaz.
+ *
+ * Ölçüldü (2026-08-07, saha geri bildirimi): `min-content` tabanına geçince başlık x=512,
+ * satırlar x=526 ve x=534 çıktı — üç farklı hizalama. Yalnızca **sabit px · % · fr** izleri
+ * her satırda aynı çözülür.
+ *
+ * ⚠️ Bedeli kabul edilmiş: 10 sütunlu Fırsatlar dar pencerede yatay kaydırma açıyor. Hizasız
+ * bir tablo, kaydırmalı bir tablodan daha kötü.
  */
 function track(col: TableCol): string {
   if (col.type === "actions") return "156px";
   if (col.w) return col.w;
   if (col.type === "text") return "minmax(180px, 36%)";
-  // Rozet sütunu içeriği kadar: "—" ile "Dokunulmamış" arasında 70px fark var, sabit
-  // taban ikisinden birine haksızlık ediyor.
-  if (col.type === "badge") return "minmax(min-content, max-content)";
+  // Sabit: en uzun rozet "Dokunulmamış" (104px) + hücre dolgusu (24px) = 128px.
+  if (col.type === "badge") return "132px";
   if (col.type === "change") return "minmax(104px, 1fr)";
-  return "minmax(min-content, 1fr)";
+  // 76px en geniş sayısal başlığı ("Gösterim" 75px) karşılıyor; artan yeri `1fr` dağıtıyor.
+  return "minmax(76px, 1fr)";
 }
 /** Yatay kaydırmanın devreye gireceği eşik için kaba alt sınırlar (min-content tahmini 60px). */
 const grid = computed(() => props.cols.map(track).join(" "));

@@ -260,6 +260,19 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    ⚠️ Eşikte **iki koşul birden** aranıyor (≥%20 VE ≥3 tıklama): yalnızca oran bakılsaydı
    1→2 tıklama "%100 iyileşme", yalnızca mutlak fark bakılsaydı 400→403 "iyileşme" sayılırdı.
 
+   🔴 **SÜTUN HİZASI BOZULDU — yapısal ders (saha geri bildirimi, aynı gün).**
+   Yatay taşmayı çözmek için izleri `min-content`/`max-content` tabanına çevirmiştim. Sonuç:
+   tablo satırdan satıra kaydı. Sebep yapısal — **her satır KENDİ grid konteyneri**, bu yüzden
+   içeriğe bağlı bir iz her satırda o satırın içeriğine göre çözülüyor. Ölçüm: başlık x=512,
+   satırlar x=526 ve x=534 (üç farklı hizalama).
+
+   **Kural (bileşende yazılı): hiçbir grid izi içeriğe bağlı olamaz** — yalnızca sabit px, %
+   ve fr her satırda aynı çözülür. Rozet sütunu 132px sabit ("Dokunulmamış" 104px + 24px
+   dolgu), sayısal sütun `minmax(76px, 1fr)` ("Gösterim" başlığı 75px).
+
+   ⚠️ Bedeli bilinçli kabul edildi: 10 sütunlu Fırsatlar dar pencerede yatay kaydırma açıyor.
+   **Hizasız bir tablo, kaydırmalı bir tablodan daha kötü.**
+
    🔴 **Faz B'de kaldırdığım `min-width` modeli geri geldi ve yine ısırdı.** Fırsatlar 10.
    sütuna (Sonuç) çıkınca elle hesaplanan toplam 972px dedi, gerçek içerik 865px'ti ve ekran
    boşuna yatay kaydırma açtı. **Kaldırıldı:** grid izleri zaten `min-content` tabanlı, ikinci
