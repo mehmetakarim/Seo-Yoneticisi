@@ -120,7 +120,7 @@ pub fn set_theme(
     }
     // Pencere çerçevesi de temayla birlikte değişsin: koyu temada açık bir başlık çubuğu
     // uygulamanın "içine yapıştırılmış" gibi durmasına yol açıyordu (kullanıcı isteği).
-    apply_window_theme(&app, &theme);
+    apply_window_theme(&app, Some(theme.as_str()));
     Ok(())
 }
 
@@ -132,11 +132,19 @@ pub fn set_theme(
 ///
 /// Sessiz başarısız oluyor: tema kozmetik, pencere hedefi bulunamadı diye ayar kaydı
 /// başarısız sayılmamalı.
-pub fn apply_window_theme(app: &tauri::AppHandle, theme: &str) {
+/// `theme`: `None` ise **sistem temasına bırakılır**.
+///
+/// 🔴 Bu ayrım şart: ilk kurulumda kayıtlı tema yok. Boş dizeyi "light" saymak, macOS'i koyu
+/// modda kullanan yeni bir kullanıcının penceresini zorla açık yapardı — sistem ayarını
+/// ezmek bizim işimiz değil.
+pub fn apply_window_theme(app: &tauri::AppHandle, theme: Option<&str>) {
     use tauri::{Manager, Theme};
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.set_theme(Some(if theme == "dark" { Theme::Dark } else { Theme::Light }));
-    }
+    let Some(w) = app.get_webview_window("main") else { return };
+    let _ = w.set_theme(match theme {
+        Some("dark") => Some(Theme::Dark),
+        Some("light") => Some(Theme::Light),
+        _ => None,
+    });
 }
 
 #[tauri::command]

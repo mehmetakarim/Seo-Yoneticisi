@@ -211,6 +211,7 @@ def main():
     TODAY_Q = {
         "analyzed_at": "2026-08-07T21:27:10",
         "hidden": 0,
+        "done_count": 0,
         "review_ready_at": "2026-09-15",
         "bucket_counts": [
             {"bucket": "urgent", "label": "Acil", "candidates": 10},
@@ -230,7 +231,7 @@ def main():
                        f"gidiyor (konum {_eol_ornek['position']:.1f})",
              "clicks": _eol_ornek["clicks"], "score": round(_eol_ornek["clicks"] * 0.6, 1),
              "page": "eol", "focus_id": _eol_ornek["url"],
-             "minutes": 1, "also": []},
+             "minutes": 1, "also": [], "done": False},
             # ⚠️ Bakım maddeleri de GERÇEK rapordan: uydurma SKU'larla derin link hiçbir satıra
             # denk gelmiyordu ve doğrulama yanlışlıkla "ekran doğru" deyip geçiyordu.
             {"reference": {"kind": "product", "ref": _dec0["sku"]},
@@ -238,7 +239,7 @@ def main():
              "reason": f"tıklama {round(_dec0['clicks_before'])}→{round(_dec0['clicks_now'])}, "
                        f"konum {_dec0['position_before']:.1f}→{_dec0['position_now']:.1f}",
              "clicks": _dec0["clicks_lost"], "score": round(_dec0["clicks_lost"] * 0.8, 1),
-             "page": "decay", "focus_id": _dec0["sku"], "minutes": 2, "also": []},
+             "page": "decay", "focus_id": _dec0["sku"], "minutes": 2, "also": [], "done": False},
             {"reference": {"kind": "product", "ref": _dec1["sku"]},
              "bucket": "upkeep", "title": _dec1["name"],
              "reason": f"tıklama {round(_dec1['clicks_before'])}→{round(_dec1['clicks_now'])}, "
@@ -247,24 +248,24 @@ def main():
              "page": "decay", "focus_id": _dec1["sku"], "minutes": 2,
              # Birden çok kovada görünen ürünün "ayrıca" satırları (ölçüm: 12 ürün 2+ kovada).
              "also": ["mağazaya gönderildikten sonra feed değişti (açıklama) — canlıdaki metin bayat",
-                      "konum 9.3, 1074 gösterim ama 11 tıklama — 19 tıklama kaçıyor"]},
+                      "konum 9.3, 1074 gösterim ama 11 tıklama — 19 tıklama kaçıyor"], "done": False},
             {"reference": {"kind": "product", "ref": "NB.LEN.21SX007CTX"},
              "bucket": "urgent", "title": "Lenovo ThinkPad E14 G7 21SX007CTX U7-255H 16G 512G",
              "reason": "mağazaya gönderildikten sonra feed değişti (açıklama) — canlıdaki metin bayat",
              "clicks": 17, "score": 57, "page": "products", "focus_id": "NB.LEN.21SX007CTX",
              "minutes": 2,
-             "also": ["konum 6.8, 891 gösterim ama 17 tıklama — 19 tıklama kaçıyor"]},
+             "also": ["konum 6.8, 891 gösterim ama 17 tıklama — 19 tıklama kaçıyor"], "done": False},
             {"reference": {"kind": "product", "ref": "ADP.ARB.R9M79A"},
              "bucket": "urgent", "title": "Aruba R9M79A Instant On 12V/18W RW Güç Adaptörü",
              "reason": "mağazaya gönderildikten sonra feed değişti (açıklama) — canlıdaki metin bayat",
              "clicks": 0, "score": 40, "page": "products", "focus_id": "ADP.ARB.R9M79A",
-             "minutes": 2, "also": []},
+             "minutes": 2, "also": [], "done": False},
             {"reference": {"kind": "product", "ref": _opp0["sku"]},
              "bucket": "leverage", "title": _opp0["name"],
              "reason": f"konum {_opp0['position']:.1f}, {round(_opp0['impressions'])} gösterim ama "
                        f"{round(_opp0['clicks'])} tıklama — {round(_opp0['missed_clicks'])} tıklama kaçıyor",
              "clicks": _opp0["missed_clicks"], "score": round(_opp0["missed_clicks"], 1),
-             "page": "opportunities", "focus_id": _opp0["sku"], "minutes": 2, "also": []},
+             "page": "opportunities", "focus_id": _opp0["sku"], "minutes": 2, "also": [], "done": False},
         ],
     }
     # ⚠️ Arka uç kuyruğu skora göre sıralı döndürüyor; stub elle yazıldığı için burada
@@ -398,15 +399,24 @@ def main():
         "      if (new URLSearchParams(location.search).has('boskuyruk'))\n"
         "        return Promise.resolve({ ...Q, items: [], hidden: 2 });\n"
         "      const gizli = (window.__GIZLI__ = window.__GIZLI__ || []);\n"
+        "      const yapildi = (window.__YAPILDI__ = window.__YAPILDI__ || []);\n"
+        "      const kalan = Q.items.filter(i => !gizli.includes(i.reference.ref))\n"
+        "        .map(i => ({ ...i, done: yapildi.includes(i.reference.ref) }));\n"
         "      return Promise.resolve({ ...Q, hidden: gizli.length,\n"
-        "        items: Q.items.filter(i => !gizli.includes(i.reference.ref)) });\n"
+        "        done_count: kalan.filter(i => i.done).length, items: kalan });\n"
         "    }\n"
         "    if (cmd === 'dismiss_queue_item') {\n"
         "      (window.__GIZLI__ = window.__GIZLI__ || []).push(args.reference);\n"
         "      return Promise.resolve(null);\n"
         "    }\n"
+        # ⚠️ "Yapıldı" maddeyi SİLMİYOR, done=true yapıyor — gün bitebilsin diye.
         "    if (cmd === 'complete_queue_item') {\n"
-        "      (window.__GIZLI__ = window.__GIZLI__ || []).push(args.reference);\n"
+        "      (window.__YAPILDI__ = window.__YAPILDI__ || []).push(args.reference);\n"
+        "      return Promise.resolve(null);\n"
+        "    }\n"
+        "    if (cmd === 'restore_queue_item') {\n"
+        "      window.__YAPILDI__ = (window.__YAPILDI__ || []).filter(r => r !== args.reference);\n"
+        "      window.__GIZLI__ = (window.__GIZLI__ || []).filter(r => r !== args.reference);\n"
         "      return Promise.resolve(null);\n"
         "    }\n"
         "    if (cmd === 'restore_queue_items') { window.__GIZLI__ = []; return Promise.resolve(null); }\n"

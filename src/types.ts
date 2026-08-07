@@ -474,6 +474,8 @@ export interface QueueItem {
   minutes: number;
   /** Aynı ürünün diğer kovalardaki sebepleri. */
   also: string[];
+  /** Bugün "yapıldı" işaretlendi mi — madde listeden düşmez, üstü çizili kalır. */
+  done: boolean;
 }
 
 export interface BucketCount {
@@ -486,6 +488,8 @@ export interface TodayQueue {
   items: QueueItem[];
   analyzed_at: string;
   hidden: number;
+  /** Listede kaç madde "yapıldı" — ilerleme çubuğu bunu gösteriyor. */
+  done_count: number;
   bucket_counts: BucketCount[];
   /** Sonuç kontrolü kovası boşsa en erken dolacağı tarih; doluysa "". */
   review_ready_at: string;

@@ -177,6 +177,14 @@ pub struct QueueItem {
     /// Aynı ürünün diğer kovalardaki sebepleri ("düşüşte", "feed değişti").
     /// Ölçüm: 12 ürün 2+ kovada, 4'ü üç kovada birden.
     pub also: Vec<String>,
+    /// Bugün "yapıldı" işaretlendi mi.
+    ///
+    /// 🔴 **Saha geri bildirimi (2026-08-08):** işaretlenen madde listeden ANINDA
+    /// düşüyordu ve yerine 11. aday geliyordu — sayaç hep 10'da kalıyor, gün bitmiyordu
+    /// (*"bu mantık ile günlük iş hiç bitmez"*). Artık madde **yerinde kalıyor**, üstü
+    /// çizili görünüyor ve ilerleme sayılabiliyor: günün listesi sabit, işledikçe doluyor.
+    #[serde(default)]
+    pub done: bool,
 }
 
 /// Feed değişikliği üretilmiş METNİ geçersiz kılıyor mu?
@@ -231,6 +239,7 @@ pub fn dedupe(mut cands: Vec<Candidate>) -> Vec<QueueItem> {
             focus_id: c.focus_id,
             minutes: c.minutes,
             also: Vec::new(),
+            done: false,
         });
     }
     out

@@ -1000,10 +1000,20 @@ export const useStore = defineStore("app", {
         if (kind === "product") void this.loadOutcomes();
         this.toast(
           kind === "product"
-            ? "Yapıldı olarak işaretlendi — sonucu 28 gün sonra ölçülecek."
+            ? "Yapıldı — sonucu 28 gün sonra ölçülecek."
             : "Yapıldı olarak işaretlendi.",
           "ok",
         );
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    /** Tek maddenin kararını geri alır ("geri al" bağlantısı). */
+    async restoreQueueItem(kind: string, reference: string) {
+      try {
+        await api.restoreQueueItem(kind, reference);
+        await this.loadToday();
       } catch (e) {
         this.toast(String(e), "error");
       }

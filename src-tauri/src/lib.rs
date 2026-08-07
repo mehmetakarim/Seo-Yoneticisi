@@ -31,8 +31,8 @@ pub fn run() {
             let db_path = dir.join("seo-yoneticisi.db");
             let conn = db::open(&db_path).expect("veritabanı hazırlanamadı");
             // Pencere çerçevesini kayıtlı temayla açılışta hizala — ilk karede doğru renk.
-            let kayitli = db::get_setting(&conn, "theme").ok().flatten().unwrap_or_default();
-            commands::apply_window_theme(app.handle(), &kayitli);
+            let kayitli = db::get_setting(&conn, "theme").ok().flatten();
+            commands::apply_window_theme(app.handle(), kayitli.as_deref());
 
             app.manage(AppState {
                 conn: Mutex::new(conn),
@@ -57,6 +57,7 @@ pub fn run() {
             commands::get_today_queue,
             commands::dismiss_queue_item,
             commands::complete_queue_item,
+            commands::restore_queue_item,
             commands::restore_queue_items,
             commands::get_jsonld,
             commands::mark_details_done,

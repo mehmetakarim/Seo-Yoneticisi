@@ -18,6 +18,8 @@ pub struct TodayQueue {
     pub analyzed_at: String,
     /// Gizlenmiş/ertelenmiş madde sayısı (geri alma düğmesi bunu gösteriyor).
     pub hidden: usize,
+    /// Bugünün listesinde kaç madde "yapıldı" — ilerleme çubuğu bunu gösteriyor.
+    pub done_count: usize,
     /// Kovaların o anki aday sayısı — boş kova "neden boş" diyebilsin diye.
     pub bucket_counts: Vec<BucketCount>,
     /// Sonuç kontrolü kovası boşsa en erken ne zaman dolacağı (YYYY-AA-GG) — boşsa "".
@@ -38,26 +40,43 @@ pub struct BucketCount {
 ///
 /// Erteleme süresi dolmuşsa gizli sayılmıyor; kayıt temizlenmesine gerek yok, sorgu bugünün
 /// tarihine bakıyor.
-fn dismissals(conn: &Connection, analyzed_at: &str) -> Vec<(String, String)> {
-    let bugun = now_str()[..10].to_string();
-    let mut stmt = match conn.prepare(
-        // Üç biçim, tek sorgu:
-        //   kalıcı gizleme  → until ve done_at_analysis boş
-        //   erteleme        → until henüz geçmemiş
-        //   yapıldı         → İŞARETLENDİĞİ ANALİZ hâlâ geçerli
-        // ⚠️ Son madde bilinçli: analiz yenilendiğinde "yapıldı" işareti düşer. İş gerçekten
-        // işe yaradıysa madde zaten yeni raporda çıkmaz; yaramadıysa geri gelmeli.
-        "SELECT kind, ref FROM queue_dismissals
-         WHERE (until IS NULL AND done_at_analysis IS NULL)
-            OR until > ?1
-            OR done_at_analysis = ?2",
-    ) {
+fn sorgu(conn: &Connection, sql: &str, p: &[&dyn rusqlite::ToSql]) -> Vec<(String, String)> {
+    let mut stmt = match conn.prepare(sql) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
-    stmt.query_map(params![bugun, analyzed_at], |r| Ok((r.get(0)?, r.get(1)?)))
+    stmt.query_map(p, |r| Ok((r.get(0)?, r.get(1)?)))
         .map(|rows| rows.filter_map(Result::ok).collect())
         .unwrap_or_default()
+}
+
+/// Kuyruktan **tamamen çıkarılmış** maddeler: kalıcı gizleme ve süresi dolmamış erteleme.
+///
+/// ⚠️ "Yapıldı" burada DEĞİL — o madde listede kalmaya devam ediyor (bkz. [`completed`]).
+fn hidden(conn: &Connection) -> Vec<(String, String)> {
+    let bugun = now_str()[..10].to_string();
+    sorgu(
+        conn,
+        "SELECT kind, ref FROM queue_dismissals
+         WHERE (until IS NULL AND done_at_analysis IS NULL) OR until > ?1",
+        &[&bugun],
+    )
+}
+
+/// "Yapıldı" işaretli maddeler — yalnızca **işaretlendiği analiz** için geçerli.
+///
+/// 🔴 Bu maddeler kuyruktan ÇIKARILMIYOR, yerinde kalıp üstü çizili gösteriliyor. Anında
+/// düşürüldüğünde yerlerine yeni aday geliyor, sayaç hep 10'da kalıyor ve gün hiç bitmiyordu
+/// (saha geri bildirimi, 2026-08-08).
+///
+/// Analiz yenilendiğinde işaret düşer: iş işe yaradıysa madde zaten yeni raporda çıkmaz,
+/// yaramadıysa geri gelmeli.
+fn completed(conn: &Connection, analyzed_at: &str) -> Vec<(String, String)> {
+    sorgu(
+        conn,
+        "SELECT kind, ref FROM queue_dismissals WHERE done_at_analysis = ?1",
+        &[&analyzed_at],
+    )
 }
 
 fn ref_key(r: &ItemRef) -> (&'static str, String) {
@@ -289,7 +308,10 @@ pub fn get_today_queue(state: State<'_, AppState>) -> Result<TodayQueue, String>
         });
     }
 
-    let gizli = dismissals(&conn, &report.analyzed_at);
+    // ⚠️ İKİ AYRI liste: gizlenenler kuyruktan çıkar, "yapıldı" olanlar YERİNDE KALIR.
+    // Anında düşürmek günü bitmez kılıyordu (saha geri bildirimi) — bkz. `completed`.
+    let gizli = hidden(&conn);
+    let yapilan = completed(&conn, &report.analyzed_at);
     let kalan: Vec<Candidate> = all
         .into_iter()
         .filter(|c| {
@@ -318,10 +340,18 @@ pub fn get_today_queue(state: State<'_, AppState>) -> Result<TodayQueue, String>
         .unwrap_or_default()
     };
 
+    let mut items = queue::pick(kalan);
+    for it in &mut items {
+        let (k, r) = ref_key(&it.reference);
+        it.done = yapilan.iter().any(|(dk, dr)| dk == k && *dr == r);
+    }
+    let done_count = items.iter().filter(|i| i.done).count();
+
     Ok(TodayQueue {
-        items: queue::pick(kalan),
+        items,
         analyzed_at: report.analyzed_at.clone(),
         hidden: gizli.len(),
+        done_count,
         bucket_counts,
         review_ready_at,
     })
@@ -394,6 +424,26 @@ pub fn complete_queue_item(
     Ok(())
 }
 
+/// Tek bir maddenin kuyruktan çıkarılma kararını geri alır ("geri al").
+///
+/// ⚠️ Yazılan ölçüm olayı SİLİNMİYOR: `manual_done` olayı olmuş bir şeyin kaydı, kullanıcı
+/// işareti geri alsa da o an gerçekten bir iş yapıldığı bilgisi zaman çizelgesinde kalmalı.
+/// Geri alınan tek şey maddenin kuyruktaki görünümü.
+#[tauri::command]
+pub fn restore_queue_item(
+    state: State<'_, AppState>,
+    kind: String,
+    reference: String,
+) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    conn.execute(
+        "DELETE FROM queue_dismissals WHERE kind = ?1 AND ref = ?2",
+        params![kind, reference],
+    )
+    .map_err(|e| format!("Geri alınamadı: {e}"))?;
+    Ok(())
+}
+
 /// Gizlenmiş/ertelenmiş maddelerin tamamını geri getirir.
 #[tauri::command]
 pub fn restore_queue_items(state: State<'_, AppState>) -> Result<(), String> {
@@ -428,17 +478,23 @@ mod tests {
         )
         .unwrap();
 
-        // Aynı analiz: üçü de kuyruğun dışında.
-        let ayni = dismissals(&conn, "2026-08-07T21:27:10");
-        assert_eq!(ayni.len(), 3, "aynı analizde üç madde de gizli olmalı");
+        // Gizlenenler: kalıcı + ertelenmiş. ⚠️ "Yapıldı" burada OLMAMALI — o madde listede
+        // kalıp üstü çizili gösteriliyor (gün bitebilsin diye).
+        let g: Vec<String> = hidden(&conn).into_iter().map(|(_, r)| r).collect();
+        assert_eq!(g.len(), 2, "gizlenenler yanlış: {g:?}");
+        assert!(g.iter().any(|r| r == "KALICI") && g.iter().any(|r| r == "ERTELI"));
+        assert!(
+            !g.iter().any(|r| r == "YAPILDI"),
+            "'yapıldı' kuyruktan çıkarılmış — listede kalmalıydı"
+        );
 
-        // Analiz yenilendi: kalıcı ve ertelenmiş duruyor, "yapıldı" DÜŞTÜ.
-        let yeni = dismissals(&conn, "2026-08-20T10:00:00");
-        let refs: Vec<&str> = yeni.iter().map(|(_, r)| r.as_str()).collect();
-        assert_eq!(yeni.len(), 2, "yeni analizde 'yapıldı' işareti düşmeliydi: {refs:?}");
-        assert!(refs.contains(&"KALICI"));
-        assert!(refs.contains(&"ERTELI"));
-        assert!(!refs.contains(&"YAPILDI"), "'yapıldı' kalıcı olmuş");
+        // "Yapıldı" yalnızca İŞARETLENDİĞİ analiz için geçerli.
+        assert_eq!(completed(&conn, "2026-08-07T21:27:10").len(), 1);
+        assert_eq!(
+            completed(&conn, "2026-08-20T10:00:00").len(),
+            0,
+            "yeni analizde 'yapıldı' işareti düşmeliydi"
+        );
     }
 
     /// Gerçek veritabanı KOPYASI üzerinde kuyruğun ne ürettiğini ölçer.

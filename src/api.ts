@@ -162,5 +162,8 @@ export const api = {
   /** "Yapıldı": maddeyi sonraki analize kadar çıkarır ve ürünse ölçüm olayı yazar. */
   completeQueueItem: (kind: string, reference: string) =>
     invoke<void>("complete_queue_item", { kind, reference }),
+  /** Tek maddenin "yapıldı"/gizleme kararını geri alır. Ölçüm olayı silinmez. */
+  restoreQueueItem: (kind: string, reference: string) =>
+    invoke<void>("restore_queue_item", { kind, reference }),
   restoreQueueItems: () => invoke<void>("restore_queue_items"),
 };
