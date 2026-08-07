@@ -107,6 +107,14 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         -- ⚠️ Kuyruğun KENDİSİ saklanmıyor (her açılışta hesaplanıyor); kalıcı olan tek şey
         -- kullanıcının kararı. `until` NULL ise kalıcı gizleme, doluysa o tarihe kadar erteleme.
         -- `ref` ürün için sku, satışta olmayan sayfa için slug — EOL satırlarında sku YOK.
+        --
+        -- Üç çıkarma biçimi var, üçü de bu tabloda:
+        --   until NULL + done_at_analysis NULL → kalıcı gizleme
+        --   until = 'YYYY-AA-GG'               → o tarihe kadar erteleme
+        --   done_at_analysis = analiz damgası  → "yapıldı", SONRAKİ ANALİZE KADAR
+        -- ⚠️ "Yapıldı" bilerek kalıcı değil: iş bugün yapıldı, ama analiz yenilendiğinde
+        -- sorun sürüyorsa madde geri gelmeli. Kalıcı gizleseydik gerçekten çözülmemiş bir
+        -- iş sessizce kaybolurdu.
         CREATE TABLE IF NOT EXISTS queue_dismissals (
           kind TEXT NOT NULL,
           ref TEXT NOT NULL,
@@ -124,6 +132,9 @@ pub fn init(conn: &Connection) -> Result<(), String> {
 
 /// Eski DB'lere sonradan eklenen kolonları idempotent şekilde ekler.
 fn migrate(conn: &Connection) -> Result<(), String> {
+    // Faz K sonrası: "Yapıldı" işareti hangi analize karşı verildi. ⚠️ CREATE TABLE ile
+    // eklenemez — tablo v0.11.0 sonrası kurulumlarda zaten var, `IF NOT EXISTS` sütun eklemez.
+    add_column_if_missing(conn, "queue_dismissals", "done_at_analysis", "TEXT")?;
     add_column_if_missing(conn, "seo_status", "draft_details", "TEXT")?;
     // Faz 4: SEO araştırma çıktısı (SeoInsights JSON) ürün başına saklanır.
     add_column_if_missing(conn, "seo_status", "research_json", "TEXT")?;

@@ -38,15 +38,24 @@ pub struct BucketCount {
 ///
 /// Erteleme süresi dolmuşsa gizli sayılmıyor; kayıt temizlenmesine gerek yok, sorgu bugünün
 /// tarihine bakıyor.
-fn dismissals(conn: &Connection) -> Vec<(String, String)> {
+fn dismissals(conn: &Connection, analyzed_at: &str) -> Vec<(String, String)> {
     let bugun = now_str()[..10].to_string();
     let mut stmt = match conn.prepare(
-        "SELECT kind, ref FROM queue_dismissals WHERE until IS NULL OR until > ?1",
+        // Üç biçim, tek sorgu:
+        //   kalıcı gizleme  → until ve done_at_analysis boş
+        //   erteleme        → until henüz geçmemiş
+        //   yapıldı         → İŞARETLENDİĞİ ANALİZ hâlâ geçerli
+        // ⚠️ Son madde bilinçli: analiz yenilendiğinde "yapıldı" işareti düşer. İş gerçekten
+        // işe yaradıysa madde zaten yeni raporda çıkmaz; yaramadıysa geri gelmeli.
+        "SELECT kind, ref FROM queue_dismissals
+         WHERE (until IS NULL AND done_at_analysis IS NULL)
+            OR until > ?1
+            OR done_at_analysis = ?2",
     ) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
-    stmt.query_map([&bugun], |r| Ok((r.get(0)?, r.get(1)?)))
+    stmt.query_map(params![bugun, analyzed_at], |r| Ok((r.get(0)?, r.get(1)?)))
         .map(|rows| rows.filter_map(Result::ok).collect())
         .unwrap_or_default()
 }
@@ -280,7 +289,7 @@ pub fn get_today_queue(state: State<'_, AppState>) -> Result<TodayQueue, String>
         });
     }
 
-    let gizli = dismissals(&conn);
+    let gizli = dismissals(&conn, &report.analyzed_at);
     let kalan: Vec<Candidate> = all
         .into_iter()
         .filter(|c| {
@@ -332,11 +341,56 @@ pub fn dismiss_queue_item(
 ) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
     conn.execute(
-        "INSERT INTO queue_dismissals (kind, ref, until, at) VALUES (?1,?2,?3,?4)
-         ON CONFLICT(kind, ref) DO UPDATE SET until = ?3, at = ?4",
+        "INSERT INTO queue_dismissals (kind, ref, until, at, done_at_analysis)
+         VALUES (?1,?2,?3,?4,NULL)
+         ON CONFLICT(kind, ref) DO UPDATE SET until = ?3, at = ?4, done_at_analysis = NULL",
         params![kind, reference, until, now_str()],
     )
     .map_err(|e| format!("Madde gizlenemedi: {e}"))?;
+    Ok(())
+}
+
+/// Kuyruk maddesini **yapıldı** olarak işaretler.
+///
+/// İki şey birden yapıyor ve ikincisi asıl değerli olan:
+///
+/// 1. Maddeyi kuyruktan çıkarır — ama **sonraki analize kadar** (`done_at_analysis`).
+///    Kalıcı gizleme değil: iş işe yaramadıysa madde geri gelmeli.
+/// 2. 🔑 **Ölçüm olayı yazar.** Faz Ö'nün dürüstçe itiraf ettiği boşluk buydu: *"içeriği elle
+///    kopyalayıp mağazaya yapıştıran kullanıcı için olay oluşmuyor → o ürün ölçülemiyor"*.
+///    Kullanıcının yapamadığı işleri (301 yönlendirme IdeaSoft panelinden tanımlanıyor,
+///    uygulama yapamıyor) artık ölçüme sokabiliyoruz.
+///
+/// ⚠️ `reaches_store = 1` ama `kind = "manual_done"`: bu bir **beyan**, uygulamanın
+/// doğruladığı bir gönderim değil. Zaman çizelgesi ikisini ayrı etiketliyor
+/// ("Elle yapıldı olarak işaretlendi" ↔ "IdeaSoft'a gönderildi") — kullanıcı 3 hafta sonra
+/// sonuca bakarken neye dayandığını bilmeli.
+///
+/// Yalnızca ÜRÜN maddeleri ölçülebiliyor: olay günlüğü sku'ya bağlı, satışta olmayan
+/// sayfaların sku'su yok. Sayfa maddelerinde madde yine kuyruktan çıkıyor, olay yazılmıyor.
+#[tauri::command]
+pub fn complete_queue_item(
+    state: State<'_, AppState>,
+    kind: String,
+    reference: String,
+) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    let analyzed_at: String = db::get_setting(&conn, "opportunity_json")?
+        .and_then(|j| serde_json::from_str::<OpportunityReport>(&j).ok())
+        .map(|r| r.analyzed_at)
+        .unwrap_or_default();
+
+    conn.execute(
+        "INSERT INTO queue_dismissals (kind, ref, until, at, done_at_analysis)
+         VALUES (?1,?2,NULL,?3,?4)
+         ON CONFLICT(kind, ref) DO UPDATE SET until = NULL, at = ?3, done_at_analysis = ?4",
+        params![kind, reference, now_str(), analyzed_at],
+    )
+    .map_err(|e| format!("Madde işaretlenemedi: {e}"))?;
+
+    if kind == "product" {
+        super::log_event(&conn, &reference, "manual_done", true);
+    }
     Ok(())
 }
 
@@ -352,6 +406,40 @@ pub fn restore_queue_items(state: State<'_, AppState>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Üç çıkarma biçiminin **ayrıştığını** sabitler.
+    ///
+    /// ⚠️ Asıl korunan davranış sonuncusu: **"yapıldı" kalıcı değil.** Analiz yenilendiğinde
+    /// işaret düşer; iş gerçekten işe yaradıysa madde zaten yeni raporda çıkmaz, yaramadıysa
+    /// geri gelir. Kalıcı gizleseydik çözülmemiş bir iş sessizce kaybolurdu.
+    #[test]
+    fn yapildi_isareti_sonraki_analizde_dusuyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        let bugun = now_str();
+        let yarin = (chrono::Local::now().date_naive() + chrono::Duration::days(1)).to_string();
+
+        conn.execute(
+            "INSERT INTO queue_dismissals (kind, ref, until, at, done_at_analysis)
+             VALUES ('product','KALICI',NULL,?1,NULL),
+                    ('product','ERTELI',?2,?1,NULL),
+                    ('product','YAPILDI',NULL,?1,'2026-08-07T21:27:10')",
+            params![bugun, yarin],
+        )
+        .unwrap();
+
+        // Aynı analiz: üçü de kuyruğun dışında.
+        let ayni = dismissals(&conn, "2026-08-07T21:27:10");
+        assert_eq!(ayni.len(), 3, "aynı analizde üç madde de gizli olmalı");
+
+        // Analiz yenilendi: kalıcı ve ertelenmiş duruyor, "yapıldı" DÜŞTÜ.
+        let yeni = dismissals(&conn, "2026-08-20T10:00:00");
+        let refs: Vec<&str> = yeni.iter().map(|(_, r)| r.as_str()).collect();
+        assert_eq!(yeni.len(), 2, "yeni analizde 'yapıldı' işareti düşmeliydi: {refs:?}");
+        assert!(refs.contains(&"KALICI"));
+        assert!(refs.contains(&"ERTELI"));
+        assert!(!refs.contains(&"YAPILDI"), "'yapıldı' kalıcı olmuş");
+    }
 
     /// Gerçek veritabanı KOPYASI üzerinde kuyruğun ne ürettiğini ölçer.
     ///

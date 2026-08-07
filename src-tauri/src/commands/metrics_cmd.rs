@@ -232,6 +232,9 @@ fn kind_label(kind: &str) -> &'static str {
         "details_done" => "Açıklama tamamlandı",
         "tech_done" => "Teknik tablo tamamlandı",
         "feed_ack" => "Feed değişikliği onaylandı",
+        // ⚠️ "elle" kelimesi bilinçli: uygulamanın DOĞRULADIĞI bir gönderim değil, kullanıcının
+        // beyanı. Zaman çizelgesinde ikisi karışmamalı.
+        "manual_done" => "Elle yapıldı olarak işaretlendi",
         _ => "İşlem",
     }
 }

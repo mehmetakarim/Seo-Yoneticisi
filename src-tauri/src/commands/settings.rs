@@ -109,9 +109,34 @@ pub async fn test_gsc_credentials(state: State<'_, AppState>) -> Result<String, 
 }
 
 #[tauri::command]
-pub fn set_theme(state: State<'_, AppState>, theme: String) -> Result<(), String> {
-    let conn = state.conn.lock().unwrap();
-    db::set_setting(&conn, "theme", &theme)
+pub fn set_theme(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    theme: String,
+) -> Result<(), String> {
+    {
+        let conn = state.conn.lock().unwrap();
+        db::set_setting(&conn, "theme", &theme)?;
+    }
+    // Pencere çerçevesi de temayla birlikte değişsin: koyu temada açık bir başlık çubuğu
+    // uygulamanın "içine yapıştırılmış" gibi durmasına yol açıyordu (kullanıcı isteği).
+    apply_window_theme(&app, &theme);
+    Ok(())
+}
+
+/// Pencere çerçevesini (başlık çubuğu, kenarlıklar) uygulama temasına uydurur.
+///
+/// ⚠️ Ön yüzden DEĞİL buradan yapılıyor: aynı fonksiyon açılışta da çağrılıyor (bkz. `lib.rs`),
+/// böylece pencere daha ilk karede doğru renkte açılıyor. JS tarafından yapılsaydı uygulama
+/// açık çerçeveyle açılıp bir kare sonra koyuya dönerdi.
+///
+/// Sessiz başarısız oluyor: tema kozmetik, pencere hedefi bulunamadı diye ayar kaydı
+/// başarısız sayılmamalı.
+pub fn apply_window_theme(app: &tauri::AppHandle, theme: &str) {
+    use tauri::{Manager, Theme};
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_theme(Some(if theme == "dark" { Theme::Dark } else { Theme::Light }));
+    }
 }
 
 #[tauri::command]

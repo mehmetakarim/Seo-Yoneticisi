@@ -142,6 +142,17 @@ const gunFarki = computed(() => {
             <button class="go" @click="store.openQueueItem(it.page, it.focus_id)">
               <Icon name="external" :size="12" /> Aç
             </button>
+            <!-- ⚠️ "Yapıldı" ile "Gizle" farklı şeyler: ilki "bu işi yaptım" (ölçüme girer,
+                 sonraki analizde sorun sürüyorsa geri gelir), ikincisi "bu bir iş değil". -->
+            <button
+              class="done"
+              :data-tip="it.reference.kind === 'product'
+                ? 'Bu işi yaptım. Kuyruktan çıkar ve sonucunu ölçmeye başla — mağazada gerçekten bir değişiklik yaptıysanız işaretleyin.'
+                : 'Bu işi yaptım. Madde sonraki analize kadar kuyruktan çıkar.'"
+              @click="store.completeQueueItem(it.reference.kind, it.reference.ref)"
+            >
+              <Icon name="check" :size="12" :stroke-width="2.6" /> Yapıldı
+            </button>
             <button
               class="ghost-sm"
               data-tip="Yarın tekrar göster"
@@ -394,6 +405,25 @@ const gunFarki = computed(() => {
 }
 .go:hover {
   filter: brightness(1.06);
+}
+/* "Yapıldı" — olumlu ama birincil değil: birincil eylem hâlâ "Aç" (işi orada yapıyorsunuz). */
+.done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--badge-uygun-c);
+  border-radius: 8px;
+  background: var(--badge-uygun-bg);
+  color: var(--badge-uygun-c);
+  font-size: 11.5px;
+  font-weight: 580;
+  cursor: pointer;
+  font-family: inherit;
+}
+.done:hover {
+  filter: brightness(0.97);
 }
 .ghost-sm {
   height: 28px;

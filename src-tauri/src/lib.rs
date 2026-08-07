@@ -30,6 +30,10 @@ pub fn run() {
             std::fs::create_dir_all(&dir).expect("veri klasörü oluşturulamadı");
             let db_path = dir.join("seo-yoneticisi.db");
             let conn = db::open(&db_path).expect("veritabanı hazırlanamadı");
+            // Pencere çerçevesini kayıtlı temayla açılışta hizala — ilk karede doğru renk.
+            let kayitli = db::get_setting(&conn, "theme").ok().flatten().unwrap_or_default();
+            commands::apply_window_theme(app.handle(), &kayitli);
+
             app.manage(AppState {
                 conn: Mutex::new(conn),
                 db_path,
@@ -52,6 +56,7 @@ pub fn run() {
             commands::get_product_timeline,
             commands::get_today_queue,
             commands::dismiss_queue_item,
+            commands::complete_queue_item,
             commands::restore_queue_items,
             commands::get_jsonld,
             commands::mark_details_done,

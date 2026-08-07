@@ -985,6 +985,30 @@ export const useStore = defineStore("app", {
       }
     },
 
+    /**
+     * Maddeyi "yapıldı" işaretler: kuyruktan çıkar + ölçüm olayı yaz.
+     *
+     * ⚠️ Gizlemeden farkı **kalıcı olmaması**: işaret sonraki analize kadar geçerli. İş işe
+     * yaramadıysa madde geri gelir. Ürün maddelerinde ayrıca sonuç takibi başlar — Faz Ö'nün
+     * "elle yapılan iş ölçülemiyor" boşluğu bu düğmeyle kapanıyor.
+     */
+    async completeQueueItem(kind: string, reference: string) {
+      try {
+        await api.completeQueueItem(kind, reference);
+        await this.loadToday();
+        // Ürün maddelerinde sonuç rozetleri de değişiyor; özet tazelensin.
+        if (kind === "product") void this.loadOutcomes();
+        this.toast(
+          kind === "product"
+            ? "Yapıldı olarak işaretlendi — sonucu 28 gün sonra ölçülecek."
+            : "Yapıldı olarak işaretlendi.",
+          "ok",
+        );
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
     /** Gizlenen/ertelenen maddelerin tamamını geri getirir. */
     async restoreQueueItems() {
       try {

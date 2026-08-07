@@ -159,5 +159,8 @@ export const api = {
   /** `until` yoksa kalıcı gizleme, varsa (YYYY-AA-GG) o tarihe kadar erteleme. */
   dismissQueueItem: (kind: string, reference: string, until: string | null) =>
     invoke<void>("dismiss_queue_item", { kind, reference, until }),
+  /** "Yapıldı": maddeyi sonraki analize kadar çıkarır ve ürünse ölçüm olayı yazar. */
+  completeQueueItem: (kind: string, reference: string) =>
+    invoke<void>("complete_queue_item", { kind, reference }),
   restoreQueueItems: () => invoke<void>("restore_queue_items"),
 };
