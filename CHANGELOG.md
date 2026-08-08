@@ -13,6 +13,17 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.12.0
+- Yeni: **Bugün ekranı** — menünün en üstünde, uygulama artık burada açılıyor. Sabah "hangi ekrana gideyim?" diye düşünmeden, o gün dokunulacak 10 işi sıralı olarak görüyorsunuz
+- İşler beş kovadan seçiliyor: acil (canlıda bayat içerik) · yüksek kaldıraç (kaçırılan tıklama) · kaçak trafik (satışta olmayan sayfalar) · sonuç kontrolü · bakım. Her kovadan en fazla 3 madde, böylece liste tek bir konuya saplanmıyor
+- Her maddede **neden** yazıyor ve bu cümle her zaman gerçek bir ölçümden geliyor: "515 tıklama satın alınamayan bir sayfaya gidiyor (konum 6.6)"
+- **Skor şeffaf**: yanındaki çubuk maddenin görece ağırlığını gösteriyor, üstüne gelince formülü çıkıyor, "Skor nasıl hesaplanıyor?" düğmesi ağırlıkları gerekçeleriyle açıklıyor
+- Maddeye tıklayınca doğru ekranda **doğru satıra** gidiyorsunuz — satır seçili ve görünür oluyor, listenin altlarında kalsa bile
+- **Yapıldı** düğmesi: madde listeden kaybolmuyor, üstü çizilip "3 / 10 bitti" ilerlemesine ekleniyor. Yanlışlıkla bastıysanız "geri al"
+- Yaptığınız işi mağazada elle yaptıysanız (örneğin 301 yönlendirme) "Yapıldı" artık sonuç takibini de başlatıyor — bu işler daha önce hiç ölçülemiyordu
+- Üzerinde çalışmayacağınız maddeler için **Bugünlük ertele** ve **Gizle**; gizlenenler sayaçta görünüyor ve tek tıkla geri geliyor
+- Koyu temaya geçtiğinizde **pencere çerçevesi de koyuluyor** — başlık çubuğu artık uygulamanın geri kalanıyla uyumlu
+
 ## v0.11.0
 - Yeni: **AI Asistanı artık hangi verilerle konuşacağınızı size sorduruyor** — giriş kutusunun solundaki **+** düğmesinden veri kaynağı seçiliyor. Beş SEO aracı, Sonuçlar ve Katalog listede
 - Seçim **sohbetin ortasında değiştirilebiliyor**: aynı pencerede önce Fırsatlar'ı, sonra Satışta olmayanlar'ı konuşabilirsiniz. Yeni sohbet açmaya gerek yok

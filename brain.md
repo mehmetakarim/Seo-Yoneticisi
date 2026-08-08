@@ -4,13 +4,13 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-08-07
-**Aktif faz:** **v0.11.0 yayında.** Yol haritasının ilk üç fazı bitti:
+**Aktif faz:** **v0.12.0 yayında.** Yol haritasının ilk dört fazı bitti:
 **B** (ortak tablo + İşlem sütunu, v0.9.0) · **Ö** (ölçüm omurgası — "işe yaradı mı?", v0.10.0) ·
-**A** (asistan bağlam seçimi — "+" menüsü, v0.11.0).
+**A** (asistan bağlam seçimi — "+" menüsü, v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0).
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
-**Sıradaki faz: K (Bugün + iş kuyruğu).** Ardından S · D · C · T · P (+ serbest G).
+**Sıradaki faz: S (odak seansı).** Ardından D · C · T · P (+ serbest G).
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -28,28 +28,27 @@ v0.8.2 = feed değişikliği tespiti + Schema.org JSON-LD ·
 v0.8.3 = "Neler değişti?" karşılaştırması + IdeaSoft'tan teknik tablo getirme ·
 v0.9.0 = Faz B: araç ekranlarında ortak tablo + İşlem sütunu ·
 v0.10.0 = Faz Ö: ölçüm omurgası (GSC geçmişi + olay günlüğü + sonuç rozetleri) ·
-**v0.11.0 = Faz A: asistan bağlam seçimi ("+" menüsü, çoklu kaynak) + Satışta olmayanlar
-halef akışı düzeltmeleri**
+v0.11.0 = Faz A: asistan bağlam seçimi ("+" menüsü) + halef akışı düzeltmeleri ·
+**v0.12.0 = Faz K: Bugün ekranı + iş kuyruğu (tasarım turu, "Yapıldı", koyu pencere çerçevesi)**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **147 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**14 test**; `commands/` 9 dosyaya bölünmüş durumda).
+bağımlı DEĞİL, **155 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**15 test**; `commands/` 10 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
 
 ### 🧭 Durum (2026-08-07 akşamı)
 
-**v0.11.0 yayında ve doğrulandı** (CI success · `latest.json` 0.11.0 · 7 platform imzalı ·
-8 not satırı). Yol haritasının **B · Ö · A** fazları bitti; sıradaki **K (Bugün + iş kuyruğu)**.
+**v0.12.0 yayında.** Yol haritasının **B · Ö · A · K** fazları bitti; sıradaki **S (odak seansı)**.
 
 ⚠️ **Eylül ortasında yapılacak, unutulmamalı:** sonuç eşiklerinin (iyileşti/geriledi)
 kalibrasyonu. Şu an gerekçeli varsayılanla duruyor çünkü 72 gönderimin hepsi 26 Temmuz–7 Ağustos
 arasında yapıldı ve takip penceresi gönderimden 21 gün SONRA başlamak zorunda. Gerekçe 0au'da.
 
 Fazların **ne olduğu** aşağıdaki numaralı girdilerde (B → 0at, Ö → 0au, A → 0av, halef
-düzeltmeleri → 0aw); **nereye gittiğimiz** `yol-haritasi.md`'de.
+düzeltmeleri → 0aw, K → 0ax, pencere teması → 0ay); **nereye gittiğimiz** `yol-haritasi.md`'de.
 
 ### 📋 Eski kuyruk — kullanıcı önceliğiyle (2026-07-31), tamamı bitti
 
@@ -239,6 +238,80 @@ değişti ve ikisi de bu maddeyi çürütüyor.
 
    Teknik zemin hazır: gönderim modülü `extraDetails` alanına zaten yazıyor (teknik tablo
    oradan gidiyor), yani iş "yeni yetenek" değil, mevcut gönderime bir parça eklemek.
+
+0ax. ✅ **BUGÜN EKRANI + İŞ KUYRUĞU (v0.12.0, Faz K).** Uygulama dokuz ekran sunuyordu ve
+   "nereden başlayayım?" sorusunu kullanıcı kendisi çözüyordu. Genel Bakış bunu **araç
+   düzeyinde** cevaplıyor; **satır düzeyinde** cevaplayan bir yer yoktu. Veri zaten vardı —
+   eksik olan tek şey **SEÇİMDİ**: 2.226 aday satırdan bugünün 10 işi.
+
+   Saf seçim mantığı `core/src/queue.rs`'te (8 test), kovaların tanımı `commands/today.rs`'te.
+   Kuyruk **saklanmıyor, her açılışta hesaplanıyor** (`metrics.rs` ile aynı gerekçe); kalıcı
+   olan tek şey kullanıcının kararı → `queue_dismissals`.
+
+   🔬 **Üç ölçüm tasarımı doğrudan belirledi:**
+
+   1. 🔴 **Feed bayrağı ham hâliyle %87 gürültü.** 70 bayraktan **61'i yalnızca "görseller"**;
+      görsel değişikliği üretilmiş meta/açıklama METNİNİ geçersiz kılmıyor. Acil kovası
+      daraltıldı: *metin alanı değişmiş VE mağazaya gönderilmiş* → **9 ürün**.
+   2. 🔴 **Ham skor sırası amiral analizi kuyruğa hiç sokmuyordu.** İlk 10: kaçak 4 · bakım 3 ·
+      acil 3 · **kaldıraç 0**. Sebep ölçek farkı (en büyük EOL sayfası 515 tıklama, en büyük
+      fırsat 37 kaçırılan tıklama). **Kova başına 3** sınırıyla ilk 10'da dört kova temsil
+      ediliyor.
+   3. 🔴 **12 ürün birden çok kovada** (4'ü üç kovada birden): 106 ham satır → **90 benzersiz**.
+      Bir ürün = bir madde; en güçlü sebep başlık, diğerleri "ayrıca" satırında.
+
+   **Skor şeffaf:** tıklama × kova ağırlığı, ağırlıklar ekranda gerekçesiyle. Ağırlık keyfi
+   değil — *"bu kaybın ne kadarı geri kazanılabilir ve uygulama bunu yapabilir mi?"*. Kaçak
+   trafiğin 0,6 olmasının sebebi asıl çözümün 301 olması ve **uygulamanın onu yapamaması**.
+
+   ⚠️ Süreler **tahmin, ölçüm değil** — üretim süreleri loglanmıyor; kodda ve ekranda böyle
+   işaretli. Loglanmaya başlarsa gerçek medyanla değişmeli.
+
+   🔴 **SAHA HATASI: "gün hiç bitmiyordu."** İlk sürümde "Yapıldı" maddeyi anında düşürüyor,
+   yerine 11. aday geliyordu; sayaç hep 10'da kalıyordu — *"bu mantık ile günlük iş hiç
+   bitmez"*. Tasarım turu da aynı cevabı verdi: **işaretlenen madde YERİNDE kalsın.** Üstü
+   çizili, soluk, "geri al" ile. Arka uçta iki liste ayrıştı: `hidden()` çıkarır (kalıcı
+   gizleme + erteleme), `completed()` yerinde bırakıp işaretler. Ders: *bitmesi beklenen bir
+   liste, tamamlandıkça kendini yeniden doldurmamalı.*
+
+   🔑 **"Yapıldı" bir ölçüm boşluğunu kapattı.** Faz Ö şunu itiraf ediyordu: *"içeriği elle
+   kopyalayıp yapıştıran kullanıcı için olay oluşmuyor → ölçülemiyor"*. Kuyruktaki işlerin bir
+   kısmını uygulama zaten yapamıyor (301). Artık `manual_done` + `reaches_store=1` yazılıyor.
+   ⚠️ Beyan ile doğrulanmış gönderim ayrı etiketli ("Elle yapıldı olarak işaretlendi" ↔
+   "IdeaSoft'a gönderildi"). ⚠️ İşaret **kalıcı değil** (`done_at_analysis`): analiz
+   yenilenince düşer — iş yaramadıysa madde geri gelmeli.
+
+   **Derin link için yeni odak mekanizması:** `store.focus` + `useRowFocus` + SeoTable
+   kaydırması. Üç ekran listeyi kırpıyor (EOL 25, Düşüşte 30, Yükselmeye yakın 40); gerektiğinde
+   kırpma yükseltiliyor. SeoTable'ın Faz B'den beri kullanılmayan `selected` alanı nihayet
+   kullanılıyor.
+
+   🔴 **Kaydırmada ölçümle bulunan tuzak:** satırı DOM'da bulmak YETMİYOR. Ekran değişimiyle kap
+   yeniden oluştuğu için `scrollIntoView` sessizce hiçbir şey yapmıyordu — satır seçili
+   görünüyor ama ekranın **2.228 piksel altında** duruyordu, yani "çalışıyor" sanılabilirdi.
+   Artık kaydırmanın SONUCU doğrulanıyor, olmadıysa sonraki karede tekrar deneniyor.
+
+   ⚠️ **Sonuç kontrolü kovası bugün BOŞ** ve Eylül ortasına kadar boş kalacak (72 gönderim
+   0–12 gün önce, ölçüm için 28 gün gerekiyor). Sessizce boş bırakmak yerine tarihi söylüyor.
+
+0ay. 🔴 **KOYU PENCERE ÇERÇEVESİ — "çağırdım, olmalı" üç kez yanılttı (2026-08-08).**
+   Kullanıcı isteği basitti: koyu temada pencere çerçevesi de koyu olsun. `set_theme` çağırıp
+   "oldu" dedim; **olmadı**. Uygulama çalıştırılıp ekran görüntüsü alınınca üç ayrı yanılgı
+   çıktı, her biri bir öncekini çözünce göründü:
+
+   1. **`set_theme` tek başına hiçbir şey yapmıyor.** Tanılama şaşırtıcıydı: pencere bulunuyor,
+      `Ok` dönüyor, `w.theme()` geri **Dark** okuyor — ama çubuk bembeyaz. Gördüğümüz beyaz
+      NSAppearance değil, **pencerenin ZEMİN rengiydi**; macOS başlığı zeminin üstüne çiziyor
+      ve zemin varsayılanı beyaz. → `set_background_color`.
+   2. **Zemin koyu oldu, başlık YAZISI koyu kaldı** (kullanıcı yakaladı). Tauri'nin `set_theme`i
+      macOS'te **NSApp** görünümünü değiştiriyor, pencerenin kendisininkini değil. → `objc2` ile
+      doğrudan `NSWindow.setAppearance(DarkAqua)`.
+   3. **Görünüm doğru olduğu hâlde başlık yine koyu çizildi.** `appearance()` ve
+      `effectiveAppearance()` ikisi de DarkAqua okuyor. → Zorlamak yerine soru değişti: bu yazı
+      gerekli mi? **Değil** — uygulama adı kenar çubuğunun tepesinde. `hiddenTitle: true`.
+
+   **Ders: platform API'si "Ok" döndürdü diye iş bitmiş sayılmaz; ekrana bakılmalı.** Bu
+   oturumda üç tur boşa gitmesinin sebebi buydu.
 
 0aw. 🔴 **İSİMSİZ İKON, SIRADAKİ ADIMI GİZLER — Faz B'nin gecikmiş bedeli**
    (saha geri bildirimi 2026-08-07, düzeltme **v0.11.0**).
@@ -1464,13 +1537,13 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 ⚠️ Bu bölüm 2026-08-07'de tazelendi; "repo push bekliyor" gibi aylar önce bitmiş maddeler
 duruyordu (repo 2026-07-26'dan beri public).
 
-- **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 14) ·
-  `cargo test -p seo-core` (147) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+- **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 15) ·
+  `cargo test -p seo-core` (155) · canlı testler `-- --ignored` ile ve env değişkenleriyle
   (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
 - **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`
   `dist/harness.html` · kipler: `?empty=1` `?setup=1` `?changed=1` `?nosnap=1` `?nosonuc=1`
-  `?nav=<ekran>` `&tema=koyu` · `?halefyok=1` (halef bulunamadı yolu)
+  `?nav=<ekran>` `&tema=koyu` · `?halefyok=1` (halef bulunamadı) · `?boskuyruk=1` (Bugün boş)
   ⚠️ `npm run build` `dist/`i siler → harness HER ZAMAN derlemeden sonra üretilir.
   🔴 **`file://` ile AÇILMAZ** — derlenen `index.html` varlıkları `/assets/...` mutlak yolundan
   istiyor ve dosya protokolünde bunlar bulunamıyor, sayfa sessizce boş açılıyor. HTTP üzerinden

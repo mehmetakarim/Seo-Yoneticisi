@@ -3673,7 +3673,7 @@ dependencies = [
 
 [[package]]
 name = "seo-core"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "chrono",
  "futures-util",
@@ -3691,7 +3691,7 @@ dependencies = [
 
 [[package]]
 name = "seo-yoneticisi"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "chrono",
  "objc2",
