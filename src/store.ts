@@ -21,6 +21,8 @@ import type {
   OutcomeSummary,
   OutcomeBadge,
   TodayQueue,
+  FocusState,
+  FocusSummary,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -103,6 +105,16 @@ interface State {
    * (EOL 25, Düşüşte 30, Yükselmeye yakın 40) — hedef satır render edilmemiş olabiliyor.
    */
   focus: { page: string; id: string } | null;
+  /** Odak seansı (Faz S). `session_id` null ise seans yok.
+   *  ⚠️ `focus` ADI ALINMIŞ — o, Faz K'nin satır odağı. Bu ayrı bir kavram. */
+  session: FocusState | null;
+  /** Seans başlangıcından beri geçen saniye — ekrandaki sayaç. ⚠️ Yalnızca GÖSTERİM;
+   *  ölçüm arka uçtaki zaman damgalarından çıkıyor, uygulama uyusa da bozulmuyor. */
+  sessionElapsed: number;
+  /** Süre dolunca gösterilen mola önerisi. Otomatik başlamaz — kullanıcı kararı. */
+  sessionBreakOffered: boolean;
+  /** Seans bitince gösterilen sakin bilanço. */
+  sessionSummary: FocusSummary | null;
   /** Ölçüm omurgası (Faz Ö) — sonuç özeti ve satır rozetleri. */
   outcomeSummary: OutcomeSummary | null;
   outcomeBadges: Record<string, OutcomeBadge>;
@@ -170,6 +182,10 @@ export const useStore = defineStore("app", {
     today: null,
     todayBusy: false,
     focus: null,
+    session: null,
+    sessionElapsed: 0,
+    sessionBreakOffered: false,
+    sessionSummary: null,
     outcomeSummary: null,
     outcomeBadges: {},
     seedBusy: false,
@@ -942,6 +958,94 @@ export const useStore = defineStore("app", {
      * Sonuç verisini yükler. Ölçüm omurgası yerel veritabanından okunuyor — GSC çağrısı yok,
      * bu yüzden ekran açılışında çağrılması ucuz.
      */
+    // --- Odak seansı (Faz S) ---------------------------------------------------------
+    //
+    // 🚫 Oyunlaştırma yok: XP, lig, seri cezası, konfeti yok. Sakin bir çalışma ritmi.
+
+    /** Seans durumunu okur (açılışta ve her eylemden sonra). */
+    async loadSession() {
+      try {
+        this.session = await api.getFocusState();
+        this.tickSession();
+      } catch (e) {
+        /* seans yardımcı bir özellik; okunamaması uygulamayı engellemesin */
+      }
+    },
+
+    /** Seansı başlatır ve ilk işi kilitler. */
+    async startSession() {
+      try {
+        this.session = await api.startFocusSession();
+        this.sessionSummary = null;
+        this.sessionBreakOffered = false;
+        this.tickSession();
+        if (!this.session.locked) await this.endSession("queue_empty");
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    /**
+     * Sayacı günceller. ⚠️ Sayaç yalnızca GÖSTERİM: gerçek süre arka uçtaki
+     * `started_at`/`ended_at` farkından çıkıyor, bu yüzden uygulama uyusa bile ölçüm bozulmaz.
+     */
+    tickSession() {
+      const s = this.session;
+      if (!s?.session_id) {
+        this.sessionElapsed = 0;
+        return;
+      }
+      const bas = new Date(s.started_at).getTime();
+      this.sessionElapsed = Math.max(0, Math.floor((Date.now() - bas) / 1000));
+      // Süre dolduğunda mola ÖNERİLİR, otomatik başlamaz.
+      if (this.sessionElapsed >= s.planned_minutes * 60) this.sessionBreakOffered = true;
+    },
+
+    /**
+     * Kilitli işi sonuçlandırır ve sıradakini kilitler.
+     *
+     * ⚠️ "Bitti" Faz K'nin `completeQueueItem`ini çağırıyor — yeni bir "tamamlandı" kavramı
+     * YOK. "Atla" ise **yalnızca bu seans için**: kuyrukta kalır, kalıcı karar yazılmaz.
+     */
+    async resolveSessionItem(outcome: "done" | "skipped" | "dismissed") {
+      const it = this.session?.locked;
+      if (!it) return;
+      try {
+        if (outcome === "done") {
+          await api.completeQueueItem(it.kind, it.reference);
+          if (it.kind === "product") void this.loadOutcomes();
+        }
+        this.session = await api.resolveFocusItem(outcome);
+        await this.loadToday();
+        // Kuyruk tükendiyse arka uç seansı kapattı; özeti göster.
+        if (!this.session.session_id) await this.showSessionSummary("queue_empty");
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    /** Seansı bitirir ve sakin özeti gösterir. */
+    async endSession(reason: "time_up" | "stopped" | "queue_empty") {
+      try {
+        const ozet = await api.endFocusSession(reason);
+        this.session = null;
+        this.sessionBreakOffered = false;
+        this.sessionElapsed = 0;
+        this.sessionSummary = ozet;
+        await this.loadToday();
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    /** Arka uç seansı kendi kapattığında (kuyruk tükendi) özeti çeker. */
+    async showSessionSummary(reason: string) {
+      this.sessionSummary = await api.endFocusSession(reason).catch(() => null);
+      this.session = null;
+      this.sessionElapsed = 0;
+      this.sessionBreakOffered = false;
+    },
+
     /** Bugünün kuyruğunu tazeler. Ek GSC çağrısı YOK — mevcut önbellekten hesaplanıyor. */
     async loadToday() {
       this.todayBusy = true;

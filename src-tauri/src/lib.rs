@@ -30,6 +30,9 @@ pub fn run() {
             std::fs::create_dir_all(&dir).expect("veri klasörü oluşturulamadı");
             let db_path = dir.join("seo-yoneticisi.db");
             let conn = db::open(&db_path).expect("veritabanı hazırlanamadı");
+            // Uygulama seans açıkken kapatılmışsa o seans ölçüm değil (bkz. focus.rs).
+            commands::close_stale_session(&conn);
+
             // Pencere çerçevesini kayıtlı temayla açılışta hizala — ilk karede doğru renk.
             let kayitli = db::get_setting(&conn, "theme").ok().flatten();
             commands::apply_window_theme(app.handle(), kayitli.as_deref());
@@ -55,6 +58,12 @@ pub fn run() {
             commands::get_outcome_badges,
             commands::get_product_timeline,
             commands::get_today_queue,
+            commands::start_focus_session,
+            commands::resolve_focus_item,
+            commands::end_focus_session,
+            commands::get_focus_state,
+            commands::get_focus_calibration,
+            commands::set_focus_durations,
             commands::dismiss_queue_item,
             commands::complete_queue_item,
             commands::restore_queue_item,

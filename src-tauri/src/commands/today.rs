@@ -79,7 +79,7 @@ fn completed(conn: &Connection, analyzed_at: &str) -> Vec<(String, String)> {
     )
 }
 
-fn ref_key(r: &ItemRef) -> (&'static str, String) {
+pub(crate) fn ref_key(r: &ItemRef) -> (&'static str, String) {
     match r {
         ItemRef::Product(s) => ("product", s.clone()),
         ItemRef::Page(s) => ("page", s.clone()),
@@ -134,6 +134,16 @@ fn days_since(at: &str) -> i64 {
 /// bir "iyileştirilmeli" cümlesi yok, hepsinde sayı var.
 fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
     let mut out = Vec::new();
+    // 🔑 Faz S'in ürünü: kova başına ÖLÇÜLMÜŞ süre. Yeterli örnek yoksa (kova başına 5)
+    // aşağıdaki elle yazılmış tahminler kullanılmaya devam ediyor.
+    let olculen = super::calibration(conn);
+    // Ölçülmüş süre varsa onu, yoksa elle yazılan tahmini döndürür.
+    let sure = |b: Bucket, tahmin: u32| -> (u32, bool) {
+        match olculen.get(&format!("{b:?}").to_lowercase()) {
+            Some(dk) => (*dk, true),
+            None => (tahmin, false),
+        }
+    };
     let states = product_states(conn);
     // Ürünün GSC tıklaması — acil maddelerinin skorunu da tıklama sürüyor.
     let clicks_of: std::collections::HashMap<&str, f64> = report
@@ -158,7 +168,8 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
                 clicks: *clicks_of.get(p.sku.as_str()).unwrap_or(&0.0),
                 page: "products".into(),
                 focus_id: p.sku.clone(),
-                minutes: 2,
+                minutes: sure(Bucket::Urgent, 2).0,
+                minutes_measured: sure(Bucket::Urgent, 2).1,
             });
         }
         // İş yerelde bitmiş ama mağazaya hiç ulaşmamış → Faz Ö'nün merkezi kuralına göre
@@ -172,7 +183,8 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
                 clicks: *clicks_of.get(p.sku.as_str()).unwrap_or(&0.0),
                 page: "products".into(),
                 focus_id: p.sku.clone(),
-                minutes: 1,
+                minutes: sure(Bucket::Urgent, 1).0,
+                minutes_measured: sure(Bucket::Urgent, 1).1,
             });
         }
     }
@@ -193,7 +205,8 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
             clicks: o.missed_clicks,
             page: "opportunities".into(),
             focus_id: o.sku.clone(),
-            minutes: 2,
+            minutes: sure(Bucket::Leverage, 2).0,
+            minutes_measured: sure(Bucket::Leverage, 2).1,
         });
     }
 
@@ -212,7 +225,8 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
             clicks: e.clicks,
             page: "eol".into(),
             focus_id: e.url.clone(),
-            minutes: 1,
+            minutes: sure(Bucket::Leak, 1).0,
+            minutes_measured: sure(Bucket::Leak, 1).1,
         });
     }
 
@@ -244,7 +258,8 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
                 clicks: 0.0,
                 page: "products".into(),
                 focus_id: sku,
-                minutes: 1,
+                minutes: sure(Bucket::Review, 1).0,
+                minutes_measured: sure(Bucket::Review, 1).1,
             });
         }
     }
@@ -265,7 +280,8 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
             clicks: d.clicks_lost,
             page: "decay".into(),
             focus_id: d.sku.clone(),
-            minutes: 2,
+            minutes: sure(Bucket::Upkeep, 2).0,
+            minutes_measured: sure(Bucket::Upkeep, 2).1,
         });
     }
     for c in &report.cannibalization {
@@ -281,7 +297,8 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
             clicks: c.clicks,
             page: "cannibal".into(),
             focus_id: c.query.clone(),
-            minutes: 3,
+            minutes: sure(Bucket::Upkeep, 3).0,
+            minutes_measured: sure(Bucket::Upkeep, 3).1,
         });
     }
 
@@ -292,13 +309,22 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
 #[tauri::command]
 pub fn get_today_queue(state: State<'_, AppState>) -> Result<TodayQueue, String> {
     let conn = state.conn.lock().unwrap();
-    let raw = db::get_setting(&conn, "opportunity_json")?;
+    build_today_queue(&conn)
+}
+
+/// Kuyruğu kurar — **bağlantıyı kilitlemeden**.
+///
+/// ⚠️ Ayrı bir fonksiyon çünkü odak seansı da (Faz S) aynı kuyruğu okuyor ve kilidi kendisi
+/// tutuyor. İki yerde iki farklı kuyruk kurulumu olsaydı seansın kilitlediği iş ile ekrandaki
+/// liste ayrışabilirdi.
+pub fn build_today_queue(conn: &Connection) -> Result<TodayQueue, String> {
+    let raw = db::get_setting(conn, "opportunity_json")?;
     let report: OpportunityReport = match raw {
         Some(j) => serde_json::from_str(&j).unwrap_or_default(),
         None => OpportunityReport::default(),
     };
 
-    let all = candidates(&conn, &report);
+    let all = candidates(conn, &report);
     let mut bucket_counts: Vec<BucketCount> = Vec::new();
     for b in [Bucket::Urgent, Bucket::Leverage, Bucket::Leak, Bucket::Review, Bucket::Upkeep] {
         bucket_counts.push(BucketCount {
@@ -310,8 +336,8 @@ pub fn get_today_queue(state: State<'_, AppState>) -> Result<TodayQueue, String>
 
     // ⚠️ İKİ AYRI liste: gizlenenler kuyruktan çıkar, "yapıldı" olanlar YERİNDE KALIR.
     // Anında düşürmek günü bitmez kılıyordu (saha geri bildirimi) — bkz. `completed`.
-    let gizli = hidden(&conn);
-    let yapilan = completed(&conn, &report.analyzed_at);
+    let gizli = hidden(conn);
+    let yapilan = completed(conn, &report.analyzed_at);
     let kalan: Vec<Candidate> = all
         .into_iter()
         .filter(|c| {

@@ -470,8 +470,9 @@ export interface QueueItem {
   page: string;
   /** O ekranda odaklanacak satırın kimliği. */
   focus_id: string;
-  /** ⚠️ Tahmin, ölçüm değil — üretim süreleri loglanmıyor. */
   minutes: number;
+  /** Süre ölçüldü mü? false ise elle yazılmış tahmin (Faz S ölçüyor). */
+  minutes_measured: boolean;
   /** Aynı ürünün diğer kovalardaki sebepleri. */
   also: string[];
   /** Bugün "yapıldı" işaretlendi mi — madde listeden düşmez, üstü çizili kalır. */
@@ -493,4 +494,51 @@ export interface TodayQueue {
   bucket_counts: BucketCount[];
   /** Sonuç kontrolü kovası boşsa en erken dolacağı tarih; doluysa "". */
   review_ready_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Odak seansı (Faz S)
+// ---------------------------------------------------------------------------
+
+/** Seansta o an kilitli iş — aynı anda YALNIZCA BİR tane. */
+export interface LockedItem {
+  kind: string;
+  reference: string;
+  bucket: Bucket;
+  title: string;
+  reason: string;
+  page: string;
+  focus_id: string;
+  /** Bu iş ne zaman kilitlendi — "bu işte 4 dakikadır" için. */
+  started_at: string;
+}
+
+export interface FocusState {
+  /** null ise seans yok. */
+  session_id: number | null;
+  started_at: string;
+  planned_minutes: number;
+  break_minutes: number;
+  locked: LockedItem | null;
+  done_count: number;
+  skipped_count: number;
+}
+
+/** Seans özeti — sakin bir bilanço, kutlama değil. */
+export interface FocusSummary {
+  done_count: number;
+  skipped_count: number;
+  minutes: number;
+  /** "queue_empty" | "time_up" | "stopped" */
+  ended_reason: string;
+  /** [kova, adet] — bitirilen işlerin dağılımı. */
+  buckets: [string, number][];
+}
+
+/** Ayarlar ekranı için: kova başına kaç ölçüm birikti. */
+export interface CalibrationRow {
+  bucket: string;
+  samples: number;
+  /** Yeterli örnek yoksa null — "henüz ölçülmedi". */
+  minutes: number | null;
 }

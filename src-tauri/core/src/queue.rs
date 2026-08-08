@@ -156,8 +156,10 @@ pub struct Candidate {
     pub page: String,
     /// Odaklanacak satırın kimliği — araç ekranındaki `TableRow.id` ile aynı olmalı.
     pub focus_id: String,
-    /// Önerilen eylemin kaba süresi (dakika). ⚠️ **Tahmin, ölçüm değil** — bkz. [`QueueItem`].
+    /// Önerilen eylemin süresi (dakika).
     pub minutes: u32,
+    /// Bu süre **ölçüldü mü**, yoksa elle yazılmış tahmin mi (Faz S).
+    pub minutes_measured: bool,
 }
 
 /// Seçilmiş, tekilleştirilmiş ve skorlanmış kuyruk maddesi.
@@ -171,9 +173,13 @@ pub struct QueueItem {
     pub score: f64,
     pub page: String,
     pub focus_id: String,
-    /// ⚠️ **Tahmin, ölçüm değil.** Üretim süreleri hiçbir yerde loglanmıyor; bu değer eylem
-    /// türünden türetiliyor. Süre loglanmaya başlarsa gerçek medyanla değiştirilmeli.
     pub minutes: u32,
+    /// Süre **ölçüldü mü**? `false` ise elle yazılmış tahmin.
+    ///
+    /// Faz S öncesinde hepsi tahmindi; artık odak seansı kova başına ≥5 ölçüm biriktirince
+    /// medyan devralıyor. Ekran ikisini ayırt ediyor: "≈2 dk" ↔ "2 dk · ölçüldü".
+    #[serde(default)]
+    pub minutes_measured: bool,
     /// Aynı ürünün diğer kovalardaki sebepleri ("düşüşte", "feed değişti").
     /// Ölçüm: 12 ürün 2+ kovada, 4'ü üç kovada birden.
     pub also: Vec<String>,
@@ -238,6 +244,7 @@ pub fn dedupe(mut cands: Vec<Candidate>) -> Vec<QueueItem> {
             page: c.page,
             focus_id: c.focus_id,
             minutes: c.minutes,
+            minutes_measured: c.minutes_measured,
             also: Vec::new(),
             done: false,
         });
@@ -284,6 +291,39 @@ pub fn pick(cands: Vec<Candidate>) -> Vec<QueueItem> {
     out
 }
 
+/// Bir kovanın süresinin **ölçülmüş** sayılabilmesi için gereken en az örnek.
+///
+/// 🔬 Neden bir eşik var: tek bir seans ölçümü temsil etmiyor. Kullanıcı ilk işte telefona
+/// bakmış olabilir, ikincide akışa girmiş olabilir. 5 örnek, medyanın uç değerlerden
+/// etkilenmemesi için gereken en küçük makul sayı (3'te iki uzun ölçüm medyanı taşır).
+pub const MIN_SAMPLES: usize = 5;
+
+/// Ölçülen sürelerden kova süresi — **medyan**, ortalama değil.
+///
+/// ⚠️ Ortalama kullanılmıyor: kullanıcı bir işin ortasında çay tazeleyip 40 dakika sonra
+/// dönerse ortalama uçar, medyan dayanır. Bu ölçüm duvar saati süresi olduğu için böyle
+/// kesintiler kural, istisna değil.
+///
+/// `None` dönüyorsa henüz ölçüm yok demektir; çağıran elle yazılmış tahmini kullanır ve
+/// ekran bunu "≈2 dk" (tahmin) ↔ "2 dk · ölçüldü" diye ayırt eder.
+///
+/// ⚠️ Çağıran YALNIZCA tamamlanmış işlerin sürelerini vermeli: atlanan bir iş "ne kadar
+/// sürdüğü" bilgisi taşımıyor, listeye girerse süreyi olduğundan kısa gösterir.
+pub fn calibrated_minutes(samples: &[f64]) -> Option<u32> {
+    if samples.len() < MIN_SAMPLES {
+        return None;
+    }
+    let mut v: Vec<f64> = samples.iter().copied().filter(|x| x.is_finite() && *x >= 0.0).collect();
+    if v.len() < MIN_SAMPLES {
+        return None;
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let orta = v.len() / 2;
+    let medyan = if v.len() % 2 == 0 { (v[orta - 1] + v[orta]) / 2.0 } else { v[orta] };
+    // En az 1 dakika: "0 dk" bir iş için anlamsız bir vaat olurdu.
+    Some(medyan.round().max(1.0) as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,7 +338,37 @@ mod tests {
             page: "products".into(),
             focus_id: r.into(),
             minutes: 2,
+            minutes_measured: false,
         }
+    }
+
+    #[test]
+    fn kalibrasyon_yeterli_ornek_yoksa_olcum_saymiyor() {
+        // 4 örnek MIN_SAMPLES'ın altında: tahmin yerinde kalmalı.
+        assert_eq!(calibrated_minutes(&[3.0, 4.0, 5.0, 6.0]), None);
+        assert_eq!(calibrated_minutes(&[]), None);
+        assert_eq!(calibrated_minutes(&[2.0, 2.0, 2.0, 2.0, 2.0]), Some(2));
+    }
+
+    #[test]
+    fn kalibrasyon_medyan_kullaniyor_tek_uc_deger_bozmuyor() {
+        // 🔬 Asıl korunan davranış: kullanıcı bir işin ortasında 40 dakika ara verdi.
+        // Ortalama 11 derdi (yanlış); medyan 4 diyor (doğru).
+        let ornekler = [3.0, 4.0, 4.0, 5.0, 40.0];
+        assert_eq!(calibrated_minutes(&ornekler), Some(4));
+        let ortalama: f64 = ornekler.iter().sum::<f64>() / ornekler.len() as f64;
+        assert!(ortalama > 10.0, "ortalama gerçekten sapıyor: {ortalama}");
+    }
+
+    #[test]
+    fn kalibrasyon_cift_sayida_ornekte_ortadaki_ikinin_ortasi() {
+        assert_eq!(calibrated_minutes(&[2.0, 3.0, 5.0, 7.0, 9.0, 11.0]), Some(6));
+    }
+
+    #[test]
+    fn kalibrasyon_sifira_yuvarlanmiyor() {
+        // Çok hızlı işler bile "0 dk" demez — kullanıcıya anlamsız bir vaat olurdu.
+        assert_eq!(calibrated_minutes(&[0.1, 0.2, 0.2, 0.3, 0.4]), Some(1));
     }
 
     #[test]

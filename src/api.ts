@@ -24,6 +24,9 @@ import type {
   ProductTimeline,
   SeedResult,
   TodayQueue,
+  FocusState,
+  FocusSummary,
+  CalibrationRow,
 } from "./types";
 
 export const api = {
@@ -166,4 +169,15 @@ export const api = {
   restoreQueueItem: (kind: string, reference: string) =>
     invoke<void>("restore_queue_item", { kind, reference }),
   restoreQueueItems: () => invoke<void>("restore_queue_items"),
+
+  // --- Odak seansı (Faz S) ---
+  startFocusSession: () => invoke<FocusState>("start_focus_session"),
+  /** `outcome`: "done" | "skipped" | "dismissed" */
+  resolveFocusItem: (outcome: string) => invoke<FocusState>("resolve_focus_item", { outcome }),
+  endFocusSession: (reason: string) =>
+    invoke<FocusSummary | null>("end_focus_session", { reason }),
+  getFocusState: () => invoke<FocusState>("get_focus_state"),
+  getFocusCalibration: () => invoke<CalibrationRow[]>("get_focus_calibration"),
+  setFocusDurations: (work: number, brk: number) =>
+    invoke<void>("set_focus_durations", { work, brk }),
 };

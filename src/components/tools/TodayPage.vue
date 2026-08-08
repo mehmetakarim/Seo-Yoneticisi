@@ -136,9 +136,20 @@ const gunFarki = computed(() => {
             </template>
           </div>
         </div>
-        <button class="skor-btn" @click="skorAcik = true">
-          <Icon name="info" :size="13" /> Skor nasıl hesaplanıyor?
-        </button>
+        <div class="s-btns">
+          <!-- Seans çubuğu kabukta yaşıyor; buradaki düğme yalnızca başlatıyor. -->
+          <button
+            v-if="items.length && !store.session?.session_id"
+            class="seans-btn"
+            data-tip="Kuyruktan tek iş kilitlenir, süre ölçülür. Oyunlaştırma yok."
+            @click="store.startSession()"
+          >
+            <Icon name="clock" :size="13" /> Odak seansı başlat
+          </button>
+          <button class="skor-btn" @click="skorAcik = true">
+            <Icon name="info" :size="13" /> Skor nasıl hesaplanıyor?
+          </button>
+        </div>
       </div>
 
       <!-- Kuyruk: tek yüzey, aralarında ince çizgi (tasarım kararı — kart çerçevesi yok). -->
@@ -215,7 +226,15 @@ const gunFarki = computed(() => {
           <div class="i-score">
             <div class="sc-top">
               <span class="sc-val" :data-tip="skorMetni(it)">{{ Math.round(it.score) }}</span>
-              <span class="sc-min">≈{{ it.minutes }} dk</span>
+              <!-- ⚠️ "≈" yalnızca TAHMİNDE. Ölçülmüş süre kesin yazılıyor ve baloncuk
+                   bunu söylüyor — kullanıcı neye güveneceğini bilmeli (Faz S). -->
+              <span
+                class="sc-min"
+                :class="{ olculdu: it.minutes_measured }"
+                :data-tip="it.minutes_measured
+                  ? 'Odak seanslarında ölçüldü (kova medyanı)'
+                  : 'Tahmin — bu kovada henüz yeterli ölçüm yok'"
+              >{{ it.minutes_measured ? "" : "≈" }}{{ it.minutes }} dk</span>
             </div>
             <!-- Sayı tek başına anlamsız; çubuk görece büyüklüğü veriyor. -->
             <span class="sc-bar">
@@ -368,6 +387,29 @@ const gunFarki = computed(() => {
   margin-top: 4px;
   font-size: 11px;
   color: var(--c-faint);
+}
+.s-btns {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+.seans-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 13px;
+  border: none;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 580;
+  cursor: pointer;
+  font-family: inherit;
+}
+.seans-btn:hover {
+  filter: brightness(1.06);
 }
 .skor-btn {
   flex: none;
@@ -569,6 +611,12 @@ const gunFarki = computed(() => {
   font-size: 11px;
   color: var(--c-faint);
   font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+/* Ölçülmüş süre biraz daha belirgin: tahminle aynı görünmemeli. */
+.sc-min.olculdu {
+  color: var(--c-soft);
+  font-weight: 560;
 }
 .sc-bar {
   display: block;

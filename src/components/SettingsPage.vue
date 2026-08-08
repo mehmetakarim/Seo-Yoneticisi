@@ -9,6 +9,31 @@ import Icon from "./Icon.vue";
 
 const store = useStore();
 
+// --- Odak seansı (Faz S) ---
+const seansDk = ref(25);
+const molaDk = ref(5);
+const kalibrasyon = ref<{ bucket: string; samples: number; minutes: number | null }[]>([]);
+const KOVA: Record<string, string> = {
+  urgent: "Acil",
+  leverage: "Yüksek kaldıraç",
+  leak: "Kaçak trafik",
+  review: "Sonuç kontrolü",
+  upkeep: "Bakım",
+};
+
+async function seansAyarKaydet() {
+  try {
+    await api.setFocusDurations(seansDk.value, molaDk.value);
+    await store.loadSession();
+    // Sunucu makul aralığa sıkıştırıyor; ekran gerçek değeri göstersin.
+    seansDk.value = store.session?.planned_minutes ?? seansDk.value;
+    molaDk.value = store.session?.break_minutes ?? molaDk.value;
+    store.toast("Seans süresi kaydedildi.", "ok");
+  } catch (e) {
+    store.toast(String(e), "error");
+  }
+}
+
 const feedUrl = ref("");
 const geminiKey = ref("");
 const capsolverKey = ref("");
@@ -43,6 +68,12 @@ onMounted(async () => {
   ideasoftDomain.value = store.settings.ideasoft_domain;
   ideasoftToken.value = store.settings.ideasoft_token;
   gscEmail.value = store.settings.gsc_client_email;
+
+  // Odak seansı: kayıtlı süreler + ölçüm durumu.
+  await store.loadSession();
+  seansDk.value = store.session?.planned_minutes ?? 25;
+  molaDk.value = store.session?.break_minutes ?? 5;
+  kalibrasyon.value = await api.getFocusCalibration().catch(() => []);
 });
 
 async function persist() {
@@ -529,6 +560,58 @@ async function doImport() {
         </div>
       </div>
 
+      <!-- Odak seansı (Faz S) -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ch-title">
+            <Icon name="clock" :size="17" style="color:var(--accent)" />
+            Odak seansı
+          </div>
+          <div class="ch-sub">
+            Seans kuyruktan <b>tek iş</b> kilitler ve ne kadar sürdüğünü ölçer. Ölçülen süreler
+            Bugün ekranındaki tahminlerin yerini alıyor.
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="sure-row">
+            <div>
+              <label class="lbl">Seans (dakika)</label>
+              <input v-model.number="seansDk" class="inp kisa" type="number" min="5" max="90" />
+            </div>
+            <div>
+              <label class="lbl">Mola (dakika)</label>
+              <input v-model.number="molaDk" class="inp kisa" type="number" min="1" max="30" />
+            </div>
+            <button class="solid" @click="seansAyarKaydet()">Kaydet</button>
+          </div>
+
+          <div>
+            <label class="lbl">Ölçüm durumu</label>
+            <div v-if="kalibrasyon.length" class="kal">
+              <div v-for="k in kalibrasyon" :key="k.bucket" class="kal-row">
+                <span class="kk">{{ KOVA[k.bucket] ?? k.bucket }}</span>
+                <span class="ks">{{ k.samples }} ölçüm</span>
+                <span class="kv" :class="{ yok: k.minutes === null }">
+                  {{ k.minutes === null ? "henüz yeterli değil" : `${k.minutes} dk` }}
+                </span>
+              </div>
+            </div>
+            <div v-else class="hint">
+              <Icon name="info" :size="13" />
+              Henüz ölçüm yok. Bir kovada <b>5 iş</b> bitirdiğinizde o kovanın süresi tahmin
+              olmaktan çıkıp <b>ölçüme</b> dönüyor.
+            </div>
+          </div>
+
+          <!-- 🚫 Oyunlaştırma yasağı, kullanıcıya da açıkça söyleniyor. -->
+          <div class="hint">
+            <Icon name="info" :size="13" />
+            Seans puan, rozet veya seri tutmuyor. Amaç sakin bir çalışma ritmi ve gerçek süre
+            ölçümü — mola önerilir, zorunlu değildir.
+          </div>
+        </div>
+      </div>
+
       <!-- Yedekleme -->
       <div class="card">
         <div class="card-head">
@@ -677,6 +760,49 @@ async function doImport() {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+.sure-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.inp.kisa {
+  width: 92px;
+  flex: none;
+}
+.kal {
+  border: 1px solid var(--c-border-soft);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.kal-row {
+  display: grid;
+  /* Sabit izler: içeriğe bağlı iz satırdan satıra kayar (bkz. SeoTable dersi). */
+  grid-template-columns: 150px 90px 1fr;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+.kal-row:last-child {
+  border-bottom: 0;
+}
+.kk {
+  font-weight: 580;
+  color: var(--c-text);
+}
+.ks {
+  color: var(--c-faint);
+  font-variant-numeric: tabular-nums;
+}
+.kv {
+  color: var(--c-mid);
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+}
+.kv.yok {
+  color: var(--c-faint);
+  font-weight: 400;
 }
 .lbl {
   display: block;

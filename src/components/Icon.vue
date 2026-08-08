@@ -38,6 +38,7 @@ const P: Record<string, string> = {
   alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   // SEO araç ekranları (v0.7.0) — her araç kendi ekranına taşındığında kenar çubuğunda
   // birbirinden ayırt edilebilmesi gerekti.
   layout: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M9 12h12"/>',

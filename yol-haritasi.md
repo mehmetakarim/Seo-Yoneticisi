@@ -223,7 +223,7 @@ kondu) · 12 ürün birden çok kovada (106 ham satır → 90 benzersiz, tekille
 
 ---
 
-### Faz S — Odak seansı
+### Faz S — Odak seansı ✅ (tamamlandı)
 
 **Amaç.** Kuyruğu sürdürülebilir bir tempoda tüketmek. **Oyunlaştırma değil**, sakin bir
 çalışma ritmi.
@@ -237,10 +237,21 @@ biter/atlanır/ertelenir, mola önerilir (zorunlu değil), sakin seans özeti.
 
 **Başlama koşulu.** Faz K bitmiş olmalı.
 
-**Bitti sayılır.** Bir seans baştan sona yürütüldü; seans geçmişinden gerçek ortalama iş süresi
-hesaplandı ve kuyruk tahminleri bu ölçüme göre güncellendi.
+🔬 **Ölçüldü (planlama sırasında):** gerçek iş süresi verisi **hiç yoktu** — `work_events`
+zaman damgaları yalnızca uç noktaları yakalıyor (`meta_done → ideasoft_push` **0,6 dk**, bu
+işin değil gönderimin süresi). Kullanıcının düşünme süresi hiçbir yerde kayıtlı değildi. Seans
+duvar saati süresini ölçüyor. Kalibrasyon **medyan** (ortalama değil: tek bir uzun ara ortalamayı
+uçurur) ve **yalnızca bitirilen** işlerden — atlanan iş süre bilgisi taşımıyor.
 
-**Ekran gerekiyor mu.** Evet — seans paneli/çubuğu → design promptu.
+**Bitti sayılır.**
+- [x] Bir seans baştan sona yürütüldü (harness: kilit → bitti → atla → özet).
+- [x] Seans geçmişinden gerçek süre hesaplanıyor (kova başına ≥5 örnek, medyan).
+- [x] Kuyruk tahminleri bu ölçüme göre güncelleniyor; ekran ikisini ayırt ediyor
+      ("≈2 dk" tahmin ↔ "4 dk" ölçüldü). Test: `olcum_yeterli_orneke_ulasinca_tahmini_devraliyor`.
+
+**Ekran gerekiyor mu.** ~~Evet — design promptu.~~ → **Hayır:** çubuk mevcut token'larla
+kuruldu (üst şeridin altında 44px, rozet ve renkler mevcut paletten). Ayrı tasarım turu
+gerekmedi; beğenilmezse sonra yapılabilir.
 
 ---
 

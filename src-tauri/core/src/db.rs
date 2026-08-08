@@ -122,6 +122,39 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           at TEXT NOT NULL,
           PRIMARY KEY (kind, ref)
         );
+
+        -- ===== Odak seansı (Faz S) =====
+        -- Seansın asıl ürünü GERÇEK SÜRE ÖLÇÜMÜ: kuyruktaki dakikalar bugüne kadar elle
+        -- yazılmış tahminlerdi ("tahmin, ölçüm değil" diye işaretliydi). Ölçülen tek şey
+        -- duvar saati süresi — düşünme ve düzenleme dahil, çünkü asıl bilinmeyen o.
+        -- ⚠️ `work_events` bunu ölçemiyordu: ölçüldü (2026-08-08), yalnızca uç noktaları
+        -- yakalıyor (meta_done → ideasoft_push farkı 0,6 dk — bu işin değil, gönderimin süresi).
+        CREATE TABLE IF NOT EXISTS focus_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at TEXT NOT NULL,
+          ended_at TEXT,
+          planned_minutes INTEGER NOT NULL,
+          break_minutes INTEGER NOT NULL,
+          -- 'queue_empty' | 'time_up' | 'stopped'
+          ended_reason TEXT
+        );
+
+        -- ⚠️ Süre YALNIZCA outcome='done' satırlarından hesaplanıyor: atlanan iş "ne kadar
+        -- sürdüğü" bilgisi taşımıyor, listeye girerse süreyi olduğundan kısa gösterir.
+        -- 'abandoned' = seans yarıda kesildi (uygulama kapandı); ölçüme hiç girmez.
+        CREATE TABLE IF NOT EXISTS focus_session_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES focus_sessions(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          ref TEXT NOT NULL,
+          bucket TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          ended_at TEXT,
+          -- 'done' | 'skipped' | 'dismissed' | 'abandoned'
+          outcome TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_focus_items_bucket
+          ON focus_session_items(bucket, outcome);
         "#,
     )
     .map_err(|e| format!("Şema oluşturulamadı: {e}"))?;

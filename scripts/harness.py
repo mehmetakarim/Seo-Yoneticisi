@@ -231,7 +231,7 @@ def main():
                        f"gidiyor (konum {_eol_ornek['position']:.1f})",
              "clicks": _eol_ornek["clicks"], "score": round(_eol_ornek["clicks"] * 0.6, 1),
              "page": "eol", "focus_id": _eol_ornek["url"],
-             "minutes": 1, "also": [], "done": False},
+             "minutes": 1, "minutes_measured": False, "also": [], "done": False},
             # ⚠️ Bakım maddeleri de GERÇEK rapordan: uydurma SKU'larla derin link hiçbir satıra
             # denk gelmiyordu ve doğrulama yanlışlıkla "ekran doğru" deyip geçiyordu.
             {"reference": {"kind": "product", "ref": _dec0["sku"]},
@@ -239,7 +239,8 @@ def main():
              "reason": f"tıklama {round(_dec0['clicks_before'])}→{round(_dec0['clicks_now'])}, "
                        f"konum {_dec0['position_before']:.1f}→{_dec0['position_now']:.1f}",
              "clicks": _dec0["clicks_lost"], "score": round(_dec0["clicks_lost"] * 0.8, 1),
-             "page": "decay", "focus_id": _dec0["sku"], "minutes": 2, "also": [], "done": False},
+             # Bu madde ÖLÇÜLMÜŞ süreyle: ekranda "≈" olmadan ve biraz belirgin yazmalı.
+             "page": "decay", "focus_id": _dec0["sku"], "minutes": 4, "minutes_measured": True, "also": [], "done": False},
             {"reference": {"kind": "product", "ref": _dec1["sku"]},
              "bucket": "upkeep", "title": _dec1["name"],
              "reason": f"tıklama {round(_dec1['clicks_before'])}→{round(_dec1['clicks_now'])}, "
@@ -259,13 +260,13 @@ def main():
              "bucket": "urgent", "title": "Aruba R9M79A Instant On 12V/18W RW Güç Adaptörü",
              "reason": "mağazaya gönderildikten sonra feed değişti (açıklama) — canlıdaki metin bayat",
              "clicks": 0, "score": 40, "page": "products", "focus_id": "ADP.ARB.R9M79A",
-             "minutes": 2, "also": [], "done": False},
+             "minutes": 2, "minutes_measured": False, "also": [], "done": False},
             {"reference": {"kind": "product", "ref": _opp0["sku"]},
              "bucket": "leverage", "title": _opp0["name"],
              "reason": f"konum {_opp0['position']:.1f}, {round(_opp0['impressions'])} gösterim ama "
                        f"{round(_opp0['clicks'])} tıklama — {round(_opp0['missed_clicks'])} tıklama kaçıyor",
              "clicks": _opp0["missed_clicks"], "score": round(_opp0["missed_clicks"], 1),
-             "page": "opportunities", "focus_id": _opp0["sku"], "minutes": 2, "also": [], "done": False},
+             "page": "opportunities", "focus_id": _opp0["sku"], "minutes": 2, "minutes_measured": False, "also": [], "done": False},
         ],
     }
     # ⚠️ Arka uç kuyruğu skora göre sıralı döndürüyor; stub elle yazıldığı için burada
@@ -319,6 +320,8 @@ def main():
         # ayrıştırıcısı bunu gördüğü anda DIŞ script'i kapatıyor → sayfa sessizce boş açılıyor.
         # (Bu tuzağa bir kez düşüldü; `seo_core::jsonld::render_script` aynı kaçışı yapıyor.)
         f"    const H = {json.dumps(handlers, ensure_ascii=False).replace('</', '<\\/')};\n"
+        # Bugün kuyruğu hem `get_today_queue` hem odak seansı tarafından okunuyor; tek yerde.
+        f"    const TQ = {json.dumps(TODAY_Q, ensure_ascii=False)};\n"
         "    if (new URLSearchParams(location.search).has('empty')\n"
         "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
         # `?setup=1` → taze kurulum benzetimi. Sihirbaz kullanıcının GERÇEK veritabanına
@@ -395,7 +398,7 @@ def main():
         # dört kova, birleştirilmiş "ayrıca" satırları, tıklamasız bir acil madde.
         # ⚠️ `?boskuyruk=1` → "bugün için seçilecek iş yok" hâli.
         "    if (cmd === 'get_today_queue') {\n"
-        f"      const Q = {json.dumps(TODAY_Q, ensure_ascii=False)};\n"
+        "      const Q = TQ;\n"
         "      if (new URLSearchParams(location.search).has('boskuyruk'))\n"
         "        return Promise.resolve({ ...Q, items: [], hidden: 2 });\n"
         "      const gizli = (window.__GIZLI__ = window.__GIZLI__ || []);\n"
@@ -410,6 +413,48 @@ def main():
         "      return Promise.resolve(null);\n"
         "    }\n"
         # ⚠️ "Yapıldı" maddeyi SİLMİYOR, done=true yapıyor — gün bitebilsin diye.
+        # Odak seansı (Faz S). ⚠️ `?seans=1` seans SÜRÜYOR hâli · `?seansozet=1` özet modali.
+        # Sayaç gerçek: başlangıç damgası "şimdi - 3 dk" veriliyor ki çubuk canlı görünsün.
+        "    if (cmd.startsWith('start_focus') || cmd === 'get_focus_state'\n"
+        "        || cmd === 'resolve_focus_item') {\n"
+        "      const S = (window.__SEANS__ = window.__SEANS__ || { i: 0, done: 0, skipped: 0 });\n"
+        "      const acik = new URLSearchParams(location.search).has('seans')\n"
+        "        || cmd === 'start_focus_session' || S.basladi;\n"
+        "      if (cmd === 'start_focus_session') S.basladi = true;\n"
+        "      if (cmd === 'resolve_focus_item') {\n"
+        "        if (args.outcome === 'done') S.done++; else S.skipped++;\n"
+        "        S.i++;\n"
+        "      }\n"
+        "      if (!acik) return Promise.resolve({ session_id: null, started_at: '',\n"
+        "        planned_minutes: 25, break_minutes: 5, locked: null, done_count: 0, skipped_count: 0 });\n"
+        "      const gizliS = window.__GIZLI__ || [];\n"
+        "      const yapildiS = window.__YAPILDI__ || [];\n"
+        "      const kalan = TQ.items.filter(i => !gizliS.includes(i.reference.ref)\n"
+        "        && !yapildiS.includes(i.reference.ref));\n"
+        "      const it = kalan[S.i];\n"
+        # ⚠️ YEREL saat damgası: üretimdeki `now_str()` de yerel yazıyor ve JS ofsetsiz
+        # damgayı yerel okuyor. `toISOString()` (UTC) kullanılınca sayaç saat farkı kadar
+        # saptı — harness'te 158 dakika gösterdi (ölçüldü).
+        "      const d = new Date(Date.now() - 3 * 60000);\n"
+        "      const iki = n => String(n).padStart(2, '0');\n"
+        "      const bas = `${d.getFullYear()}-${iki(d.getMonth()+1)}-${iki(d.getDate())}`\n"
+        "        + `T${iki(d.getHours())}:${iki(d.getMinutes())}:${iki(d.getSeconds())}`;\n"
+        "      return Promise.resolve({ session_id: 1, started_at: bas, planned_minutes: 25,\n"
+        "        break_minutes: 5, done_count: S.done, skipped_count: S.skipped,\n"
+        "        locked: it ? { kind: it.reference.kind, reference: it.reference.ref,\n"
+        "          bucket: it.bucket, title: it.title, reason: it.reason, page: it.page,\n"
+        "          focus_id: it.focus_id, started_at: bas } : null });\n"
+        "    }\n"
+        "    if (cmd === 'end_focus_session') {\n"
+        "      const S = (window.__SEANS__ = window.__SEANS__ || { done: 0, skipped: 0 });\n"
+        "      window.__SEANS__ = { i: 0, done: 0, skipped: 0 };\n"
+        "      return Promise.resolve({ done_count: S.done || 3, skipped_count: S.skipped || 1,\n"
+        "        minutes: 12.4, ended_reason: args.reason || 'stopped',\n"
+        "        buckets: [['upkeep', 2], ['urgent', 1]] });\n"
+        "    }\n"
+        "    if (cmd === 'get_focus_calibration') return Promise.resolve([\n"
+        "      { bucket: 'upkeep', samples: 7, minutes: 4 },\n"
+        "      { bucket: 'urgent', samples: 3, minutes: null }]);\n"
         "    if (cmd === 'complete_queue_item') {\n"
         "      (window.__YAPILDI__ = window.__YAPILDI__ || []).push(args.reference);\n"
         "      return Promise.resolve(null);\n"
