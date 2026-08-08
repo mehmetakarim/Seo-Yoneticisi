@@ -124,28 +124,88 @@ pub fn set_theme(
     Ok(())
 }
 
-/// Pencere çerçevesini (başlık çubuğu, kenarlıklar) uygulama temasına uydurur.
+/// Pencere çerçevesini (başlık çubuğu, zemin, yazı) uygulama temasına uydurur.
 ///
-/// ⚠️ Ön yüzden DEĞİL buradan yapılıyor: aynı fonksiyon açılışta da çağrılıyor (bkz. `lib.rs`),
-/// böylece pencere daha ilk karede doğru renkte açılıyor. JS tarafından yapılsaydı uygulama
-/// açık çerçeveyle açılıp bir kare sonra koyuya dönerdi.
+/// ⚠️ Ön yüzden DEĞİL buradan: aynı fonksiyon açılışta da çağrılıyor (bkz. `lib.rs`), böylece
+/// pencere ilk karede doğru renkte açılıyor. JS'ten yapılsaydı açık çerçeveyle açılıp bir kare
+/// sonra koyuya dönerdi.
 ///
-/// Sessiz başarısız oluyor: tema kozmetik, pencere hedefi bulunamadı diye ayar kaydı
-/// başarısız sayılmamalı.
-/// `theme`: `None` ise **sistem temasına bırakılır**.
+/// # 🔬 Üç çağrı da gerekli — çalışan uygulamada ölçüldü (2026-08-08)
 ///
-/// 🔴 Bu ayrım şart: ilk kurulumda kayıtlı tema yok. Boş dizeyi "light" saymak, macOS'i koyu
-/// modda kullanan yeni bir kullanıcının penceresini zorla açık yapardı — sistem ayarını
-/// ezmek bizim işimiz değil.
+/// Bu iki adımda ve iki ayrı yanılgıyla bulundu:
+///
+/// 1. **Yalnızca `set_theme` hiçbir şey yapmadı.** Başlık çubuğu koyu temada bembeyaz kaldı.
+///    Tanılama şaşırtıcıydı: pencere bulunuyor, `set_theme` `Ok` dönüyor, `w.theme()` geri
+///    `Dark` okuyor. Yani gördüğümüz beyaz **NSAppearance değil, pencerenin ZEMİN rengiydi** —
+///    macOS başlık çubuğunu pencere zemininin üstüne çiziyor ve zemin varsayılanı beyaz.
+///    → `set_background_color` eklendi, çubuk anında koyuya döndü.
+/// 2. **Ama başlık YAZISI koyu kaldı** ve koyu zeminde kayboldu (kullanıcı yakaladı).
+///    Sebep: Tauri'nin `set_theme`i macOS'te `NSApp.appearance`ı değiştiriyor, **pencerenin
+///    kendi görünümünü değil**. Pencere Aqua'da kaldığı için macOS başlığı koyu mürekkeple
+///    çiziyordu. → Görünüm doğrudan `NSWindow`a uygulanıyor ([`ns_appearance`]).
+/// 3. **Görünüm doğru olduğu hâlde başlık hâlâ koyu çizildi.** Ölçüm: `win.appearance()` ve
+///    `effectiveAppearance()` ikisi de `NSAppearanceNameDarkAqua` okuyor — yani sorun bizde
+///    değil, macOS'in bu pencere için başlığı çizme biçiminde. → Yerel başlık YAZISI
+///    gizlendi (`hiddenTitle: true`, `tauri.conf.json`). Zaten gereksizdi: uygulama adı
+///    kenar çubuğunun tepesinde duruyor. Kalan çubuk temayla uyumlu ve boş.
+///
+/// Zemin renkleri `styles.css`teki `--c-bg` ile aynı: açık `#ffffff`, koyu `#1c1c1e`.
+/// ⚠️ Orası değişirse burası da değişmeli.
+///
+/// `theme` `None` ise **sisteme bırakılır**: ilk kurulumda kayıtlı tema yok ve boş değeri
+/// "light" saymak, macOS'i koyu modda kullanan yeni bir kullanıcının penceresini zorla açık
+/// yapardı — sistem ayarını ezmek bizim işimiz değil.
+///
+/// Sessiz başarısız oluyor: tema kozmetik, pencere bulunamadı diye ayar kaydı düşmemeli.
 pub fn apply_window_theme(app: &tauri::AppHandle, theme: Option<&str>) {
-    use tauri::{Manager, Theme};
+    use tauri::{window::Color, Manager, Theme};
     let Some(w) = app.get_webview_window("main") else { return };
-    let _ = w.set_theme(match theme {
-        Some("dark") => Some(Theme::Dark),
-        Some("light") => Some(Theme::Light),
-        _ => None,
-    });
+    let koyu = match theme {
+        Some("dark") => true,
+        Some("light") => false,
+        _ => return, // sisteme bırak
+    };
+
+    let _ = w.set_theme(Some(if koyu { Theme::Dark } else { Theme::Light }));
+    let _ = w.set_background_color(Some(if koyu {
+        Color(0x1c, 0x1c, 0x1e, 0xff)
+    } else {
+        Color(0xff, 0xff, 0xff, 0xff)
+    }));
+    ns_appearance(&w, koyu);
 }
+
+/// Pencerenin **kendi** `NSAppearance`ını ayarlar — başlık yazısının rengi buna bağlı.
+///
+/// Tauri'nin `set_theme`i uygulama düzeyinde çalıştığı için pencere Aqua'da kalıyor ve macOS
+/// başlığı koyu mürekkeple çiziyor; koyu zeminde okunmuyor (bkz. [`apply_window_theme`]).
+#[cfg(target_os = "macos")]
+fn ns_appearance(w: &tauri::WebviewWindow, koyu: bool) {
+    use objc2::rc::Retained;
+    use objc2_app_kit::{
+        NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
+        NSWindow,
+    };
+
+    let Ok(ptr) = w.ns_window() else { return };
+    if ptr.is_null() {
+        return;
+    }
+    let ad = if koyu { unsafe { NSAppearanceNameDarkAqua } } else { unsafe { NSAppearanceNameAqua } };
+    let Some(gorunum): Option<Retained<NSAppearance>> = NSAppearance::appearanceNamed(ad) else {
+        return;
+    };
+    // SAFETY: `ns_window()` geçerli bir NSWindow işaretçisi döndürüyor ve bu çağrı ana
+    // iş parçacığından yapılıyor (Tauri komutları ve `setup` ana iş parçacığında koşuyor).
+    unsafe {
+        let win: &NSWindow = &*(ptr as *mut NSWindow);
+        win.setAppearance(Some(&gorunum));
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ns_appearance(_w: &tauri::WebviewWindow, _koyu: bool) {}
+
 
 #[tauri::command]
 pub async fn test_feed_url(url: String) -> Result<i64, String> {
