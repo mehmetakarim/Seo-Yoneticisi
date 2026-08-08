@@ -115,6 +115,8 @@ interface State {
   sessionBreakOffered: boolean;
   /** Seans bitince gösterilen sakin bilanço. */
   sessionSummary: FocusSummary | null;
+  /** Kuyrukta kilitlenebilecek iş var mı — "Odak seansı başlat" düğmesi buna bakıyor. */
+  sessionCanStart: boolean;
   /** Ölçüm omurgası (Faz Ö) — sonuç özeti ve satır rozetleri. */
   outcomeSummary: OutcomeSummary | null;
   outcomeBadges: Record<string, OutcomeBadge>;
@@ -186,6 +188,7 @@ export const useStore = defineStore("app", {
     sessionElapsed: 0,
     sessionBreakOffered: false,
     sessionSummary: null,
+    sessionCanStart: false,
     outcomeSummary: null,
     outcomeBadges: {},
     seedBusy: false,
@@ -966,6 +969,7 @@ export const useStore = defineStore("app", {
     async loadSession() {
       try {
         this.session = await api.getFocusState();
+        this.sessionCanStart = await api.hasLockableItem();
         this.tickSession();
       } catch (e) {
         /* seans yardımcı bir özellik; okunamaması uygulamayı engellemesin */
@@ -975,11 +979,20 @@ export const useStore = defineStore("app", {
     /** Seansı başlatır ve ilk işi kilitler. */
     async startSession() {
       try {
-        this.session = await api.startFocusSession();
+        const d = await api.startFocusSession();
+        // ⚠️ Kilitlenecek iş yoksa arka uç seans AÇMIYOR. Eskiden açıp hemen kapatıyordu ve
+        // kullanıcı "Seans bitti · 0 iş" modaliyle karşılaşıyordu — başarısızlık gibi
+        // okunuyordu, oysa günün işi bitmiş demek (saha hatası, 2026-08-08).
+        if (!d.session_id) {
+          this.sessionCanStart = false;
+          this.toast("Bugünün işleri bitmiş — kilitlenecek iş kalmadı.", "ok");
+          return;
+        }
+        this.session = d;
         this.sessionSummary = null;
         this.sessionBreakOffered = false;
+        this.sessionCanStart = true;
         this.tickSession();
-        if (!this.session.locked) await this.endSession("queue_empty");
       } catch (e) {
         this.toast(String(e), "error");
       }
@@ -1018,7 +1031,10 @@ export const useStore = defineStore("app", {
         this.session = await api.resolveFocusItem(outcome);
         await this.loadToday();
         // Kuyruk tükendiyse arka uç seansı kapattı; özeti göster.
+        // ⚠️ İkinci koşul emniyet: seans açık ama kilitlenecek iş yoksa çubuk boş asılı
+        // kalırdı. Arka uç normalde bu duruma düşmüyor ama çubuk buna dayanmamalı.
         if (!this.session.session_id) await this.showSessionSummary("queue_empty");
+        else if (!this.session.locked) await this.endSession("queue_empty");
       } catch (e) {
         this.toast(String(e), "error");
       }
@@ -1051,6 +1067,7 @@ export const useStore = defineStore("app", {
       this.todayBusy = true;
       try {
         this.today = await api.getTodayQueue();
+        this.sessionCanStart = await api.hasLockableItem();
       } catch (e) {
         this.toast(String(e), "error");
       } finally {

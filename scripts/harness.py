@@ -403,6 +403,9 @@ def main():
         "        return Promise.resolve({ ...Q, items: [], hidden: 2 });\n"
         "      const gizli = (window.__GIZLI__ = window.__GIZLI__ || []);\n"
         "      const yapildi = (window.__YAPILDI__ = window.__YAPILDI__ || []);\n"
+        "      if (new URLSearchParams(location.search).has('hepsiyapildi'))\n"
+        "        return Promise.resolve({ ...Q, hidden: 1, done_count: Q.items.length,\n"
+        "          items: Q.items.map(i => ({ ...i, done: true })) });\n"
         "      const kalan = Q.items.filter(i => !gizli.includes(i.reference.ref))\n"
         "        .map(i => ({ ...i, done: yapildi.includes(i.reference.ref) }));\n"
         "      return Promise.resolve({ ...Q, hidden: gizli.length,\n"
@@ -415,6 +418,19 @@ def main():
         # ⚠️ "Yapıldı" maddeyi SİLMİYOR, done=true yapıyor — gün bitebilsin diye.
         # Odak seansı (Faz S). ⚠️ `?seans=1` seans SÜRÜYOR hâli · `?seansozet=1` özet modali.
         # Sayaç gerçek: başlangıç damgası "şimdi - 3 dk" veriliyor ki çubuk canlı görünsün.
+        # ⚠️ `?hepsiyapildi=1` → kullanıcının yaşadığı durum: günün 10 işi de bitmiş.
+        # Düğme pasif olmalı, "Seans bitti · 0 iş" modali ÇIKMAMALI.
+        "    if (cmd === 'has_lockable_item') {\n"
+        "      if (new URLSearchParams(location.search).has('hepsiyapildi'))\n"
+        "        return Promise.resolve(false);\n"
+        "      const g = window.__GIZLI__ || [], y = window.__YAPILDI__ || [];\n"
+        "      return Promise.resolve(TQ.items.some(i => !g.includes(i.reference.ref)\n"
+        "        && !y.includes(i.reference.ref)));\n"
+        "    }\n"
+        "    if (cmd === 'start_focus_session'\n"
+        "        && new URLSearchParams(location.search).has('hepsiyapildi'))\n"
+        "      return Promise.resolve({ session_id: null, started_at: '', planned_minutes: 25,\n"
+        "        break_minutes: 5, locked: null, done_count: 0, skipped_count: 0 });\n"
         "    if (cmd.startsWith('start_focus') || cmd === 'get_focus_state'\n"
         "        || cmd === 'resolve_focus_item') {\n"
         "      const S = (window.__SEANS__ = window.__SEANS__ || { i: 0, done: 0, skipped: 0 });\n"
@@ -439,11 +455,16 @@ def main():
         "      const iki = n => String(n).padStart(2, '0');\n"
         "      const bas = `${d.getFullYear()}-${iki(d.getMonth()+1)}-${iki(d.getDate())}`\n"
         "        + `T${iki(d.getHours())}:${iki(d.getMinutes())}:${iki(d.getSeconds())}`;\n"
+        # ⚠️ Kilitlenecek iş kalmadıysa arka uç SEANSI KAPATIYOR (session_id null döner).
+        # Stub bunu taklit etmezse çubuk boş kilitle asılı kalır — ilk sürümde öyle oldu.
+        "      if (!it) return Promise.resolve({ session_id: null, started_at: '',\n"
+        "        planned_minutes: 25, break_minutes: 5, locked: null,\n"
+        "        done_count: S.done, skipped_count: S.skipped });\n"
         "      return Promise.resolve({ session_id: 1, started_at: bas, planned_minutes: 25,\n"
         "        break_minutes: 5, done_count: S.done, skipped_count: S.skipped,\n"
-        "        locked: it ? { kind: it.reference.kind, reference: it.reference.ref,\n"
+        "        locked: { kind: it.reference.kind, reference: it.reference.ref,\n"
         "          bucket: it.bucket, title: it.title, reason: it.reason, page: it.page,\n"
-        "          focus_id: it.focus_id, started_at: bas } : null });\n"
+        "          focus_id: it.focus_id, started_at: bas } });\n"
         "    }\n"
         "    if (cmd === 'end_focus_session') {\n"
         "      const S = (window.__SEANS__ = window.__SEANS__ || { done: 0, skipped: 0 });\n"

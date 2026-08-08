@@ -180,4 +180,6 @@ export const api = {
   getFocusCalibration: () => invoke<CalibrationRow[]>("get_focus_calibration"),
   setFocusDurations: (work: number, brk: number) =>
     invoke<void>("set_focus_durations", { work, brk }),
+  /** Kuyrukta seansa kilitlenebilecek iş var mı — düğme buna göre açılıyor. */
+  hasLockableItem: () => invoke<boolean>("has_lockable_item"),
 };

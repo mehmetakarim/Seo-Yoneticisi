@@ -64,6 +64,7 @@ pub fn run() {
             commands::get_focus_state,
             commands::get_focus_calibration,
             commands::set_focus_durations,
+            commands::has_lockable_item,
             commands::dismiss_queue_item,
             commands::complete_queue_item,
             commands::restore_queue_item,

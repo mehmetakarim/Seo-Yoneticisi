@@ -138,10 +138,15 @@ const gunFarki = computed(() => {
         </div>
         <div class="s-btns">
           <!-- Seans çubuğu kabukta yaşıyor; buradaki düğme yalnızca başlatıyor. -->
+          <!-- ⚠️ Kilitlenecek iş yoksa düğme PASİF: basıldığında "Seans bitti · 0 iş"
+               modali çıkıyordu ve bu bir hata gibi okunuyordu (saha hatası). -->
           <button
             v-if="items.length && !store.session?.session_id"
             class="seans-btn"
-            data-tip="Kuyruktan tek iş kilitlenir, süre ölçülür. Oyunlaştırma yok."
+            :disabled="!store.sessionCanStart"
+            :data-tip="store.sessionCanStart
+              ? 'Kuyruktan tek iş kilitlenir, süre ölçülür. Oyunlaştırma yok.'
+              : 'Bugünün işleri bitmiş — kilitlenecek iş kalmadı'"
             @click="store.startSession()"
           >
             <Icon name="clock" :size="13" /> Odak seansı başlat
@@ -408,8 +413,12 @@ const gunFarki = computed(() => {
   cursor: pointer;
   font-family: inherit;
 }
-.seans-btn:hover {
+.seans-btn:hover:not(:disabled) {
   filter: brightness(1.06);
+}
+.seans-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .skor-btn {
   flex: none;

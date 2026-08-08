@@ -213,10 +213,22 @@ fn durum(conn: &Connection) -> FocusState {
 }
 
 /// Yeni bir seans başlatır ve ilk işi kilitler.
+///
+/// 🔴 **Kilitlenecek iş yoksa seans AÇILMAZ** (saha hatası, 2026-08-08). İlk sürüm önce kaydı
+/// açıyor, sonra kilitleyecek iş bulamayınca hemen kapatıyordu: kullanıcı "Odak seansı başlat"
+/// deyince karşısına "Seans bitti · 0 iş · 0 dk" modali çıkıyordu — bu bir başarısızlık gibi
+/// okunuyor, oysa günün işi bitmiş demek. Üstelik her denemede sıfır saniyelik bir seans kaydı
+/// birikiyordu (kullanıcının veritabanında 8 tane bulundu).
+///
+/// Artık `session_id` `None` dönüyor ve ekran bunu sakin bir bilgiyle karşılıyor.
 #[tauri::command]
 pub fn start_focus_session(state: State<'_, AppState>) -> Result<FocusState, String> {
     let conn = state.conn.lock().unwrap();
     if open_session(&conn).is_some() {
+        return Ok(durum(&conn));
+    }
+    // ⚠️ ÖNCE bak, sonra kaydet.
+    if next_item(&conn, 0).is_none() {
         return Ok(durum(&conn));
     }
     let work = setting_i64(&conn, "focus_work_minutes", DEFAULT_WORK);
@@ -230,6 +242,13 @@ pub fn start_focus_session(state: State<'_, AppState>) -> Result<FocusState, Str
     let id = conn.last_insert_rowid();
     lock_next(&conn, id);
     Ok(durum(&conn))
+}
+
+/// Kuyrukta seansa kilitlenebilecek bir iş var mı — ekran düğmeyi buna göre açıyor.
+#[tauri::command]
+pub fn has_lockable_item(state: State<'_, AppState>) -> Result<bool, String> {
+    let conn = state.conn.lock().unwrap();
+    Ok(next_item(&conn, 0).is_some())
 }
 
 /// Sıradaki işi kilitler. Kuyruk tükenmişse hiçbir şey yapmaz (çağıran seansı bitirir).
@@ -428,6 +447,13 @@ pub fn close_stale_session(conn: &Connection) {
     if let Some(id) = open_session(conn) {
         end_session(conn, id, "stopped");
     }
+    // Hiç maddesi olmayan KAPANMIŞ seanslar: v0.12.0 sonrası bir kusurdan kalan artıklar
+    // (kilitlenecek iş yokken de seans açılıyordu). Ölçüm taşımıyorlar, temizleniyor.
+    let _ = conn.execute(
+        "DELETE FROM focus_sessions WHERE ended_at IS NOT NULL AND id NOT IN
+           (SELECT DISTINCT session_id FROM focus_session_items)",
+        [],
+    );
 }
 
 #[cfg(test)]
@@ -492,6 +518,40 @@ mod tests {
         // Aynı kovada gerçekten bitirilmiş 5 iş → ölçüm oluşuyor ve KISA değil.
         seans(&conn, "leverage", &[9, 9, 9, 9, 9], "done");
         assert_eq!(calibration(&conn).get("leverage"), Some(&9));
+    }
+
+    /// 🔴 Kilitlenecek iş yokken seans AÇILMAMALI (saha hatası, 2026-08-08).
+    ///
+    /// Kullanıcı günün 10 işinin 10'unu bitirmişti; "Odak seansı başlat" deyince karşısına
+    /// "Seans bitti · 0 iş · 0 dk" modali çıkıyordu — başarısızlık gibi okunuyor. Üstelik her
+    /// denemede sıfır saniyelik bir kayıt birikiyordu (veritabanında 8 tane bulundu).
+    #[test]
+    fn kilitlenecek_is_yokken_seans_kaydi_olusmuyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        // Kuyruk boş (analiz yok) → kilitlenecek iş yok.
+        assert!(next_item(&conn, 0).is_none());
+
+        // Boş seans kaydı temizliği: elle bir artık bırakıp kalktığını doğrula.
+        conn.execute(
+            "INSERT INTO focus_sessions (started_at, ended_at, planned_minutes, break_minutes,
+                                         ended_reason)
+             VALUES ('2026-08-08T13:47:29','2026-08-08T13:47:29',25,5,'queue_empty')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM focus_sessions", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        close_stale_session(&conn);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM focus_sessions", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "maddesi olmayan seans artığı temizlenmedi"
+        );
     }
 
     /// Uygulama seans açıkken kapatılırsa: seans kapanır, açık madde `abandoned` olur.
