@@ -13,6 +13,15 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.13.0
+- Yeni: **Odak seansı** — Bugün ekranındaki "Odak seansı başlat" düğmesi kuyruktan **tek iş** kilitler ve üst şeridin altında ince bir çubuk açar. Çubuk tüm ekranlarda durur, çünkü işi başka ekranlarda yapıyorsunuz
+- Çubukta: kalan süre, kilitli işin adı, bu işte ne kadardır çalıştığınız ve dört düğme — **Aç · Bitti · Atla · Ertele**. "Atla" yalnızca o seans için; iş kuyrukta kalır
+- Süre dolunca mola **önerilir**, kendiliğinden başlamaz. Kuyruk biterse seans erken biter ve sakin bir özet gelir: kaç iş, ne kadar sürdü, hangi kovalar
+- **Kuyruktaki süreler artık ölçülüyor.** Bugüne kadar "≈2 dk" gibi tahminlerdi; seans gerçek süreyi ölçüyor ve bir kovada 5 iş bitirdiğinizde tahminin yerini alıyor. Ekran ikisini ayırt ediyor: "≈2 dk" tahmin, "4 dk" ölçüm
+- Ayarlar'da **seans ve mola süresi** (varsayılan 25/5) ile hangi kovada kaç ölçüm biriktiği görünüyor
+- Seans puan, rozet veya seri tutmuyor — amaç sakin bir çalışma ritmi
+- Düzeltme: günün işlerinin tamamı bitmişken "Odak seansı başlat"a basıldığında "Seans bitti · 0 iş" penceresi çıkıyordu. Artık düğme pasif ve sebebini söylüyor; boşuna seans kaydı da oluşmuyor
+
 ## v0.12.0
 - Yeni: **Bugün ekranı** — menünün en üstünde, uygulama artık burada açılıyor. Sabah "hangi ekrana gideyim?" diye düşünmeden, o gün dokunulacak 10 işi sıralı olarak görüyorsunuz
 - İşler beş kovadan seçiliyor: acil (canlıda bayat içerik) · yüksek kaldıraç (kaçırılan tıklama) · kaçak trafik (satışta olmayan sayfalar) · sonuç kontrolü · bakım. Her kovadan en fazla 3 madde, böylece liste tek bir konuya saplanmıyor

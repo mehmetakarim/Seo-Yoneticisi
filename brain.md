@@ -4,13 +4,13 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-08-07
-**Aktif faz:** **v0.12.0 yayında.** Yol haritasının ilk dört fazı bitti:
-**B** (ortak tablo + İşlem sütunu, v0.9.0) · **Ö** (ölçüm omurgası — "işe yaradı mı?", v0.10.0) ·
-**A** (asistan bağlam seçimi — "+" menüsü, v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0).
+**Aktif faz:** **v0.13.0 yayında.** Yol haritasının ilk beş fazı bitti:
+**B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
+v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0).
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
-**Sıradaki faz: S (odak seansı).** Ardından D · C · T · P (+ serbest G).
+**Sıradaki faz: D (katalog derinliği + SEO güçlendirme).** Ardından C · T · P (+ serbest G).
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -29,26 +29,27 @@ v0.8.3 = "Neler değişti?" karşılaştırması + IdeaSoft'tan teknik tablo get
 v0.9.0 = Faz B: araç ekranlarında ortak tablo + İşlem sütunu ·
 v0.10.0 = Faz Ö: ölçüm omurgası (GSC geçmişi + olay günlüğü + sonuç rozetleri) ·
 v0.11.0 = Faz A: asistan bağlam seçimi ("+" menüsü) + halef akışı düzeltmeleri ·
-**v0.12.0 = Faz K: Bugün ekranı + iş kuyruğu (tasarım turu, "Yapıldı", koyu pencere çerçevesi)**
+v0.12.0 = Faz K: Bugün ekranı + iş kuyruğu (tasarım turu, "Yapıldı", koyu pencere) ·
+**v0.13.0 = Faz S: odak seansı — kuyruğu ölçerek tüketmek (süreler artık ölçülüyor)**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **155 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**15 test**; `commands/` 10 dosyaya bölünmüş durumda).
+bağımlı DEĞİL, **159 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**19 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
 
 ### 🧭 Durum (2026-08-07 akşamı)
 
-**v0.12.0 yayında.** Yol haritasının **B · Ö · A · K** fazları bitti; sıradaki **S (odak seansı)**.
+**v0.13.0 yayında.** Yol haritasının **B · Ö · A · K · S** fazları bitti; sıradaki **D (katalog derinliği)**.
 
 ⚠️ **Eylül ortasında yapılacak, unutulmamalı:** sonuç eşiklerinin (iyileşti/geriledi)
 kalibrasyonu. Şu an gerekçeli varsayılanla duruyor çünkü 72 gönderimin hepsi 26 Temmuz–7 Ağustos
 arasında yapıldı ve takip penceresi gönderimden 21 gün SONRA başlamak zorunda. Gerekçe 0au'da.
 
 Fazların **ne olduğu** aşağıdaki numaralı girdilerde (B → 0at, Ö → 0au, A → 0av, halef
-düzeltmeleri → 0aw, K → 0ax, pencere teması → 0ay); **nereye gittiğimiz** `yol-haritasi.md`'de.
+düzeltmeleri → 0aw, K → 0ax, pencere teması → 0ay, S → 0az); **nereye gittiğimiz** `yol-haritasi.md`'de.
 
 ### 📋 Eski kuyruk — kullanıcı önceliğiyle (2026-07-31), tamamı bitti
 
@@ -293,6 +294,46 @@ değişti ve ikisi de bu maddeyi çürütüyor.
 
    ⚠️ **Sonuç kontrolü kovası bugün BOŞ** ve Eylül ortasına kadar boş kalacak (72 gönderim
    0–12 gün önce, ölçüm için 28 gün gerekiyor). Sessizce boş bırakmak yerine tarihi söylüyor.
+
+0az. ✅ **ODAK SEANSI (v0.13.0, Faz S).** Faz K "bugün ne yapayım"ı cevapladı ama işi yapma
+   **ritmi** yoktu. Asıl açık daha somuttu: kuyruktaki süreler uydurmaydı (1–3 dk, kodda ve
+   ekranda "tahmin, ölçüm değil" diye işaretli). Yol haritası bunu Faz S'in bitiş şartı yapmış.
+
+   🔬 **Planlarken ölçtüm: GERÇEK SÜRE VERİSİ HİÇ YOKMUŞ.** `work_events` zaman damgalarında
+   aynı ürün için `meta_done → ideasoft_push` farkı **0,6 dakika** — bu işin değil
+   **gönderimin** süresi. Olay günlüğü yalnızca uç noktaları yakalıyor; kullanıcının düşünme
+   ve düzenleme süresi hiçbir yerde kayıtlı değildi. Seans **duvar saati** süresini ölçüyor.
+
+   **Kalibrasyon (fazın çıktısı):**
+   - **MEDYAN, ortalama değil.** Test sabitliyor: `[3,4,4,5,40]` → ortalama 11 (yanlış),
+     medyan 4 (doğru). Duvar saati ölçtüğümüz için "çayı tazeledim" kesintileri kural.
+   - **Kova başına en az 5 örnek**; azsa tahmin yerinde kalıyor.
+   - **Yalnızca bitirilen işler.** Atlanan iş "ne kadar sürdüğü" bilgisi taşımıyor; listeye
+     girerse süreyi olduğundan kısa gösterir. Yarım kalan seans (`abandoned`) da girmiyor.
+   - Ekran ikisini ayırt ediyor: **"≈2 dk"** (tahmin) ↔ **"4 dk"** (ölçüldü).
+
+   **Çubuk KABUKTA (App.vue) yaşıyor** çünkü iş başka ekranlarda yapılıyor: meta Ürünler'de,
+   canonical Satışta olmayanlar'da. Ekrana bağlı olsaydı kullanıcı işi yapmaya gittiği anda
+   sayacı ve "Bitti"yi kaybederdi. Altı ekranda da durduğu ölçüldü.
+
+   ⚠️ **Sayaç ön yüzde ama ÖLÇÜM arka uçtaki zaman damgalarından.** Uygulama uyusa ya da
+   kapansa bile ölçüm bozulmuyor. Açılışta yarım seans kapanıyor, açık madde `abandoned`.
+
+   🚫 **Oyunlaştırma yasağı koda yazıldı:** XP · lig · seri cezası · konfeti · "Harikasın! 🔥"
+   yok. Özet sakin bir bilanço; Ayarlar'da kullanıcıya da "puan/rozet/seri tutmuyor" deniyor.
+
+   🔴 **SAHA HATASI: kilitlenecek iş yokken de seans açılıyordu.** Kullanıcı günün 10 işinin
+   10'unu bitirmişti; "Odak seansı başlat" deyince karşısına *"Seans bitti · 0 iş · 0 dk"*
+   modali çıkıyordu — bir başarısızlık gibi okunuyor, oysa iyi haber. Daha kötüsü: kod **önce
+   kaydı açıp** sonra kilitleyecek iş bulamayınca kapatıyordu, yani her denemede sıfır
+   saniyelik bir seans kaydı birikiyordu — **veritabanında 8 tane bulundu.** Düzeltme: önce
+   bak, sonra kaydet (`has_lockable_item`; düğme iş yokken pasif ve sebebini söylüyor) +
+   açılışta maddesiz seans artıklarının temizliği.
+   **Ders: "hiç iş yok" bir hata hâli değil, geçerli bir sonuç — öyle karşılanmalı.**
+
+   ⚠️ Bunu bulurken `today.rs` yeniden kullanılabilir hâle geldi (`build_today_queue(conn)`):
+   seans ile ekran **aynı** kuyruğu okuyor. İki ayrı kurulum olsaydı kilitlenen iş ile
+   listedeki liste ayrışabilirdi.
 
 0ay. 🔴 **KOYU PENCERE ÇERÇEVESİ — "çağırdım, olmalı" üç kez yanılttı (2026-08-08).**
    Kullanıcı isteği basitti: koyu temada pencere çerçevesi de koyu olsun. `set_theme` çağırıp
@@ -1537,13 +1578,14 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 ⚠️ Bu bölüm 2026-08-07'de tazelendi; "repo push bekliyor" gibi aylar önce bitmiş maddeler
 duruyordu (repo 2026-07-26'dan beri public).
 
-- **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 15) ·
-  `cargo test -p seo-core` (155) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+- **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 19) ·
+  `cargo test -p seo-core` (159) · canlı testler `-- --ignored` ile ve env değişkenleriyle
   (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
 - **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`
   `dist/harness.html` · kipler: `?empty=1` `?setup=1` `?changed=1` `?nosnap=1` `?nosonuc=1`
-  `?nav=<ekran>` `&tema=koyu` · `?halefyok=1` (halef bulunamadı) · `?boskuyruk=1` (Bugün boş)
+  `?nav=<ekran>` `&tema=koyu` · `?halefyok=1` (halef bulunamadı) · `?boskuyruk=1` (Bugün boş) · `?seans=1` (odak seansı
+  sürüyor) · `?hepsiyapildi=1` (günün işi bitmiş)
   ⚠️ `npm run build` `dist/`i siler → harness HER ZAMAN derlemeden sonra üretilir.
   🔴 **`file://` ile AÇILMAZ** — derlenen `index.html` varlıkları `/assets/...` mutlak yolundan
   istiyor ve dosya protokolünde bunlar bulunamıyor, sayfa sessizce boş açılıyor. HTTP üzerinden
