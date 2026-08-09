@@ -13,6 +13,15 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.14.0
+- Yeni: **Satışta olmayan sayfalar için kalıcı karar deposu.** Verdiğiniz halef kararları artık uygulama kapansa da duruyor — daha önce yalnızca o oturum boyunca hatırlanıyordu
+- Her sayfa için üç karar: **301 yönlendir** (hedefi siz seçiyorsunuz) · **canonical** · **bilinçli tutuyorum**. Karar verilen satırlar listede rozetle işaretli, aynı sayfa her analizde yeniden karşınıza çıkmıyor
+- Yeni: **301 CSV çıktısı** — kararlarınız IdeaSoft paneline elle girilebilecek bir listeye dönüşüyor: kaynak yol, hedef yol, tıklama, konum, karar tarihi
+- ⚠️ Karar vermediğiniz satırlarda **hedef sütunu bilerek boş**. En iyi aday ayrı bir bilgi sütununda duruyor ama hedefe yazılmıyor: otomatik eşleştirme güvenilir değil ve yanlış yönlendirme, yönlendirmemekten kötüdür
+- CSV'de doldurduğunuz hedefler uygulamaya geri dönmüyor — dosya panele girmek için, uygulama yalnızca kendi içinde verdiğiniz kararları bilir
+- Yeni: **Ürün sağlık skoru** — Ürünler listesinde 0–100 arası bir rozet; üstüne gelince neyin eksik olduğunu puanlarıyla söylüyor (meta 25 · açıklama 25 · teknik tablo 20 · görsel 15 · mağazaya gönderim 15)
+- Skor, durum rozetinin yerini almıyor yanına geliyor. Farkı şu: durum rozeti içeriğin **mağazaya ulaşıp ulaşmadığına bakmıyor**. Yerelde "Tamamlandı" görünen bir ürün Google için hiç yapılmamış olabilir — skor bunu 85 puanla ve "mağazaya gönderim" eksiğiyle söylüyor
+
 ## v0.13.0
 - Yeni: **Odak seansı** — Bugün ekranındaki "Odak seansı başlat" düğmesi kuyruktan **tek iş** kilitler ve üst şeridin altında ince bir çubuk açar. Çubuk tüm ekranlarda durur, çünkü işi başka ekranlarda yapıyorsunuz
 - Çubukta: kalan süre, kilitli işin adı, bu işte ne kadardır çalıştığınız ve dört düğme — **Aç · Bitti · Atla · Ertele**. "Atla" yalnızca o seans için; iş kuyrukta kalır
