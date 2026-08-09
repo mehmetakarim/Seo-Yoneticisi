@@ -13,6 +13,13 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.14.1
+- Düzeltme: **Yaptığınız iş artık kuyruğa geri gelmiyor.** "Yapıldı" işareti analiz yenilenince düşüyordu; oysa bir düzeltmenin sonucu Google Search Console'da haftalar sonra görünüyor (90 günlük pencere). Yani işi yapmanız maddeyi listeden düşürmüyordu
+- Mağazaya ulaşan bir iş yaptıysanız o madde **28 gün boyunca** yüksek kaldıraç, kaçak trafik ve bakım kovalarında yeniden çıkmıyor. Kaybolmuyor: süre dolunca **sonuç kontrolü** kovasında, bu kez "sonucuna bakılabilir" diye geliyor
+- Acil kovası bundan etkilenmiyor — kanıtı Search Console değil, mağazanızın kendi verisi: dün gönderdiğiniz üründe bugün metin değiştiyse bu bugün bilinen bir gerçek
+- Bugün ekranı kaç işin beklediğini söylüyor: **"81 iş ölçüm bekliyor"** — üstüne gelince neden beklediğini açıklıyor
+- Satışta olmayan sayfalarda **kararını verdiğiniz sayfalar** artık günlük listede çıkmıyor: 301 yönlendirmesini panelde tanımladıysanız da, sayfayı bilinçli tutuyorsanız da bu bir karar; kuyruk onu tekrar önermiyor
+
 ## v0.14.0
 - Yeni: **Satışta olmayan sayfalar için kalıcı karar deposu.** Verdiğiniz halef kararları artık uygulama kapansa da duruyor — daha önce yalnızca o oturum boyunca hatırlanıyordu
 - Her sayfa için üç karar: **301 yönlendir** (hedefi siz seçiyorsunuz) · **canonical** · **bilinçli tutuyorum**. Karar verilen satırlar listede rozetle işaretli, aynı sayfa her analizde yeniden karşınıza çıkmıyor

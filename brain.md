@@ -8,7 +8,7 @@
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
 **D** (EOL karar deposu + 301 CSV + sağlık skoru, v0.14.0).
-⚠️ v0.14.0 sonrası kuyruk düzeltmesi (uçuş süzgeci) henüz **yayınlanmadı** — bkz. 0b1.
+**v0.14.1 = kuyruk uçuş süzgeci** — yapılan iş kanıtı gelene kadar geri gelmiyor (0b1).
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -33,7 +33,8 @@ v0.10.0 = Faz Ö: ölçüm omurgası (GSC geçmişi + olay günlüğü + sonuç 
 v0.11.0 = Faz A: asistan bağlam seçimi ("+" menüsü) + halef akışı düzeltmeleri ·
 v0.12.0 = Faz K: Bugün ekranı + iş kuyruğu (tasarım turu, "Yapıldı", koyu pencere) ·
 v0.13.0 = Faz S: odak seansı — kuyruğu ölçerek tüketmek (süreler artık ölçülüyor) ·
-**v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru**
+v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
+**v0.14.1 = kuyruk uçuş süzgeci (yapılan iş geri gelmiyor)**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
