@@ -91,6 +91,12 @@ def load_product(conn):
         "meta_badge": "hatali", "details_badge": "eksik", "overall": "bekliyor",
         "meta_done": False, "details_done": False, "tech_done": False, "image_count": 4,
         "feed_changed": None,
+        # Faz D sağlık skoru: bu ürün yerelde eksik ve mağazaya gönderilmemiş.
+        "health": 60,
+        "health_missing": [
+            {"label": "teknik tablo", "points": 20},
+            {"label": "mağazaya gönderim", "points": 15},
+        ],
     }
     detail = {k: None for k in (
         "brand main_category category quantity url img_url title descriptions keywords "
@@ -182,6 +188,7 @@ def main():
     }
 
     handlers = {
+        "get_eol_decisions": [],
         "get_jsonld": jsonld_stub,
         "get_outcome_summary": outcome_summary,
         "get_outcome_badges": outcome_badges,
@@ -486,6 +493,33 @@ def main():
         "      return Promise.resolve(null);\n"
         "    }\n"
         "    if (cmd === 'restore_queue_items') { window.__GIZLI__ = []; return Promise.resolve(null); }\n"
+        # EOL karar deposu (Faz D). ⚠️ `?kararlar=1` → bazı satırlar karar verilmiş.
+        "    if (cmd === 'get_eol_decisions') {\n"
+        "      const K = (window.__KARAR__ = window.__KARAR__ || (\n"
+        "        new URLSearchParams(location.search).has('kararlar')\n"
+        "          ? [{ slug: (H.get_opportunity_cache.eol[0]||{}).slug, url: '', action: 'redirect_301',\n"
+        "               target_slug: 'lenovo-thinkpad-t14-g6', target_sku: 'NB.LEN.T14G6',\n"
+        "               source: 'ai', decided_at: '2026-08-08T12:00:00', exported_at: null },\n"
+        "             { slug: (H.get_opportunity_cache.eol[1]||{}).slug, url: '', action: 'keep',\n"
+        "               target_slug: null, target_sku: null, source: 'manual',\n"
+        "               decided_at: '2026-08-08T12:01:00', exported_at: null }]\n"
+        "          : []));\n"
+        "      return Promise.resolve(K);\n"
+        "    }\n"
+        "    if (cmd === 'save_eol_decision') {\n"
+        "      const K = (window.__KARAR__ = window.__KARAR__ || []);\n"
+        "      K.push({ slug: args.slug, url: args.url, action: args.action,\n"
+        "        target_slug: args.targetSlug, target_sku: args.targetSku, source: args.source,\n"
+        "        decided_at: new Date().toISOString().slice(0,19), exported_at: null });\n"
+        "      return Promise.resolve(null);\n"
+        "    }\n"
+        "    if (cmd === 'delete_eol_decision') {\n"
+        "      window.__KARAR__ = (window.__KARAR__ || []).filter(k => k.slug !== args.slug);\n"
+        "      return Promise.resolve(null);\n"
+        "    }\n"
+        "    if (cmd === 'export_redirect_csv')\n"
+        "      return Promise.resolve({ decided_rows: (window.__KARAR__||[]).length,\n"
+        "        undecided_rows: 673, bytes: 84210, path: args.path });\n"
         "    if (cmd === 'suggest_eol_successor') {\n"
         "      const yok = new URLSearchParams(location.search).has('halefyok');\n"
         "      return new Promise(r => setTimeout(() => r(yok\n"

@@ -23,6 +23,7 @@ import type {
   TodayQueue,
   FocusState,
   FocusSummary,
+  EolDecision,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -117,6 +118,12 @@ interface State {
   sessionSummary: FocusSummary | null;
   /** Kuyrukta kilitlenebilecek iş var mı — "Odak seansı başlat" düğmesi buna bakıyor. */
   sessionCanStart: boolean;
+  /** EOL karar deposu (Faz D): slug → karar. ⚠️ Halef ÖNERİLERİ hâlâ bellekte
+   *  (`successors`); burada yalnızca ONAYLANMIŞ kararlar var ve bunlar kalıcı. */
+  eolDecisions: Record<string, EolDecision>;
+  /** Hedef seçme modali 301 KARARI için mi açıldı? Doluysa slug; boşsa canonical akışı.
+   *  ⚠️ Aynı modal iki amaca hizmet ediyor — hangisi olduğunu bu alan söylüyor. */
+  redirectPicking: string;
   /** Ölçüm omurgası (Faz Ö) — sonuç özeti ve satır rozetleri. */
   outcomeSummary: OutcomeSummary | null;
   outcomeBadges: Record<string, OutcomeBadge>;
@@ -189,6 +196,8 @@ export const useStore = defineStore("app", {
     sessionBreakOffered: false,
     sessionSummary: null,
     sessionCanStart: false,
+    eolDecisions: {},
+    redirectPicking: "",
     outcomeSummary: null,
     outcomeBadges: {},
     seedBusy: false,
@@ -682,6 +691,15 @@ export const useStore = defineStore("app", {
       const p = this.canonicalPicker;
       if (!p) return;
       this.canonicalPicker = null;
+      // ⚠️ Aynı modal iki amaca hizmet ediyor: 301 kararı mı, canonical yazma mı?
+      // 301'de mağazaya HİÇBİR ŞEY yazılmıyor — yalnızca karar kaydediliyor.
+      if (this.redirectPicking) {
+        const slug = this.redirectPicking;
+        this.redirectPicking = "";
+        const url = this.opportunity?.eol.find((e) => e.slug === slug)?.url ?? slug;
+        await this.decideEol(slug, url, "redirect_301", targetSlug, null, "manual");
+        return;
+      }
       await this.askCanonical(p.eolSlug, targetSlug);
     },
 
@@ -696,6 +714,7 @@ export const useStore = defineStore("app", {
     },
 
     cancelCanonicalPicker() {
+      this.redirectPicking = "";
       if (!this.canonicalSearching) this.canonicalPicker = null;
     },
 
@@ -1060,6 +1079,72 @@ export const useStore = defineStore("app", {
       this.session = null;
       this.sessionElapsed = 0;
       this.sessionBreakOffered = false;
+    },
+
+    // --- EOL karar deposu + 301 CSV (Faz D) -------------------------------------------
+
+    /** Verilmiş kararları okur (EOL ekranı satırları rozetlemek için kullanıyor). */
+    async loadEolDecisions() {
+      try {
+        const list = await api.getEolDecisions();
+        this.eolDecisions = Object.fromEntries(list.map((d) => [d.slug, d]));
+      } catch (e) {
+        /* karar listesi okunamazsa ekran yine çalışsın */
+      }
+    },
+
+    /**
+     * Karar verir. `action`: `redirect_301` | `canonical` | `keep`.
+     *
+     * ⚠️ Karar ≠ öneri: buraya yalnızca kullanıcı onayladığında geliniyor. Sebebi ölçülmüş —
+     * deterministik eşleştirici tek başına güvenilir değil ve yanlış yönlendirme,
+     * yönlendirmemekten kötüdür (bkz. `decisions.rs`).
+     */
+    async decideEol(
+      slug: string,
+      url: string,
+      action: string,
+      targetSlug: string | null,
+      targetSku: string | null,
+      source: string,
+    ) {
+      try {
+        await api.saveEolDecision(slug, url, action, targetSlug, targetSku, source);
+        await this.loadEolDecisions();
+        this.toast(
+          action === "keep" ? "Sayfa bilinçli tutuluyor olarak işaretlendi." : "301 listesine eklendi.",
+          "ok",
+        );
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    /**
+     * 301 iş listesini CSV'ye yazar.
+     *
+     * ⚠️ CSV bir **çıktı**, senkron kanalı değil: Excel'de doldurulan hedefler uygulamaya
+     * geri dönmüyor. Kararsız satırların hedef sütunu bilerek boş (bkz. `decisions.rs`).
+     */
+    async exportRedirectCsv(path: string, minClicks: number) {
+      try {
+        const o = await api.exportRedirectCsv(path, minClicks);
+        await this.loadEolDecisions();
+        return o;
+      } catch (e) {
+        this.toast(String(e), "error");
+        return null;
+      }
+    },
+
+    /** Kararı geri alır — sayfa yeniden "kararsız" olur. */
+    async undecideEol(slug: string) {
+      try {
+        await api.deleteEolDecision(slug);
+        await this.loadEolDecisions();
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
     },
 
     /** Bugünün kuyruğunu tazeler. Ek GSC çağrısı YOK — mevcut önbellekten hesaplanıyor. */

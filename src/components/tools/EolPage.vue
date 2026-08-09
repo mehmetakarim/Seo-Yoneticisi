@@ -12,7 +12,8 @@
  * ⚠️ Canonical yazma akışı **toplu değildir**: her satır ayrı, önizlemeli, açık onayla.
  * `apply_canonical` bilinçli olarak liste almıyor — imza toplu kullanımı zorlaştırıyor.
  */
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { save } from "@tauri-apps/plugin-dialog";
 import { useStore } from "../../store";
 import Icon from "../Icon.vue";
 import ModalShell from "../ModalShell.vue";
@@ -29,6 +30,52 @@ const limit = ref(25);
 
 /** Bugün kuyruğundan gelen odak satırı; hedef kırpmanın ötesindeyse liste açılıyor. */
 const focusId = useRowFocus("eol", () => rows.value.map((e) => e.url), limit);
+
+// Kararlar KALICI (Faz D) — halef önerilerinin aksine uygulama kapanınca kaybolmuyorlar.
+onMounted(() => void store.loadEolDecisions());
+
+const kararlar = computed(() => store.eolDecisions);
+const kararSayisi = computed(
+  () => Object.values(kararlar.value).filter((d) => d.action !== "keep").length,
+);
+const disaAktariliyor = ref(false);
+
+/** CSV'yi kaydeder. Kararsız satırların hedef sütunu bilerek boş kalır — bkz. decisions.rs. */
+async function csvIndir() {
+  const yol = await save({
+    title: "301 iş listesi",
+    defaultPath: `301-is-listesi-${new Date().toISOString().slice(0, 10)}.csv`,
+    filters: [{ name: "CSV", extensions: ["csv"] }],
+  });
+  if (!yol) return;
+  disaAktariliyor.value = true;
+  try {
+    // Eşik: kararsız satırlardan yalnızca gerçekten trafik alanlar listeye giriyor.
+    // 2.115 satırın tamamı bir çalışma listesi değil, bir kalabalıktır.
+    const o = await store.exportRedirectCsv(yol, 3);
+    if (o) {
+      store.toast(
+        `${o.decided_rows} karar + ${o.undecided_rows} kararsız satır yazıldı.`,
+        "ok",
+      );
+    }
+  } finally {
+    disaAktariliyor.value = false;
+  }
+}
+
+/** Bu sayfa için "301 listesine ekle" — hedef zaten seçilmişse doğrudan, değilse seçtirir. */
+function ekle301(e: { slug: string; url: string }) {
+  const hedef = targetOf(e.url);
+  if (hedef) {
+    const s = store.successors[e.url];
+    void store.decideEol(e.slug, e.url, "redirect_301", hedef, s?.sku ?? null, "ai");
+  } else {
+    // Hedef yoksa mevcut seçme modali açılıyor; onaydan sonra karar yazılacak.
+    store.redirectPicking = e.slug;
+    void store.startCanonical(e.slug, "");
+  }
+}
 
 /** Tam URL'den son yol parçası — canonical hedefi olarak gönderilir. */
 const slugOf = (u: string) => u.trim().replace(/\/$/, "").split("/").pop() ?? "";
@@ -52,6 +99,8 @@ const tableRows = computed<TableRow[]>(() =>
   rows.value.slice(0, limit.value).map((e) => {
     const s = store.successors[e.url];
     const bakiliyor = !!store.successorBusy[e.url];
+    // Karar verilmişse satır ONU gösteriyor — öneri ikinci planda kalır.
+    const karar = kararlar.value[e.slug];
     return {
       id: e.url,
       selected: e.url === focusId.value,
@@ -63,13 +112,19 @@ const tableRows = computed<TableRow[]>(() =>
       // "Hedef seç ve ayarla" düğmesini isimsiz bir zincir ikonuna çevirmiştim; öneri gelince
       // ekranda "sıradaki adım burada" diyen hiçbir işaret kalmamıştı ve kullanıcı seçim
       // modalinin kaybolduğunu düşündü. Modal duruyordu — bulunamıyordu.
-      sub: bakiliyor
+      sub: karar
+        ? karar.action === "keep"
+          ? "Bilinçli tutuluyor — 301 listesine girmiyor"
+          : `301 → ${karar.target_slug}`
+        : bakiliyor
         ? "Halef aranıyor…"
         : s
           ? (s.sku ? `Halef: ${s.name} — canonical ayarla` : "Uygun halef bulunamadı — hedef seçin")
           : "",
-      subTip: s?.reason,
-      subAction: s && !bakiliyor ? ("canonical" as const) : undefined,
+      subTip: karar
+        ? `${karar.source === "ai" ? "yapay zekâ önerisi" : "elle seçildi"} · ${karar.decided_at.slice(0, 10)}`
+        : s?.reason,
+      subAction: !karar && s && !bakiliyor ? ("canonical" as const) : undefined,
       values: { clk: n(e.clicks), imp: n(e.impressions), pos: e.position.toFixed(1) },
       actions: [
         {
@@ -80,8 +135,18 @@ const tableRows = computed<TableRow[]>(() =>
           tip: bakiliyor ? "Bakılıyor…" : s ? "Halefi yeniden öner" : "Halef öner",
         },
         {
+          // ⚠️ Faz B'de ayrılıp bugüne kadar HİÇ kullanılmamış eylem; tam bu iş için duruyordu.
+          key: "redirect",
+          disabled: !!karar,
+          tip: karar
+            ? karar.action === "keep"
+              ? "Bilinçli tutuluyor — kararı geri almak için satıra tıklayın"
+              : `301 listesinde: ${karar.target_slug}`
+            : "301 listesine ekle",
+        },
+        {
           key: "canonical",
-          disabled: store.canonicalBusy,
+          disabled: store.canonicalBusy || !!karar,
           // ⚠️ Halef bulunamasa da açık: modelin bulamaması hedefin olmadığı anlamına
           // gelmiyor (saha geri bildirimi). Hedef yoksa seçim modali açılıyor.
           tip: targetOf(e.url) ? "Canonical ayarla" : "Hedef seç ve ayarla",
@@ -96,6 +161,7 @@ function eylem(p: { id: string; key: string }) {
   const e = rows.value.find((x) => x.url === p.id);
   if (!e) return;
   if (p.key === "successor") store.suggestSuccessor(e.url);
+  else if (p.key === "redirect") ekle301(e);
   else if (p.key === "canonical") store.startCanonical(e.slug, targetOf(e.url));
 }
 </script>
@@ -125,6 +191,17 @@ function eylem(p: { id: string; key: string }) {
         />
         {{ store.catalogBusy ? "Katalog alınıyor…" : "Katalogla eşleştir" }}
       </button>
+      <!-- ⚠️ CSV bir ÇIKTI, senkron kanalı değil: Excel'de doldurduğunuz hedefler
+           uygulamaya geri dönmez. Kararsız satırların hedef sütunu bilerek boş. -->
+      <button
+        class="cat-sync"
+        :disabled="disaAktariliyor"
+        data-tip="Karar verdikleriniz hedefiyle, kararsızlar boş hedefle yazılır. Aday sütunu yalnızca bilgi amaçlıdır — doğrulamadan yönlendirme tanımlamayın."
+        @click="csvIndir()"
+      >
+        <Icon :name="disaAktariliyor ? 'loader' : 'download'" :size="11" :class="{ spin: disaAktariliyor }" />
+        {{ disaAktariliyor ? "Yazılıyor…" : `301 listesi CSV${kararSayisi ? ` (${kararSayisi} karar)` : ""}` }}
+      </button>
     </div>
 
     <SeoTable
@@ -140,10 +217,13 @@ function eylem(p: { id: string; key: string }) {
 
     <!-- Hedef seçme: halef önerisi boş çıktığında ya da öneri değiştirilmek istendiğinde.
          Yine TEK satır için — toplu seçim yok. -->
+    <!-- ⚠️ Aynı modal İKİ amaca hizmet ediyor: 301 kararı ve canonical yazma. Başlık moda
+         göre değişmeli — "Canonical hedefini seçin" derken 301 listesine eklemek kullanıcıyı
+         yanıltırdı (ilk sürümde öyleydi). -->
     <ModalShell
       :open="!!store.canonicalPicker"
-      label="Canonical hedefi seç"
-      title="Canonical hedefini seçin"
+      :label="store.redirectPicking ? '301 hedefi seç' : 'Canonical hedefi seç'"
+      :title="store.redirectPicking ? '301 yönlendirme hedefini seçin' : 'Canonical hedefini seçin'"
       :sub="store.canonicalPicker?.eolSlug"
       :closable="!store.canonicalSearching"
       @close="store.cancelCanonicalPicker()"
@@ -173,8 +253,12 @@ function eylem(p: { id: string; key: string }) {
            kataloğunda arıyordu ve satıştan kalkmış ürünleri de listeliyordu; ölü bir sayfayı
            başka bir ölü sayfaya işaret ettirmek sorunu taşımak olurdu (saha hatası). -->
       <div class="pick-hint">
-        Yalnızca <b>satıştaki</b> ürünlerde aranır — canonical, ziyaretçinin satın alabileceği
-        bir sayfayı işaret etmeli.
+        Yalnızca <b>satıştaki</b> ürünlerde aranır — ziyaretçinin satın alabileceği bir
+        sayfaya yönlendirilmeli.
+        <template v-if="store.redirectPicking">
+          Seçtiğiniz hedef <b>301 iş listesine</b> kaydedilir; yönlendirmeyi IdeaSoft
+          panelinden siz tanımlarsınız.
+        </template>
       </div>
       <div v-if="store.canonicalResults.length" class="pick-list">
         <div

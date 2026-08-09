@@ -41,7 +41,8 @@ pub fn list_products(
                     s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_details,
                     COALESCE(s.tech_status,'pending'), s.tech_specs_json,
                     p.picture2, p.picture3, p.picture4,
-                    p.feed_fp, s.reviewed_fp, p.feed_changed
+                    p.feed_fp, s.reviewed_fp, p.feed_changed,
+                    s.ideasoft_pushed_at, s.image_check_json
              FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
              ORDER BY p.name COLLATE NOCASE",
         )
@@ -74,6 +75,14 @@ pub fn list_products(
                 .filter(|u| u.as_deref().map_or(false, |x| !x.trim().is_empty()))
                 .count(),
                 feed_changed: feed_change_note(row.get(18)?, row.get(19)?, row.get(20)?),
+                pushed: row.get::<_, Option<String>>(21)?.is_some(),
+                // Görsel kontrolü yapılmışsa sorunlu olanları say; yapılmamışsa 0 (bilinmiyor
+                // ≠ sorunlu — olmayan bir kusurdan puan kırmak yanıltıcı olurdu).
+                image_problems: row
+                    .get::<_, Option<String>>(22)?
+                    .and_then(|j| serde_json::from_str::<Vec<images::ImageCheck>>(&j).ok())
+                    .map(|v| v.iter().filter(|c| !c.ok).count())
+                    .unwrap_or(0),
             })
         })
         .map_err(|e| format!("Ürün listesi okunamadı: {e}"))?
@@ -119,6 +128,16 @@ pub fn list_products(
             "degisti" => r.feed_changed.is_some(),
             other => return Err(format!("Bilinmeyen filtre: {other}")),
         };
+        // Skor `overall`dan bağımsız hesaplanıyor: ikisi farklı soruları cevaplıyor.
+        let health = seo_core::health::evaluate(&seo_core::health::HealthInput {
+            meta_done,
+            details_done,
+            tech_done: r.tech_status == "done",
+            image_count: r.image_count,
+            image_problems: r.image_problems,
+            pushed: r.pushed,
+        });
+
         if keep {
             out.push(ProductRow {
                 sku: r.sku,
@@ -133,6 +152,8 @@ pub fn list_products(
                 tech_done: r.tech_status == "done",
                 image_count: r.image_count,
                 feed_changed: r.feed_changed,
+                health: health.score,
+                health_missing: health.missing,
             });
         }
     }

@@ -3,14 +3,15 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-08-07
-**Aktif faz:** **v0.13.0 yayında.** Yol haritasının ilk beş fazı bitti:
-**B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
-v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0).
+**Son güncelleme:** 2026-08-09
+**Aktif faz:** **v0.13.0 yayında; Faz D kodda bitti, yayın bekliyor.** Yol haritasının ilk
+altı fazı bitti: **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan
+bağlam seçimi, v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
+**D** (EOL karar deposu + 301 CSV + sağlık skoru).
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
-**Sıradaki faz: D (katalog derinliği + SEO güçlendirme).** Ardından C · T · P (+ serbest G).
+**Sıradaki faz: C (CRM ince dilim).** Ardından T · P (+ serbest G).
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -34,8 +35,8 @@ v0.12.0 = Faz K: Bugün ekranı + iş kuyruğu (tasarım turu, "Yapıldı", koyu
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **159 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**19 test**; `commands/` 11 dosyaya bölünmüş durumda).
+bağımlı DEĞİL, **164 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**21 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
@@ -294,6 +295,55 @@ değişti ve ikisi de bu maddeyi çürütüyor.
 
    ⚠️ **Sonuç kontrolü kovası bugün BOŞ** ve Eylül ortasına kadar boş kalacak (72 gönderim
    0–12 gün önce, ölçüm için 28 gün gerekiyor). Sessizce boş bırakmak yerine tarihi söylüyor.
+
+0b0. ✅ **EOL KARAR DEPOSU + 301 CSV + SAĞLIK SKORU (Faz D).** Uygulama **2.115 satışta olmayan
+   sayfa** buluyor, 673'ü ≥3 tıklama alıyor — projedeki en büyük tek SEO fırsatı. Ama bulgu işe
+   dönüşemiyordu: halef önerileri **yalnızca `store.successors`'ta**, yani bellekteydi.
+   Uygulamayı kapatınca verdiğiniz kararlar kayboluyordu. Eksik olan özellik değil **kalıcılıktı**.
+
+   🔴 **FAZI ŞEKİLLENDİREN ÖLÇÜM GEÇMİŞTEN GELDİ** (`opportunity.rs`, 2026-07-29): deterministik
+   eşleştirici **hedefi otomatik dolduramaz**. `asus-zenbook-17-fold` için en iyi aday
+   *"Microsoft Windows 11 Pro"* çıkıyor (yalnızca "windows" örtüştüğü için, 0,20 benzerlik).
+   Kodun kendi cümlesi: **"yanlış yönlendirme, yönlendirmemekten kötüdür."**
+   → CSV **karar verilmiş** satırlardan doğmalı. Bu, karar deposunu fazın merkezi yaptı.
+   `csv_real` testi bunu canlı üretiyor: 673 kararsız satırın **hepsinde `hedef_yol` boş**,
+   Windows 11 eşleşmesi yalnızca bilgi sütununda (`aday` 0,20) duruyor.
+
+   **Karar deposu** `eol_decisions(slug PK, url, action, target_slug, target_sku, source,
+   decided_at, exported_at, note)`. `action`: `redirect_301` · `canonical` · `keep`.
+   ⚠️ **`keep` bilinçli bir karar türü** — ekran zaten *"bazı sayfaları bilinçli tutuyor
+   olabilirsiniz"* diyor; kayıt altına alınca aynı sayfa her analizde yeniden karşınıza çıkmıyor.
+   `source` (`ai`/`manual`) hedefi modelin mi sizin mi seçtiğinizi CSV'ye taşıyor.
+
+   ⚠️ **Excel'de doldurulan hedefler uygulamaya GERİ DÖNMÜYOR.** Bilinçli sınır: karar deposu
+   yalnızca uygulama içinde verilen kararları bilir. CSV başlığındaki `#` satırları bunu yazıyor.
+
+   **Sağlık skoru `overall_status`'ın YERİNE DEĞİL, YANINA** (`core/src/health.rs`,
+   meta 25 · açıklama 25 · teknik 20 · görsel 15 · **mağazaya ulaştı 15**). İki gerekçe:
+   (1) `overall` bir kova döndürüyor, "Eksik" bir üründe 45 ile 80 arasındaki fark görünmüyor;
+   (2) 🔑 **`overall` mağazaya ulaşıp ulaşmadığına HİÇ bakmıyor** — oysa Faz Ö'nün merkezi kuralı
+   bu. Ölçüm (279 ürün): 54 ürün üçü de tam, **1'i mağazaya hiç gönderilmemiş**, 19'u gönderilmiş
+   ama içerik eksik, 12 üründe görsel sorunu. O 1 ürün `overall`a göre "Tamamlandı", Google
+   içinse hiç yapılmamış — skorun varlık sebebi tam olarak o satır (`ucu_tam_ama_
+   gonderilmemis_urun_yuz_almiyor` testi onu sabitliyor: 85, tek eksik "mağazaya gönderim").
+   ⚠️ `overall` **değişmedi**: filtreler, sayaçlar ve Bugün kuyruğu ona bağlı, değiştirmek beş
+   ekranı birden etkilerdi. Görsel bileşeni **kısmi puan** alabiliyor (4 görselin 1'i sorunlu →
+   15'in 11'i), çünkü sorunlu görseli olan ürün hiç görseli olmayanla aynı sayılmamalı.
+
+   ❌ **ÜÇ KALEM KOD YAZILMADAN ÖLÇÜMLE ELENDİ** (yol haritasında kapsamdaydılar):
+   - **Stok eşiği uyarısı** — tükenen ürün **yok** (en düşük 1 adet); ≤3 stoklu 72 ürünün GSC
+     trafiği de yok. Kod yazılır, ekranda boş durur.
+   - **Varyant/aile gruplama** — SKU şeması aileyi kodlamıyor: `NB.LEN` 28 ürün ama bu
+     "Lenovo dizüstü", aile değil. Güvenilir gruplama için feed'de olmayan bir alan gerekiyor.
+   - **İçerik borç listesi** — Ürünler filtreleri ve Bugün kuyruğunun Katalog kaynağı aynı şeyi
+     zaten sayıyor; dördüncü kopya olurdu (bu oturumda üç kez ölçtüğümüz "kopyalanan şey sapar").
+
+   ⏸️ **Canonical toplu yazma ertelendi** — `canonical_set` olayı veritabanında **0**, yani
+   akış hiç kullanılmamış; kullanıcı önceliği 301. `action` alanı hazır, yazma katmanı sonra.
+
+   ♻️ **Faz B'de ayrılan `redirect` eylemi ilk kez kullanıldı** (ikon `cornerUpRight`, ipucu
+   "301 listesine ekle") ve hedef seçimi **mevcut** canonical modalini yeniden kullandı —
+   yalnızca başlığı kipe göre değişiyor. Yeni akış icat edilmedi, sonucu artık kaydediliyor.
 
 0az. ✅ **ODAK SEANSI (v0.13.0, Faz S).** Faz K "bugün ne yapayım"ı cevapladı ama işi yapma
    **ritmi** yoktu. Asıl açık daha somuttu: kuyruktaki süreler uydurmaydı (1–3 dk, kodda ve
@@ -1579,13 +1629,13 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 duruyordu (repo 2026-07-26'dan beri public).
 
 - **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 19) ·
-  `cargo test -p seo-core` (159) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+  `cargo test -p seo-core` (164) · canlı testler `-- --ignored` ile ve env değişkenleriyle
   (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
 - **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`
   `dist/harness.html` · kipler: `?empty=1` `?setup=1` `?changed=1` `?nosnap=1` `?nosonuc=1`
   `?nav=<ekran>` `&tema=koyu` · `?halefyok=1` (halef bulunamadı) · `?boskuyruk=1` (Bugün boş) · `?seans=1` (odak seansı
-  sürüyor) · `?hepsiyapildi=1` (günün işi bitmiş)
+  sürüyor) · `?hepsiyapildi=1` (günün işi bitmiş) · `?kararlar=1` (EOL'de karar verilmiş satırlar)
   ⚠️ `npm run build` `dist/`i siler → harness HER ZAMAN derlemeden sonra üretilir.
   🔴 **`file://` ile AÇILMAZ** — derlenen `index.html` varlıkları `/assets/...` mutlak yolundan
   istiyor ve dosya protokolünde bunlar bulunamıyor, sayfa sessizce boş açılıyor. HTTP üzerinden

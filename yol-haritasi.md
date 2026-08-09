@@ -255,27 +255,33 @@ gerekmedi; beğenilmezse sonra yapılabilir.
 
 ---
 
-### Faz D — Katalog derinliği + SEO güçlendirme
+### Faz D — Katalog derinliği + SEO güçlendirme ✅ (tamamlandı)
 
 **Amaç.** Ölçülen SEO fırsatını işe çevirmek.
 
-**Kapsam.** Ürün sağlık skoru (meta+açıklama+görsel+teknik+IdeaSoft skoru tek göstergede) ·
-içerik borç listesi · **EOL → 301 iş listesi + CSV export** (uygulama yönlendirme yapamaz, iş
-listesi üretir) · **canonical karar-kuyruğu** · stok eşiği uyarısı · varyant/aile gruplama.
+**Kapsam.** ~~Ürün sağlık skoru~~ ✅ · ~~içerik borç listesi~~ ❌ · ~~**EOL → 301 iş listesi +
+CSV export**~~ ✅ · ~~**canonical karar-kuyruğu**~~ ⏸️ · ~~stok eşiği uyarısı~~ ❌ ·
+~~varyant/aile gruplama~~ ❌ — üç kalem **ölçümle** kapsam dışına çıktı, canonical kullanıcı
+önceliğiyle ertelendi. Gerekçeler `brain.md` 0b0'da; buraya çoğaltılmıyor.
+
+Yerine gelen ve fazın merkezi olan şey: **karar deposu** (`eol_decisions`). Halef önerileri
+bellekte duruyordu, uygulama kapanınca kayboluyordu; artık `redirect_301` · `canonical` ·
+`keep` kararları kalıcı ve CSV bu kararlardan doğuyor.
 
 > **Canonical karar-kuyruğu — kuralı bozmayan orta yol.** Üretimdeki "toplu işlem yok" kuralının
 > gerekçesi halüsinasyon; canonical'da ise risk **hedef seçimi**, yazma işleminin kendisi
 > deterministik. Bu yüzden: **karar tek tek verilir** (öneri + onay), onaylanan kararlar bir
 > kuyrukta birikir, **yazma toplu yürütülür**. Operatör kontrolü kaybolmaz, oturum sayısı düşer.
+> ⏸️ Kullanıcı önceliği 301 olduğu için yazma katmanı bu fazda yapılmadı; `action` alanı hazır.
 
-**Başlama koşulu.** Faz K bitmiş olmalı (iş listeleri kuyruğa bağlanacak).
+**Başlama koşulu.** ~~Faz K bitmiş olmalı~~ ✅
 
-**Bitti sayılır.** EOL listesinden üretilen CSV gerçek veriyle açıldı ve panelde kullanılabilir
-durumda; canonical karar-kuyruğunda biriken kararlar tek oturumda yazıldı ve her satır
-`work_events`'e düştü.
+**Bitti sayılır.** ✅ EOL listesinden üretilen CSV gerçek veriyle açıldı ve panelde
+kullanılabilir durumda. ⏸️ ~~canonical karar-kuyruğunda biriken kararlar tek oturumda
+yazıldı~~ → kullanıcı kararıyla sonraya bırakıldı.
 
-**Ekran gerekiyor mu.** Kısmen — sağlık skoru ve borç listesi mevcut ekranlara girer; karar
-kuyruğu için küçük bir onay ekranı.
+**Ekran gerekiyor mu.** ~~Kısmen~~ → **Hayır:** skor rozeti ve karar rozetleri mevcut
+tablolara girdi, hedef seçimi mevcut modali yeniden kullandı. Ayrı onay ekranı gerekmedi.
 
 ---
 

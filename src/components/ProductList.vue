@@ -82,6 +82,9 @@ function okBadge(b: string) {
           >
             <Icon name="refresh" :size="10" :stroke-width="2.6" />Değişti
           </span>
+          <!-- ⚠️ "Tamamlandı" rozeti mağazaya gönderime BAKMIYOR (`overall` öyle tanımlı).
+               Skor bakıyor: 85 gösteren bir ürün yerelde tamamlanmış ama Google onu hiç
+               görmemiş olabilir. Ölçümde 1 ürün tam böyleydi (Faz D). -->
           <span v-else-if="p.meta_done && p.details_done" class="pill done">
             <Icon name="check" :size="11" :stroke-width="3" />Tamamlandı
           </span>
@@ -97,6 +100,13 @@ function okBadge(b: string) {
               Açıkl.
             </span>
           </div>
+          <span
+            v-if="p.health < 100"
+            class="skor"
+            :class="{ dusuk: p.health < 50 }"
+            :data-tip="`SEO sağlık skoru ${p.health}/100 · eksik: ${p.health_missing.map((m) => m.label).join(', ')}`"
+            >{{ p.health }}</span
+          >
         </div>
       </template>
       <div v-else class="empty">
@@ -260,6 +270,23 @@ function okBadge(b: string) {
   border-radius: 20px;
   font-size: 11px;
   font-weight: 600;
+}
+/* Sağlık skoru — `overall` rozetinin YANINDA, yerine değil. 100 ise hiç çizilmiyor:
+   sorunsuz üründe sayı gürültüdür. */
+.skor {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 20px;
+  background: var(--c-chip);
+  color: var(--c-soft);
+  font-size: 10px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+.skor.dusuk {
+  background: var(--badge-eksik-bg);
+  color: var(--badge-eksik-c);
 }
 .pill.done {
   background: var(--badge-tamamlandi-bg);

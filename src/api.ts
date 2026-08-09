@@ -27,6 +27,8 @@ import type {
   FocusState,
   FocusSummary,
   CalibrationRow,
+  EolDecision,
+  ExportSummary,
 } from "./types";
 
 export const api = {
@@ -182,4 +184,20 @@ export const api = {
     invoke<void>("set_focus_durations", { work, brk }),
   /** Kuyrukta seansa kilitlenebilecek iş var mı — düğme buna göre açılıyor. */
   hasLockableItem: () => invoke<boolean>("has_lockable_item"),
+
+  // --- EOL karar deposu + 301 CSV (Faz D) ---
+  getEolDecisions: () => invoke<EolDecision[]>("get_eol_decisions"),
+  /** `action`: "redirect_301" | "canonical" | "keep". `keep`te hedef gönderilmez. */
+  saveEolDecision: (
+    slug: string,
+    url: string,
+    action: string,
+    targetSlug: string | null,
+    targetSku: string | null,
+    source: string,
+  ) => invoke<void>("save_eol_decision", { slug, url, action, targetSlug, targetSku, source }),
+  deleteEolDecision: (slug: string) => invoke<void>("delete_eol_decision", { slug }),
+  /** Kararsız satırlarda hedef sütunu BOŞ kalır — bkz. decisions.rs. */
+  exportRedirectCsv: (path: string, minClicks: number) =>
+    invoke<ExportSummary>("export_redirect_csv", { path, minClicks }),
 };

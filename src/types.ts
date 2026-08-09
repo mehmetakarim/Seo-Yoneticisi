@@ -29,6 +29,10 @@ export interface ProductRow {
   image_count: number;
   /** Doluysa: onaydan sonra feed verisi değişti; değişen alanların adı ("ad, açıklama"). */
   feed_changed: string | null;
+  /** SEO sağlık skoru 0–100 (Faz D). ⚠️ `overall`ın yerine değil, yanına. */
+  health: number;
+  /** Skoru düşüren bileşenler — baloncukta gösteriliyor. */
+  health_missing: HealthMissing[];
 }
 
 export interface ProductDetail {
@@ -541,4 +545,37 @@ export interface CalibrationRow {
   samples: number;
   /** Yeterli örnek yoksa null — "henüz ölçülmedi". */
   minutes: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// EOL karar deposu + sağlık skoru (Faz D)
+// ---------------------------------------------------------------------------
+
+/** Bir bileşenin eksikliği: etiket + kaybedilen puan. */
+export interface HealthMissing {
+  label: string;
+  points: number;
+}
+
+/** Satışta olmayan bir sayfa için verilmiş karar. */
+export interface EolDecision {
+  slug: string;
+  url: string;
+  /** "redirect_301" | "canonical" | "keep" (bilinçli tutuluyor) */
+  action: string;
+  target_slug: string | null;
+  target_sku: string | null;
+  /** "ai" | "manual" — hedefi model mi önerdi, siz mi seçtiniz. */
+  source: string;
+  decided_at: string;
+  /** CSV'ye çıkmış mı — "bunu panele girdim mi?" sorusu. */
+  exported_at: string | null;
+}
+
+/** CSV üretim özeti. */
+export interface ExportSummary {
+  decided_rows: number;
+  undecided_rows: number;
+  bytes: number;
+  path: string;
 }

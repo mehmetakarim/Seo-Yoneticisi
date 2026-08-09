@@ -123,6 +123,32 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           PRIMARY KEY (kind, ref)
         );
 
+        -- ===== EOL karar deposu (Faz D) =====
+        -- 🔴 Bu tablonun varlık sebebi: halef önerileri bugüne kadar HİÇBİR YERDE
+        -- saklanmıyordu (yalnızca `store.successors`, yani bellekte). Uygulama kapanınca
+        -- verilen kararlar kayboluyordu ve panele taşınacak bir çıktı üretilemiyordu.
+        --
+        -- ⚠️ Karar ≠ öneri. Model bir hedef önerebilir ama satır ancak kullanıcı ONAYLAYINCA
+        -- buraya yazılır. Sebebi ölçülmüş: deterministik eşleştirici tek başına güvenilir
+        -- değil (bkz. `opportunity::successor_candidates`) ve yanlış yönlendirme,
+        -- yönlendirmemekten kötüdür.
+        --
+        -- `action`: 'redirect_301' | 'canonical' | 'keep' (sayfa BİLİNÇLİ tutuluyor)
+        -- `source`: 'ai' | 'manual' — hedefi model mi önerdi, kullanıcı mı seçti (CSV'de görünür)
+        -- `exported_at`: CSV'ye çıkmış mı — "bunu panele girdim mi?" sorusunu cevaplıyor
+        CREATE TABLE IF NOT EXISTS eol_decisions (
+          slug TEXT PRIMARY KEY,
+          url TEXT NOT NULL,
+          action TEXT NOT NULL,
+          target_slug TEXT,
+          target_sku TEXT,
+          source TEXT NOT NULL DEFAULT 'manual',
+          decided_at TEXT NOT NULL,
+          exported_at TEXT,
+          note TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_eol_decisions_action ON eol_decisions(action);
+
         -- ===== Odak seansı (Faz S) =====
         -- Seansın asıl ürünü GERÇEK SÜRE ÖLÇÜMÜ: kuyruktaki dakikalar bugüne kadar elle
         -- yazılmış tahminlerdi ("tahmin, ölçüm değil" diye işaretliydi). Ölçülen tek şey

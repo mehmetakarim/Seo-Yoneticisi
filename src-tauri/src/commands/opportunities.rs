@@ -312,15 +312,7 @@ pub async fn suggest_eol_successor(
     let (api_key, catalog) = {
         let conn = state.conn.lock().unwrap();
         let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
-        let mut stmt = conn
-            .prepare("SELECT sku, name, url FROM products WHERE url IS NOT NULL AND url <> ''")
-            .map_err(|e| format!("Ürünler okunamadı: {e}"))?;
-        let rows: Vec<(String, String, String)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .map_err(|e| format!("Ürünler okunamadı: {e}"))?
-            .filter_map(|r| r.ok())
-            .collect();
-        (key, rows)
+        (key, super::live_catalog(&conn))
     };
 
     // Kod adayları daraltır (262 → 5), model karar verir. Bkz. successor_candidates dokümanı.

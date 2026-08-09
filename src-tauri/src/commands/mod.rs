@@ -13,6 +13,7 @@ use std::sync::Mutex;
 use tauri::State;
 
 mod assistant;
+mod decisions;
 mod focus;
 mod generation;
 mod ideasoft_cmd;
@@ -26,6 +27,7 @@ mod versions;
 // Komut adları DEĞİŞMEDİ: `lib.rs`'teki `invoke_handler` listesi ve ön yüzdeki `invoke`
 // çağrıları aynen çalışıyor. Değişen tek şey komutların hangi dosyada durduğu.
 pub use assistant::*;
+pub use decisions::*;
 pub use focus::*;
 pub use generation::*;
 pub use ideasoft_cmd::*;
@@ -40,6 +42,22 @@ pub struct AppState {
     pub conn: Mutex<Connection>,
     #[allow(dead_code)] // Faz 2/3: harici DB yolu işlemleri için saklanır
     pub db_path: PathBuf,
+}
+
+/// Halef adaylarını sıralamak için katalog: `(sku, ad, url)`.
+///
+/// ⚠️ Ortak: hem halef önerisi (`opportunities.rs`) hem 301 CSV'si (`decisions.rs`) aynı
+/// listeyi okuyor. İki yerde iki sorgu olsaydı biri değişince adaylar ayrışırdı.
+pub(crate) fn live_catalog(conn: &Connection) -> Vec<(String, String, String)> {
+    let mut stmt = match conn
+        .prepare("SELECT sku, name, url FROM products WHERE url IS NOT NULL AND url <> ''")
+    {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
 }
 
 fn now_str() -> String {
@@ -97,6 +115,11 @@ pub struct ProductRow {
     /// Doluysa: kullanıcı bu ürünü "tamamlandı" işaretledikten SONRA feed verisi değişti.
     /// İçeriği değişen alanların adı ("ad, açıklama"). Bkz. [`mark_reviewed`].
     pub feed_changed: Option<String>,
+    /// SEO sağlık skoru 0–100 (Faz D). ⚠️ `overall`ın YERİNE değil, yanına: `overall`
+    /// filtrelere ve kuyruğa bağlı, değiştirmek beş ekranı birden etkilerdi.
+    pub health: u32,
+    /// Skoru düşüren bileşenler — baloncukta "neden 60?" sorusunu cevaplıyor.
+    pub health_missing: Vec<seo_core::health::Missing>,
 }
 
 #[derive(Debug, Serialize)]
@@ -193,6 +216,10 @@ struct RowData {
     image_count: usize,
     /// Bkz. [`feed_change_note`] — rozet değil, uyarı metni.
     feed_changed: Option<String>,
+    /// İçerik mağazaya ulaştı mı (Faz D sağlık skorunun bileşeni).
+    pushed: bool,
+    /// Görsel kontrolünde sorunlu bulunan görsel sayısı.
+    image_problems: usize,
 }
 
 /// Meta rozeti — taslak varsa taslak (NULL değilse) yoksa feed değeri üzerinden.
