@@ -29,6 +29,8 @@ import type {
   CalibrationRow,
   EolDecision,
   ExportSummary,
+  Contact,
+  ContactEvent,
 } from "./types";
 
 export const api = {
@@ -200,4 +202,35 @@ export const api = {
   /** Kararsız satırlarda hedef sütunu BOŞ kalır — bkz. decisions.rs. */
   exportRedirectCsv: (path: string, minClicks: number) =>
     invoke<ExportSummary>("export_redirect_csv", { path, minClicks }),
+
+  // --- CRM ince dilim (Faz C) ---
+  // ⚠️ Kişisel veri. Bu uçlardan gelen hiçbir alan asistan bağlamına konmuyor.
+  listContacts: (search: string, includeArchived: boolean) =>
+    invoke<Contact[]>("list_contacts", { search, includeArchived }),
+  getContact: (id: number) => invoke<Contact>("get_contact", { id }),
+  /** `id` null ise yeni kayıt açar; her iki durumda kişi kimliğini döner. */
+  saveContact: (c: {
+    id: number | null;
+    name: string;
+    company: string;
+    email: string;
+    phone: string;
+    channel: string;
+    note: string;
+    nextStepAt: string | null;
+    nextStepNote: string;
+  }) => invoke<number>("save_contact", c),
+  /** Silmiyor: geçmiş temaslar bir kayıt, kişi listeden çıksa da kalmalı. */
+  archiveContact: (id: number, archived: boolean) =>
+    invoke<void>("archive_contact", { id, archived }),
+  getContactEvents: (contactId: number) =>
+    invoke<ContactEvent[]>("get_contact_events", { contactId }),
+  /** Temas + yeni randevu TEK adımda — ikiye bölünürse ikincisi unutulur. */
+  addContactEvent: (
+    contactId: number,
+    kind: string,
+    note: string,
+    nextStepAt: string | null,
+    nextStepNote: string | null,
+  ) => invoke<void>("add_contact_event", { contactId, kind, note, nextStepAt, nextStepNote }),
 };

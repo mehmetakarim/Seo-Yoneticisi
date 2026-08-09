@@ -4,6 +4,7 @@ import { useStore } from "./store";
 import { subOf, titleOf, TOOL_PAGES, type Page } from "./navigation";
 import Sidebar from "./components/Sidebar.vue";
 import ProductsPage from "./components/ProductsPage.vue";
+import ContactsPage from "./components/contacts/ContactsPage.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 // SEO araçları: her analiz kendi ekranında (v0.7.0). Hepsi TEK `opportunity_json`
 // önbelleğinin dilimlerini okur — ekran başına GSC çağrısı yok.
@@ -33,6 +34,7 @@ const pageRef = ref<{ focusSearch?: () => void } | null>(null);
 const PAGES: Record<Page, Component> = {
   today: TodayPage,
   products: ProductsPage,
+  contacts: ContactsPage,
   overview: OverviewPage,
   opportunities: OpportunitiesPage,
   striking: StrikingPage,

@@ -127,16 +127,10 @@ fn in_flight(conn: &Connection, analyzed_at: &str) -> std::collections::HashSet<
          WHERE done_at_analysis IS NOT NULL AND at > ?1",
         &[&esik],
     ) {
-        out.insert(match kind.as_str() {
-            "page" => ItemRef::Page(r),
-            _ => ItemRef::Product(r),
-        });
+        out.insert(ref_from(&kind, r));
     }
     for (kind, r) in completed(conn, analyzed_at) {
-        out.remove(&match kind.as_str() {
-            "page" => ItemRef::Page(r),
-            _ => ItemRef::Product(r),
-        });
+        out.remove(&ref_from(&kind, r));
     }
     out
 }
@@ -156,6 +150,19 @@ pub(crate) fn ref_key(r: &ItemRef) -> (&'static str, String) {
     match r {
         ItemRef::Product(s) => ("product", s.clone()),
         ItemRef::Page(s) => ("page", s.clone()),
+        ItemRef::Contact(s) => ("contact", s.clone()),
+    }
+}
+
+/// `(kind, ref)` ikilisinden kimlik — [`ref_key`]in tersi.
+///
+/// ⚠️ Tek yerde: `queue_dismissals` üç türü de metin olarak saklıyor; üç ayrı yerde `match`
+/// yazılsaydı biri "contact"ı eklemeyi unutup sessizce ürün sayardı.
+fn ref_from(kind: &str, r: String) -> ItemRef {
+    match kind {
+        "page" => ItemRef::Page(r),
+        "contact" => ItemRef::Contact(r),
+        _ => ItemRef::Product(r),
     }
 }
 
@@ -376,6 +383,37 @@ fn candidates(
         });
     }
 
+    // --- 6) MÜŞTERİ: sonraki adımı gelmiş kişiler (Faz C) ---
+    // 🔑 Kuyruğun tek insan işi ve tek "bozulabilir" işi: dönülmezse iş rakibe gider, oysa
+    // bir sayfa bir gün beklemekle hiçbir şey kaybetmez. Skoru bu yüzden gecikme sürüyor.
+    let mut kisiler = super::due_contacts(conn);
+    // ⚠️ Bu analizde "yapıldı" denen kişiler listeye GERİ konuyor: dönüş yapılınca sonraki
+    // adım temizleniyor ve kişi adaylıktan tamamen düşerdi — yerine 11. madde gelir, 08-08'de
+    // düzeltilen "gün hiç bitmiyor" hatası CRM tarafında yeniden doğardı.
+    let mevcut: std::collections::HashSet<i64> = kisiler.iter().map(|k| k.id).collect();
+    let yapilan_kisiler: Vec<i64> = completed(conn, &report.analyzed_at)
+        .into_iter()
+        .filter(|(kind, _)| kind == "contact")
+        .filter_map(|(_, r)| r.parse::<i64>().ok())
+        .filter(|id| !mevcut.contains(id))
+        .collect();
+    kisiler.extend(super::contacts_by_ids(conn, &yapilan_kisiler));
+
+    for k in kisiler {
+        out.push(Candidate {
+            reference: ItemRef::Contact(k.id.to_string()),
+            bucket: Bucket::Contact,
+            title: k.title(),
+            reason: k.reason(),
+            // ⚠️ `clicks` alanı bu kovada GECİKME GÜNÜ taşıyor (bkz. `queue::score`).
+            clicks: k.overdue_days as f64,
+            page: "contacts".into(),
+            focus_id: k.id.to_string(),
+            minutes: sure(Bucket::Contact, 5).0,
+            minutes_measured: sure(Bucket::Contact, 5).1,
+        });
+    }
+
     // ⚠️ Süzgeç EN SONDA ve `pick`ten ÖNCE: kova sayaçları da süzülmüş listeyi saymalı.
     // "Kaçak trafikte 2.100 aday var" derken ölçümü uçuşta olanları sayarsak kova kendi
     // gerçeğini abartır — sayaç boş kovanın neden boş olduğunu açıklamak için var.
@@ -404,7 +442,14 @@ pub fn build_today_queue(conn: &Connection) -> Result<TodayQueue, String> {
     let ucus = in_flight(conn, &report.analyzed_at);
     let all = candidates(conn, &report, &ucus);
     let mut bucket_counts: Vec<BucketCount> = Vec::new();
-    for b in [Bucket::Urgent, Bucket::Leverage, Bucket::Leak, Bucket::Review, Bucket::Upkeep] {
+    for b in [
+        Bucket::Urgent,
+        Bucket::Leverage,
+        Bucket::Leak,
+        Bucket::Review,
+        Bucket::Upkeep,
+        Bucket::Contact,
+    ] {
         bucket_counts.push(BucketCount {
             bucket: b,
             label: b.label().into(),
@@ -525,6 +570,15 @@ pub fn complete_queue_item(
 
     if kind == "product" {
         super::log_event(&conn, &reference, "manual_done", true);
+    }
+    // ⚠️ Müşteri maddesi `work_events`e YAZILMIYOR: o günlük sku-anahtarlı ve `reaches_store`
+    // eksenli, bir telefon görüşmesi oraya ait değil. CRM'in kendi günlüğü `contact_events`.
+    // Dönüş yapıldığı için sonraki adım da temizleniyor — madde kuyruktan gizlenerek değil,
+    // VERİSİ DÜZELDİĞİ için düşüyor.
+    if kind == "contact" {
+        if let Ok(id) = reference.parse::<i64>() {
+            super::complete_contact_followup(&conn, id)?;
+        }
     }
     Ok(())
 }
@@ -669,6 +723,38 @@ mod tests {
         assert_eq!(sonuc, vec!["ESKI"], "yalnızca süresi dolan madde sonuç kontrolünde");
     }
 
+    /// 🔴 08-08 hatasının CRM'de tekrarlamaması: "yapıldı" denen kişi sonraki adımı
+    /// temizlediği için adaylıktan düşerdi, yerine 11. madde gelirdi.
+    #[test]
+    fn yapildi_denen_musteri_gunun_listesinde_kaliyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        let bu_analiz = "2026-08-09T18:11:07";
+        conn.execute(
+            "INSERT INTO contacts (id, name, company, created_at, updated_at)
+             VALUES (7,'Ahmet Yılmaz','Kurumsal BT',?1,?1)",
+            params![now_str()],
+        )
+        .unwrap();
+        // Sonraki adımı YOK (dönüş yapılınca temizlendi) ama bu analizde yapıldı işaretli.
+        conn.execute(
+            "INSERT INTO queue_dismissals (kind, ref, until, at, done_at_analysis)
+             VALUES ('contact','7',NULL,?1,?2)",
+            params![now_str(), bu_analiz],
+        )
+        .unwrap();
+
+        let mut report = OpportunityReport::default();
+        report.analyzed_at = bu_analiz.into();
+        let adaylar = candidates(&conn, &report, &Default::default());
+        let musteri: Vec<&str> = adaylar
+            .iter()
+            .filter(|c| c.bucket == Bucket::Contact)
+            .map(|c| c.title.as_str())
+            .collect();
+        assert_eq!(musteri, vec!["Ahmet Yılmaz · Kurumsal BT"]);
+    }
+
     /// Kararı verilmiş EOL sayfası kaçak kovasında iş çıkarmıyor (Faz D karar deposu).
     #[test]
     fn karari_verilmis_eol_sayfasi_kacak_kovasindan_cikiyor() {
@@ -723,7 +809,9 @@ mod tests {
 
         let all = candidates(&conn, &report, &in_flight(&conn, &report.analyzed_at));
         println!("aday havuzu: {}", all.len());
-        for b in [Bucket::Urgent, Bucket::Leverage, Bucket::Leak, Bucket::Review, Bucket::Upkeep] {
+        for b in
+            [Bucket::Urgent, Bucket::Leverage, Bucket::Leak, Bucket::Review, Bucket::Upkeep, Bucket::Contact]
+        {
             println!("  {:16} {}", b.label(), all.iter().filter(|c| c.bucket == b).count());
         }
 

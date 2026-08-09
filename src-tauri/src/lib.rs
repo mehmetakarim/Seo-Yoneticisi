@@ -69,6 +69,13 @@ pub fn run() {
             commands::save_eol_decision,
             commands::delete_eol_decision,
             commands::export_redirect_csv,
+            // --- CRM ince dilim (Faz C) ---
+            commands::list_contacts,
+            commands::get_contact,
+            commands::save_contact,
+            commands::archive_contact,
+            commands::get_contact_events,
+            commands::add_contact_event,
             commands::dismiss_queue_item,
             commands::complete_queue_item,
             commands::restore_queue_item,

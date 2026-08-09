@@ -13,6 +13,7 @@
 //! YOKTUR ve olmamalıdır — bir çekirdek modülü `AppState`'e veya `tauri::` bir şeye
 //! ihtiyaç duyuyorsa, o ihtiyaç Tauri katmanında çözülmelidir.
 
+pub mod contacts;
 pub mod db;
 pub mod feed;
 pub mod fingerprint;
@@ -26,5 +27,6 @@ pub mod images;
 pub mod opportunity;
 pub mod queue;
 pub mod seo_data;
+pub mod stats;
 pub mod sync;
 pub mod validation;

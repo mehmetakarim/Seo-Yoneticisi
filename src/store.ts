@@ -24,6 +24,8 @@ import type {
   FocusState,
   FocusSummary,
   EolDecision,
+  Contact,
+  ContactEvent,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -124,6 +126,14 @@ interface State {
   /** Hedef seçme modali 301 KARARI için mi açıldı? Doluysa slug; boşsa canonical akışı.
    *  ⚠️ Aynı modal iki amaca hizmet ediyor — hangisi olduğunu bu alan söylüyor. */
   redirectPicking: string;
+  /** CRM (Faz C). ⚠️ Kişisel veri — asistan bağlamına HİÇBİR koşulda girmiyor. */
+  contacts: Contact[];
+  contactsBusy: boolean;
+  contactSearch: string;
+  contactArchived: boolean;
+  /** Açık olan kişi kartı; kimse seçili değilse null. */
+  contact: Contact | null;
+  contactEvents: ContactEvent[];
   /** Ölçüm omurgası (Faz Ö) — sonuç özeti ve satır rozetleri. */
   outcomeSummary: OutcomeSummary | null;
   outcomeBadges: Record<string, OutcomeBadge>;
@@ -190,6 +200,12 @@ export const useStore = defineStore("app", {
     techDropped: [],
     today: null,
     todayBusy: false,
+    contacts: [],
+    contactsBusy: false,
+    contactSearch: "",
+    contactArchived: false,
+    contact: null,
+    contactEvents: [],
     focus: null,
     session: null,
     sessionElapsed: 0,
@@ -1171,8 +1187,93 @@ export const useStore = defineStore("app", {
         await this.openProduct(id);
         return;
       }
+      // Müşteri maddesi kişi kartını açıyor — araç ekranlarındaki satır odağı gibi değil,
+      // burada "satır" zaten kartın kendisi.
+      if (page === "contacts") {
+        this.page = "contacts";
+        await this.openContact(Number(id));
+        return;
+      }
       this.focus = { page, id };
       this.page = page as Page;
+    },
+
+    // --- CRM (Faz C) ---
+
+    async loadContacts() {
+      this.contactsBusy = true;
+      try {
+        this.contacts = await api.listContacts(this.contactSearch, this.contactArchived);
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.contactsBusy = false;
+      }
+    },
+
+    setContactSearch(v: string) {
+      this.contactSearch = v;
+      void this.loadContacts();
+    },
+
+    async openContact(id: number) {
+      try {
+        this.contact = await api.getContact(id);
+        this.contactEvents = await api.getContactEvents(id);
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    closeContact() {
+      this.contact = null;
+      this.contactEvents = [];
+    },
+
+    /** Kişiyi kaydeder ve kartı açık tutar — kaydettikten sonra listeye atmak sinir bozucu. */
+    async saveContact(c: Parameters<typeof api.saveContact>[0]) {
+      try {
+        const id = await api.saveContact(c);
+        await this.loadContacts();
+        await this.openContact(id);
+        void this.loadToday();
+        this.toast("Kişi kaydedildi.", "ok");
+        return id;
+      } catch (e) {
+        this.toast(String(e), "error");
+        return null;
+      }
+    },
+
+    async archiveContact(id: number, archived: boolean) {
+      try {
+        await api.archiveContact(id, archived);
+        await this.loadContacts();
+        if (this.contact?.id === id) await this.openContact(id);
+        void this.loadToday();
+        this.toast(archived ? "Kişi arşivlendi." : "Kişi arşivden çıkarıldı.", "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    /** Temas + (varsa) yeni randevu. ⚠️ Kuyruk da tazeleniyor: sonraki adım kuyruğu besliyor. */
+    async addContactEvent(
+      contactId: number,
+      kind: string,
+      note: string,
+      nextStepAt: string | null,
+      nextStepNote: string | null,
+    ) {
+      try {
+        await api.addContactEvent(contactId, kind, note, nextStepAt, nextStepNote);
+        await this.openContact(contactId);
+        await this.loadContacts();
+        void this.loadToday();
+        this.toast("Temas kaydedildi.", "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
     },
 
     /** Hedef satır çizildikten sonra ekran bunu çağırır — odak yapışkan olmamalı. */
@@ -1204,10 +1305,17 @@ export const useStore = defineStore("app", {
         await this.loadToday();
         // Ürün maddelerinde sonuç rozetleri de değişiyor; özet tazelensin.
         if (kind === "product") void this.loadOutcomes();
+        // Müşteri maddesinde kart da tazelensin: sonraki adım temizlendi, temas eklendi.
+        if (kind === "contact") {
+          void this.loadContacts();
+          if (this.contact?.id === Number(reference)) void this.openContact(Number(reference));
+        }
         this.toast(
           kind === "product"
             ? "Yapıldı — sonucu 28 gün sonra ölçülecek."
-            : "Yapıldı olarak işaretlendi.",
+            : kind === "contact"
+              ? "Dönüş yapıldı olarak kaydedildi."
+              : "Yapıldı olarak işaretlendi.",
           "ok",
         );
       } catch (e) {

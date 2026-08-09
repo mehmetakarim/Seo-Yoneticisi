@@ -38,8 +38,13 @@ use serde::{Deserialize, Serialize};
 /// Sabah listesi tek bir konuya saplanmamalı: beş kova beş farklı iş türü demek.
 pub const PER_BUCKET: usize = 3;
 
-/// Kuyruğun toplam uzunluğu. Yol haritasının hedefi "5–10 net aksiyon".
-pub const TOTAL: usize = 10;
+/// Kuyruğun toplam uzunluğu.
+///
+/// ⚠️ Faz C'de 10 → 13. Yol haritasının hedefi "5–10 net aksiyon"du ve bu **bilinçli olarak
+/// aşıldı**: ölçüldü (2026-08-09) ki 10 slotun tamamı doluydu (Bakım 3 · Kaçak 3 · Acil 3 ·
+/// Kaldıraç 1), yani müşteri işleri ancak SEO işlerini düşürerek girebilirdi. Kullanıcı
+/// kararı: *"günlük iş sayısını artırabiliriz."* Böylece CRM eklendi, SEO 10'da kaldı.
+pub const TOTAL: usize = 13;
 
 /// Bir olayın sonucunun kontrol edilebilmesi için gereken gün.
 ///
@@ -68,6 +73,8 @@ pub enum Bucket {
     Review,
     /// Düşüşte olanlar ve birbiriyle yarışan sayfalar.
     Upkeep,
+    /// Sonraki adım tarihi gelmiş müşteri (Faz C) — kuyruğun tek insan işi.
+    Contact,
 }
 
 impl Bucket {
@@ -78,6 +85,7 @@ impl Bucket {
             Bucket::Leak => "Kaçak trafik",
             Bucket::Review => "Sonuç kontrolü",
             Bucket::Upkeep => "Bakım",
+            Bucket::Contact => "Müşteri",
         }
     }
 
@@ -99,6 +107,8 @@ impl Bucket {
             Bucket::Urgent => 1.0,
             // Sonuç kontrolünde "kayıp" yok, sabit bir öncelik var (bkz. REVIEW_SCORE).
             Bucket::Review => 1.0,
+            // Müşteride de ağırlık değil taban kullanılıyor (bkz. CONTACT_BASE).
+            Bucket::Contact => 1.0,
         }
     }
 
@@ -109,6 +119,7 @@ impl Bucket {
             Bucket::Leak => "tıklama gerçek, ama asıl çözüm 301 ve onu uygulama yapamıyor",
             Bucket::Urgent => "tıklaması düşük olsa da canlıda yanlış içerik duruyor",
             Bucket::Review => "kayıp değil, zamanı gelmiş bir kontrol",
+            Bucket::Contact => "bekleyen insan bozulabilir bir iştir — sayfa bir gün beklemekle kaybetmez",
         }
     }
 
@@ -131,21 +142,40 @@ pub const URGENT_BASE: f64 = 40.0;
 /// Sonuç kontrolü maddelerinin sabit skoru — tıklama cinsinden bir "kayıp" taşımıyorlar.
 pub const REVIEW_SCORE: f64 = 30.0;
 
-/// Kuyruk maddesinin kimliği. Ürün maddeleri sku, EOL maddeleri slug taşır.
+/// Sonraki adımı gelmiş müşterinin tabanı — [`URGENT_BASE`] ile **aynı**, tesadüf değil.
+///
+/// İkisi de "canlıda çözülmemiş bir şey duruyor" sınıfı. Farkı gecikme taşıyor: bekleyen
+/// insan **bozulabilir** bir iştir, dönülmezse iş rakibe gider; bir sayfa bir gün beklemekle
+/// hiçbir şey kaybetmez.
+pub const CONTACT_BASE: f64 = 40.0;
+
+/// Gecikmenin skora ekleyebileceği en fazla puan.
+///
+/// ⚠️ Tavan olmasaydı bir yıl unutulan tek kişi (365 puan) kuyruğun tepesine çakılır, kova
+/// sınırı da onu düşüremezdi — [`PER_BUCKET`] sayıyı sınırlıyor, sırayı değil.
+pub const CONTACT_OVERDUE_CAP: f64 = 30.0;
+
+/// Kuyruk maddesinin kimliği. Ürün maddeleri sku, EOL maddeleri slug, müşteri maddeleri
+/// kişi kimliği taşır.
 ///
 /// ⚠️ EOL satırlarında **sku YOK** (rapor yalnızca slug/url veriyor, ölçüldü) — bu yüzden
 /// kaçak maddeleri ürün maddeleriyle tekilleştirilemiyor, ayrı kimlik uzayında duruyorlar.
+///
+/// ⚠️ `Contact` sayı değil **metin** taşıyor: kalıcı taraf (`queue_dismissals.ref`) TEXT ve
+/// karşılaştırmalar orada metin olarak yapılıyor. `i64` tutup her sınırda dönüştürmek, iki
+/// temsil arasında sessiz uyuşmazlık üretecek bir yer daha açardı.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "ref")]
 pub enum ItemRef {
     Product(String),
     Page(String),
+    Contact(String),
 }
 
 impl ItemRef {
     pub fn key(&self) -> &str {
         match self {
-            ItemRef::Product(s) | ItemRef::Page(s) => s,
+            ItemRef::Product(s) | ItemRef::Page(s) | ItemRef::Contact(s) => s,
         }
     }
 }
@@ -247,6 +277,9 @@ pub fn score(c: &Candidate) -> f64 {
     match c.bucket {
         Bucket::Urgent => URGENT_BASE + c.clicks,
         Bucket::Review => REVIEW_SCORE,
+        // ⚠️ Müşteride `clicks` alanı **gecikme günü** taşıyor — tıklama değil. Alan adı
+        // kuyruğun SEO geçmişinden geliyor; kova bazında ne anlama geldiği burada belli.
+        Bucket::Contact => CONTACT_BASE + c.clicks.clamp(0.0, CONTACT_OVERDUE_CAP),
         b => c.clicks * b.weight(),
     }
 }
@@ -348,19 +381,11 @@ pub const MIN_SAMPLES: usize = 5;
 ///
 /// ⚠️ Çağıran YALNIZCA tamamlanmış işlerin sürelerini vermeli: atlanan bir iş "ne kadar
 /// sürdüğü" bilgisi taşımıyor, listeye girerse süreyi olduğundan kısa gösterir.
+/// ♻️ Medyan kuralı `stats::median_sample`te — Faz C'de temas aralığı için ikinci bir
+/// çağıran çıkınca gövde paylaşıldı. Buradaki tek özel iş: **en az 1 dakika**.
 pub fn calibrated_minutes(samples: &[f64]) -> Option<u32> {
-    if samples.len() < MIN_SAMPLES {
-        return None;
-    }
-    let mut v: Vec<f64> = samples.iter().copied().filter(|x| x.is_finite() && *x >= 0.0).collect();
-    if v.len() < MIN_SAMPLES {
-        return None;
-    }
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let orta = v.len() / 2;
-    let medyan = if v.len() % 2 == 0 { (v[orta - 1] + v[orta]) / 2.0 } else { v[orta] };
-    // En az 1 dakika: "0 dk" bir iş için anlamsız bir vaat olurdu.
-    Some(medyan.round().max(1.0) as u32)
+    // "0 dk" bir iş için anlamsız bir vaat olurdu.
+    crate::stats::median_sample(samples, MIN_SAMPLES).map(|m| m.round().max(1.0) as u32)
 }
 
 #[cfg(test)]

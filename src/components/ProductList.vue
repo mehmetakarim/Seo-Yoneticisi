@@ -126,78 +126,8 @@ function okBadge(b: string) {
 </template>
 
 <style scoped>
-.list-panel {
-  width: clamp(300px, 30vw, 392px);
-  flex: none;
-  border-right: 1px solid var(--c-border);
-  display: flex;
-  flex-direction: column;
-  background: var(--c-list);
-  min-height: 0;
-}
-.search-wrap {
-  padding: 14px 16px 10px;
-}
-.search {
-  position: relative;
-}
-.search-icon {
-  position: absolute;
-  left: 11px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--c-faint);
-}
-.search input {
-  width: 100%;
-  height: 36px;
-  padding: 0 12px 0 34px;
-  border: 1px solid var(--c-border);
-  border-radius: 9px;
-  background: var(--c-input);
-  font-size: 13px;
-  color: var(--c-text);
-  outline: none;
-}
-.filters {
-  display: flex;
-  gap: 4px;
-  padding: 0 14px 12px;
-  overflow-x: auto;
-}
-.filter {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  padding: 6px 11px;
-  border: 1px solid var(--c-border);
-  border-radius: 8px;
-  background: var(--c-input);
-  color: var(--c-mid);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.filter.on {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-  font-weight: 600;
-}
-.filter .count {
-  font-size: 11px;
-  padding: 0 6px;
-  border-radius: 20px;
-  background: var(--c-chip);
-  color: var(--c-soft);
-  font-weight: 600;
-}
-.filter.on .count {
-  background: rgba(255, 255, 255, 0.22);
-  color: #fff;
-}
+/* ⚠️ Liste kroması (.list-panel/.search/.filters) `styles.css`e taşındı —
+   Faz C'de kişi listesi de aynısını kullanıyor, iki kopya zamanla saparadı. */
 .rows {
   flex: 1;
   overflow-y: auto;

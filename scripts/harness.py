@@ -22,6 +22,7 @@ işaretlenir.
 ⚠️ Üretilen `dist/harness.html` bir yapı çıktısıdır, `.gitignore` kapsamındadır.
 """
 
+import datetime
 import json
 import os
 import pathlib
@@ -200,6 +201,37 @@ def main():
         "get_product": detail,
         "app_version": "harness",
     }
+    # CRM (Faz C). ⚠️ `?musteri=0` → hiç kişi yok (boş ekranın dürüstlüğü test edilebilsin).
+    # Tarihler ÇALIŞMA ANINA göre üretiliyor: sabit tarih yazılsaydı "4 gün gecikti" birkaç
+    # gün sonra "40 gün gecikti" derdi ve ekran ölçüsü kayardı.
+    _bugun = datetime.date.today()
+    _g = lambda n: (_bugun + datetime.timedelta(days=n)).isoformat()
+    CONTACTS = [
+        {"id": 1, "name": "Ahmet Yılmaz", "company": "Kurumsal BT", "email": "ahmet@kurumsalbt.com",
+         "phone": "0532 000 00 00", "channel": "mail", "note": "Sunucu yenileme projesi.",
+         "last_contact_at": _g(-11) + "T10:12:00", "next_step_at": _g(-4),
+         "next_step_note": "fiyat teklifi verilecek", "archived": False, "event_count": 3},
+        {"id": 2, "name": "Zeynep Kaya", "company": "Anadolu Yapı", "email": "zeynep@anadoluyapi.com",
+         "phone": "0555 111 11 11", "channel": "fuar", "note": "",
+         "last_contact_at": _g(-2) + "T15:40:00", "next_step_at": _g(0),
+         "next_step_note": "numune sonucu sorulacak", "archived": False, "event_count": 1},
+        {"id": 3, "name": "Mert Demir", "company": "Demir Elektrik", "email": "", "phone": "0312 222 22 22",
+         "channel": "telefon", "note": "", "last_contact_at": _g(-40) + "T09:00:00",
+         "next_step_at": _g(12), "next_step_note": "bütçe sonrası tekrar", "archived": False,
+         "event_count": 2},
+        {"id": 4, "name": "Elif Şahin", "company": "", "email": "elif@ornek.com", "phone": "",
+         "channel": "instagram", "note": "Tek seferlik alım.", "last_contact_at": None,
+         "next_step_at": None, "next_step_note": "", "archived": True, "event_count": 0},
+    ]
+    CONTACT_EVENTS = {
+        1: [{"id": 3, "at": _g(-11) + "T10:12:00", "kind": "call", "note": "Fiyat aralığı soruldu."},
+            {"id": 2, "at": _g(-19) + "T14:02:00", "kind": "email", "note": "Katalog gönderildi."},
+            {"id": 1, "at": _g(-26) + "T11:30:00", "kind": "meeting", "note": "Fuarda tanışıldı."}],
+        2: [{"id": 4, "at": _g(-2) + "T15:40:00", "kind": "email", "note": "Numune kargoya verildi."}],
+        3: [{"id": 6, "at": _g(-40) + "T09:00:00", "kind": "note", "note": "Bütçe yılbaşında."},
+            {"id": 5, "at": _g(-70) + "T09:00:00", "kind": "call", "note": "İlk görüşme."}],
+    }
+
     # Canonical hedefi araması: gerçek feed ürünleri üzerinde, terimle süzülerek.
     live_json = json.dumps(live, ensure_ascii=False)
 
@@ -228,12 +260,24 @@ def main():
             {"bucket": "leak", "label": "Kaçak trafik", "candidates": 2115},
             {"bucket": "review", "label": "Sonuç kontrolü", "candidates": 0},
             {"bucket": "upkeep", "label": "Bakım", "candidates": 52},
+            {"bucket": "contact", "label": "Müşteri", "candidates": 2},
         ],
         "items": [
             # ⚠️ Kaçak maddesi GERÇEK rapordan ve bilerek **40. satırdan** alınıyor: EOL ekranı
             # ilk 25 satırı çiziyor, yani bu madde odak mekanizmasının kırpmayı yükseltme
             # yolunu gerçekten sınıyor. Uydurma bir URL kullanılsaydı derin link hiç
             # eşleşmez ve test yanlış yere "çalışıyor" derdi.
+            # Müşteri maddeleri (Faz C): biri gecikmiş, biri bugünkü. Skor 40 + gecikme.
+            {"reference": {"kind": "contact", "ref": "1"},
+             "bucket": "contact", "title": "Ahmet Yılmaz · Kurumsal BT",
+             "reason": "4 gündür bekliyor — fiyat teklifi verilecek",
+             "clicks": 4, "score": 44, "page": "contacts", "focus_id": "1",
+             "minutes": 5, "minutes_measured": False, "also": [], "done": False},
+            {"reference": {"kind": "contact", "ref": "2"},
+             "bucket": "contact", "title": "Zeynep Kaya · Anadolu Yapı",
+             "reason": "bugün dönülecek — numune sonucu sorulacak",
+             "clicks": 0, "score": 40, "page": "contacts", "focus_id": "2",
+             "minutes": 5, "minutes_measured": False, "also": [], "done": False},
             {"reference": {"kind": "page", "ref": _eol_ornek["slug"]},
              "bucket": "leak", "title": _eol_ornek["slug"],
              "reason": f"{round(_eol_ornek['clicks'])} tıklama satın alınamayan bir sayfaya "
@@ -331,6 +375,8 @@ def main():
         f"    const H = {json.dumps(handlers, ensure_ascii=False).replace('</', '<\\/')};\n"
         # Bugün kuyruğu hem `get_today_queue` hem odak seansı tarafından okunuyor; tek yerde.
         f"    const TQ = {json.dumps(TODAY_Q, ensure_ascii=False)};\n"
+        f"    const CT = {json.dumps(CONTACTS, ensure_ascii=False)};\n"
+        f"    const CE = {json.dumps(CONTACT_EVENTS, ensure_ascii=False)};\n"
         "    if (new URLSearchParams(location.search).has('empty')\n"
         "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
         # `?setup=1` → taze kurulum benzetimi. Sihirbaz kullanıcının GERÇEK veritabanına
@@ -420,6 +466,20 @@ def main():
         "      return Promise.resolve({ ...Q, hidden: gizli.length,\n"
         "        done_count: kalan.filter(i => i.done).length, items: kalan });\n"
         "    }\n"
+        "    if (cmd === 'list_contacts') {\n"
+        "      const bos = new URLSearchParams(location.search).get('musteri') === '0';\n"
+        "      if (bos) return Promise.resolve([]);\n"
+        "      const t = (args.search || '').toLowerCase();\n"
+        "      return Promise.resolve(CT.filter(c => (args.includeArchived || !c.archived)\n"
+        "        && (!t || (c.name + c.company + c.email + c.phone).toLowerCase().includes(t))));\n"
+        "    }\n"
+        "    if (cmd === 'get_contact')\n"
+        "      return Promise.resolve(CT.find(c => c.id === args.id) || CT[0]);\n"
+        "    if (cmd === 'get_contact_events')\n"
+        "      return Promise.resolve(CE[args.contactId] || []);\n"
+        "    if (cmd === 'save_contact') return Promise.resolve(args.id || 9);\n"
+        "    if (cmd === 'archive_contact' || cmd === 'add_contact_event')\n"
+        "      return Promise.resolve(null);\n"
         "    if (cmd === 'dismiss_queue_item') {\n"
         "      (window.__GIZLI__ = window.__GIZLI__ || []).push(args.reference);\n"
         "      return Promise.resolve(null);\n"

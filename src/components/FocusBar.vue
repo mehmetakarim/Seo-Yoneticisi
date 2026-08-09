@@ -14,7 +14,7 @@
  */
 import { computed, onMounted, onUnmounted } from "vue";
 import { useStore } from "../store";
-import type { Bucket } from "../types";
+import { BUCKET_LABEL as LABEL, BUCKET_TONE as TONE } from "../buckets";
 import Icon from "./Icon.vue";
 
 const store = useStore();
@@ -32,20 +32,7 @@ onUnmounted(() => {
 const s = computed(() => store.session);
 const it = computed(() => s.value?.locked ?? null);
 
-const TONE: Record<Bucket, string> = {
-  urgent: "eksik",
-  leverage: "uygun",
-  leak: "bekliyor",
-  review: "tamamlandi",
-  upkeep: "hatali",
-};
-const LABEL: Record<Bucket, string> = {
-  urgent: "Acil",
-  leverage: "Yüksek kaldıraç",
-  leak: "Kaçak trafik",
-  review: "Sonuç kontrolü",
-  upkeep: "Bakım",
-};
+// ♻️ Kova etiketleri `buckets.ts`te — Bugün ekranıyla ortak (iki kopya sapmaya bir adımdı).
 
 /** Kalan süre — dolduğunda negatife düşmez, "süre doldu" hâline geçer. */
 const kalanSn = computed(() => {
@@ -177,6 +164,8 @@ async function ertele() {
 .b-bekliyor { background: var(--badge-bekliyor-bg); color: var(--badge-bekliyor-c); }
 .b-hatali { background: var(--badge-hatali-bg); color: var(--badge-hatali-c); }
 .b-tamamlandi { background: var(--badge-tamamlandi-bg); color: var(--badge-tamamlandi-c); }
+/* Müşteri: SEO durumu değil, insan işi — nötr yüzey onu listede ayırt ediyor. */
+.b-notr { background: var(--c-chip); color: var(--c-mid); }
 .baslik {
   flex: 1;
   min-width: 0;

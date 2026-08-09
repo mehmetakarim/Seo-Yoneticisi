@@ -20,7 +20,8 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { useStore } from "../../store";
-import type { Bucket, QueueItem } from "../../types";
+import type { QueueItem } from "../../types";
+import { BUCKET_LABEL as LABEL, BUCKET_TONE as TONE } from "../../buckets";
 import Icon from "../Icon.vue";
 import ModalShell from "../ModalShell.vue";
 
@@ -37,22 +38,6 @@ const q = computed(() => store.today);
 const items = computed(() => q.value?.items ?? []);
 const bitti = computed(() => q.value?.done_count ?? 0);
 
-/** Kova rozeti — mevcut rozet token'ları; tasarım da bu paletten seçmiş. */
-const TONE: Record<Bucket, string> = {
-  urgent: "eksik",
-  leverage: "uygun",
-  leak: "bekliyor",
-  review: "tamamlandi",
-  upkeep: "hatali",
-};
-const LABEL: Record<Bucket, string> = {
-  urgent: "Acil",
-  leverage: "Yüksek kaldıraç",
-  leak: "Kaçak trafik",
-  review: "Sonuç kontrolü",
-  upkeep: "Bakım",
-};
-
 /** Skor çubuğu = skor ÷ listenin en yükseği. Sayı tek başına anlamsız (309 mu iyi, 37 mi?). */
 const enYuksek = computed(() => Math.max(1, ...items.value.map((i) => i.score)));
 const cubukYuzde = (it: QueueItem) => Math.max(6, Math.round((it.score / enYuksek.value) * 100));
@@ -63,6 +48,8 @@ function skorMetni(it: QueueItem): string {
     return `40 (acil tabanı) + ${Math.round(it.clicks)} tıklama = ${Math.round(it.score)}`;
   if (it.bucket === "review")
     return `sabit ${Math.round(it.score)} (kayıp değil, zamanı gelmiş kontrol)`;
+  if (it.bucket === "contact")
+    return `40 (müşteri tabanı) + ${Math.round(it.clicks)} gün gecikme = ${Math.round(it.score)}`;
   const w = it.bucket === "leverage" ? "1,0" : it.bucket === "upkeep" ? "0,8" : "0,6";
   return `${Math.round(it.clicks)} tıklama × ${w} = ${Math.round(it.score)}`;
 }
@@ -73,6 +60,7 @@ const AGIRLIKLAR = [
   { kova: "Kaçak trafik", agirlik: "0,6", gerekce: "tıklama gerçek, ama asıl çözüm 301 ve onu uygulama yapamıyor" },
   { kova: "Acil", agirlik: "40 + tıklama", gerekce: "tıklaması düşük olsa da canlıda yanlış içerik duruyor" },
   { kova: "Sonuç kontrolü", agirlik: "sabit 30", gerekce: "kayıp değil, zamanı gelmiş bir kontrol" },
+  { kova: "Müşteri", agirlik: "40 + gecikme günü", gerekce: "bekleyen insan bozulabilir bir iştir — sayfa bir gün beklemekle kaybetmez" },
 ];
 
 /** Yarının tarihi (YYYY-AA-GG) — erteleme bu tarihe kadar. */
@@ -81,6 +69,9 @@ function yarin(): string {
   d.setDate(d.getDate() + 1);
   return d.toISOString().slice(0, 10);
 }
+
+/** Bugünün listesindeki müşteri maddesi sayısı — üst şeritteki özet. */
+const bugunMusteri = computed(() => items.value.filter((i) => i.bucket === "contact").length);
 
 const bosKova = computed(() => (q.value?.bucket_counts ?? []).filter((b) => b.candidates === 0));
 const gunFarki = computed(() => {
@@ -92,8 +83,10 @@ const gunFarki = computed(() => {
 
 <template>
   <div class="page om-scroll">
-    <!-- Analiz hiç çalışmamışsa kuyruk kurulamaz; kullanıcıyı boş listeyle baş başa bırakma. -->
-    <div v-if="!store.opportunity" class="empty">
+    <!-- Analiz hiç çalışmamışsa SEO kuyruğu kurulamaz; kullanıcıyı boş listeyle baş başa
+         bırakma. ⚠️ Müşteri maddeleri analizden BAĞIMSIZ (Faz C): kişi eklenmişse liste
+         doludur ve bu ekran gösterilmemeli. -->
+    <div v-if="!store.opportunity && !items.length" class="empty">
       <Icon name="sun" :size="24" :stroke-width="1.9" />
       <p class="e-title">Analiz henüz çalışmadı</p>
       <p class="e-sub">
@@ -136,6 +129,14 @@ const gunFarki = computed(() => {
             </template>
             <!-- Süzgeç sessiz çalışsaydı kullanıcı kovanın neden küçüldüğünü bilemezdi:
                  yaptığı iş listeden düşmüş ama sebebi görünmüyor olurdu. -->
+            <!-- Müşteri özeti: liste tek, ama insan işi ayrıca söyleniyor (kullanıcı
+                 kararı: "1. ve 2. maddeyi harmanlayabiliriz"). Ayrı bir LİSTE değil. -->
+            <template v-if="bugunMusteri">
+              ·
+              <a class="link" @click="store.page = 'contacts'">
+                {{ bugunMusteri }} kişiye dönülecek
+              </a>
+            </template>
             <template v-if="q && q.in_flight">
               ·
               <span
@@ -493,6 +494,8 @@ const gunFarki = computed(() => {
 .b-bekliyor { background: var(--badge-bekliyor-bg); color: var(--badge-bekliyor-c); }
 .b-hatali { background: var(--badge-hatali-bg); color: var(--badge-hatali-c); }
 .b-tamamlandi { background: var(--badge-tamamlandi-bg); color: var(--badge-tamamlandi-c); }
+/* Müşteri: SEO durumu değil, insan işi — nötr yüzey onu listede ayırt ediyor. */
+.b-notr { background: var(--c-chip); color: var(--c-mid); }
 .i-title {
   flex: 1;
   min-width: 0;

@@ -453,12 +453,13 @@ export interface SeedResult {
 // ---------------------------------------------------------------------------
 
 /** İş türü kovası. Rust `seo_core::queue::Bucket` ile birebir. */
-export type Bucket = "urgent" | "leverage" | "leak" | "review" | "upkeep";
+export type Bucket = "urgent" | "leverage" | "leak" | "review" | "upkeep" | "contact";
 
-/** Madde kimliği: ürün maddeleri sku, satışta olmayan sayfalar slug taşır.
- *  ⚠️ EOL satırlarında sku YOK — bu yüzden iki ayrı kimlik uzayı var. */
+/** Madde kimliği: ürün maddeleri sku, satışta olmayan sayfalar slug, müşteriler kişi
+ *  kimliği taşır.
+ *  ⚠️ EOL satırlarında sku YOK — bu yüzden ayrı kimlik uzayları var. */
 export interface ItemRef {
-  kind: "product" | "page";
+  kind: "product" | "page" | "contact";
   ref: string;
 }
 
@@ -580,4 +581,35 @@ export interface ExportSummary {
   undecided_rows: number;
   bytes: number;
   path: string;
+}
+
+// ---------------------------------------------------------------------------
+// CRM ince dilim (Faz C)
+// ---------------------------------------------------------------------------
+
+/** Müşteri kaydı. ⚠️ Kişisel veri — asistan bağlamına GİRMİYOR (bkz. assistantSources.ts). */
+export interface Contact {
+  id: number;
+  name: string;
+  company: string;
+  email: string;
+  phone: string;
+  /** "mail" | "telefon" | "instagram" | "fuar" | "referans" | "diğer" — boş olabilir. */
+  channel: string;
+  note: string;
+  last_contact_at: string | null;
+  /** Fazın kalbi: tarih verildiği gün kuyruğa iş düşer, dönüş yapılınca temizlenir. */
+  next_step_at: string | null;
+  next_step_note: string;
+  archived: boolean;
+  event_count: number;
+}
+
+/** Temas kaydı — CRM'in kendi olay günlüğü (`work_events` DEĞİL). */
+export interface ContactEvent {
+  id: number;
+  at: string;
+  /** "call" | "email" | "meeting" | "note" | "followup_done" */
+  kind: string;
+  note: string;
 }

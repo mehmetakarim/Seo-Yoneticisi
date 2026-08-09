@@ -227,6 +227,30 @@ export const sourceByKey = (key: string) => SOURCES.find((s) => s.key === key);
  * İlk satırlar her zaman rapor özeti: kullanıcı hangi kaynağı seçerse seçsin, asistanın
  * "katalogda kaç ürün var, kaç fırsat var" gibi çerçeveyi bilmesi gerekiyor.
  */
+/**
+ * 🔴 **GİZLİLİK KİLİDİ (Faz C).** Bu kaynak anahtarları asistana AÇILAMAZ.
+ *
+ * Asistan bağlamı Gemini'ye gönderiliyor. `contacts` tabloları müşteri adı, telefonu,
+ * e-postası ve görüşme notları tutuyor — bunlar Google'a gitmez. Kural bir yorumla
+ * bırakılmadı çünkü kayıt tablosuna girdi eklemek tek satırlık bir iş: aşağıdaki kontrol,
+ * yasaklı bir anahtar eklenirse uygulamayı geliştirme kipinde **hemen** durduruyor.
+ *
+ * Kişi verisini asistana vermek istenirse önce şu soru cevaplanmalı: kullanıcı bunu açıkça
+ * onayladı mı ve hangi alanlar maskeleniyor? O gün geldiğinde bu liste bilerek değiştirilir.
+ */
+const YASAKLI_KAYNAKLAR = ["contacts", "contact", "kisiler"];
+
+if (import.meta.env.DEV) {
+  const sizinti = SOURCES.filter((s) => YASAKLI_KAYNAKLAR.includes(s.key));
+  if (sizinti.length) {
+    throw new Error(
+      `Gizlilik kilidi: kişisel veri kaynağı asistana açılamaz (${sizinti
+        .map((s) => s.key)
+        .join(", ")}). Bkz. assistantSources.ts — YASAKLI_KAYNAKLAR.`,
+    );
+  }
+}
+
 export function buildContext(d: SourceData, selected: string[]): string {
   const r = d.report;
   if (!r) return "Henüz analiz çalıştırılmamış — elimizde Search Console verisi yok.";

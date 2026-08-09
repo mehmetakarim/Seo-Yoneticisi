@@ -18,7 +18,7 @@
  */
 /// ⚠️ İlk grubun adı BOŞ (`""`) — Sidebar başlığı `v-if` ile atlıyor. "Bugün" menünün en
 /// üstünde tek başına duruyor; "BUGÜN" başlığı altında "Bugün" öğesi gibi bir tekrar olmuyor.
-export const GROUPS = ["", "Katalog", "SEO Araçları", "Asistan", "Sistem"] as const;
+export const GROUPS = ["", "Katalog", "Müşteriler", "SEO Araçları", "Asistan", "Sistem"] as const;
 export type Group = (typeof GROUPS)[number];
 
 export interface NavItem {
@@ -48,6 +48,17 @@ export const NAV = [
   },
 
   { key: "products", label: "Ürünler", icon: "box", title: "Ürünler", group: "Katalog" },
+
+  // Katalog'dan HEMEN SONRA: ne sattığınız → kime sattığınız. Site vitrin, asıl satış
+  // mail/telefon üzerinden yürüyor ve o taraf bugüne kadar uygulamanın dışındaydı.
+  {
+    key: "contacts",
+    label: "Kişiler",
+    icon: "users",
+    title: "Müşteriler",
+    sub: "Kime ne zaman dönüleceği — sonraki adım tarihi Bugün kuyruğuna iş düşürür",
+    group: "Müşteriler",
+  },
 
   // SEO araçları: her analiz kendi ekranında. Sıra bilinçli — önce "nereye bakayım"
   // (Genel Bakış), sonra en çok iş çıkaran araç, sonra sorgu düzeyi analizler.

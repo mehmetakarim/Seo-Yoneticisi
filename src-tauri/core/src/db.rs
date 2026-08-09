@@ -181,6 +181,69 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         );
         CREATE INDEX IF NOT EXISTS idx_focus_items_bucket
           ON focus_session_items(bucket, outcome);
+
+        -- ===== CRM ince dilim (Faz C) =====
+        -- 🔴 Bu tablolarla birlikte veritabanına İLK KEZ kişisel veri giriyor. İki sonucu var
+        -- ve ikisi de bilinçli:
+        --   1. Kişiler asistana AÇILMIYOR (`assistantSources.ts`) — asistan bağlamı Gemini'ye
+        --      gidiyor, müşteri adı/telefonu Google'a gönderilmez.
+        --   2. Yedeğe DAHİL (K2 dersi: kısmi yedek "geri yükledim ama eksik" sürprizi üretir),
+        --      ama dışa aktarma ekranı kişisel veri içerdiğini söylüyor.
+        --
+        -- `next_step_at` fazın kalbi: yol haritasının deyimiyle "CRM'in %80'i". Tarih
+        -- verildiği gün kuyruğa iş düşer, dönüş yapılınca temizlenir.
+        CREATE TABLE IF NOT EXISTS contacts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          company TEXT NOT NULL DEFAULT '',
+          email TEXT NOT NULL DEFAULT '',
+          phone TEXT NOT NULL DEFAULT '',
+          -- 'mail' | 'telefon' | 'instagram' | 'fuar' | 'referans' | 'diğer' (tek değerli)
+          channel TEXT NOT NULL DEFAULT '',
+          note TEXT NOT NULL DEFAULT '',
+          last_contact_at TEXT,
+          next_step_at TEXT,
+          next_step_note TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          -- Arşiv silme DEĞİL: geçmiş temaslar kayıt, kişi listeden çıksa da kalmalı.
+          archived INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_contacts_next_step ON contacts(next_step_at)
+          WHERE next_step_at IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email);
+
+        -- Temas geçmişi = CRM'in olay günlüğü.
+        -- ⚠️ `work_events`'e AYNA SATIR YAZILMIYOR. Aynı olguyu iki tabloya yazmak bu projede
+        -- üç kez ölçtüğümüz sapma tuzağı; ayrıca Faz Ö'nün günlüğü sku-anahtarlı ve
+        -- `reaches_store` eksenli — bir telefon görüşmesi oraya ait değil.
+        CREATE TABLE IF NOT EXISTS contact_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+          at TEXT NOT NULL,
+          -- 'call' | 'email' | 'meeting' | 'note' | 'followup_done'
+          kind TEXT NOT NULL,
+          note TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_contact_events_contact
+          ON contact_events(contact_id, at);
+
+        -- İlgi etiketleri çoklu → ayrı tablo. Virgüllü metin olsaydı filtre LIKE ile
+        -- çalışırdı ve "IG" etiketi "IGNORE"u da yakalardı.
+        CREATE TABLE IF NOT EXISTS contact_tags (
+          contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+          tag TEXT NOT NULL,
+          PRIMARY KEY (contact_id, tag)
+        );
+
+        -- "Bu ürünle ilgilendi" — SEO tarafıyla CRM'i birbirine bağlayan tek yer.
+        CREATE TABLE IF NOT EXISTS contact_products (
+          contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+          sku TEXT NOT NULL,
+          at TEXT NOT NULL,
+          PRIMARY KEY (contact_id, sku)
+        );
+        CREATE INDEX IF NOT EXISTS idx_contact_products_sku ON contact_products(sku);
         "#,
     )
     .map_err(|e| format!("Şema oluşturulamadı: {e}"))?;
