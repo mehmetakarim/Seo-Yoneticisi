@@ -496,6 +496,8 @@ export interface TodayQueue {
   /** Listede kaç madde "yapıldı" — ilerleme çubuğu bunu gösteriyor. */
   done_count: number;
   bucket_counts: BucketCount[];
+  /** Yapıldı ama sonucu henüz ölçülemeyen iş sayısı (28 günlük pencere). */
+  in_flight: number;
   /** Sonuç kontrolü kovası boşsa en erken dolacağı tarih; doluysa "". */
   review_ready_at: string;
 }

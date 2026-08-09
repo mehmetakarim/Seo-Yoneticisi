@@ -219,6 +219,8 @@ def main():
         "analyzed_at": "2026-08-07T21:27:10",
         "hidden": 0,
         "done_count": 0,
+        # Uçuş süzgeci (2026-08-09): yapıldı ama sonucu 28 gün sonra görünecek işler.
+        "in_flight": 81,
         "review_ready_at": "2026-09-15",
         "bucket_counts": [
             {"bucket": "urgent", "label": "Acil", "candidates": 10},

@@ -22,6 +22,11 @@ pub struct TodayQueue {
     pub done_count: usize,
     /// Kovaların o anki aday sayısı — boş kova "neden boş" diyebilsin diye.
     pub bucket_counts: Vec<BucketCount>,
+    /// Ölçümü uçuşta olan iş sayısı — yapıldı, sonucu 28 gün sonra görünecek.
+    ///
+    /// Ekranda söyleniyor: süzgeç sessiz çalışsaydı kullanıcı kovanın neden küçüldüğünü
+    /// bilemezdi. `review_ready_at` ile aynı gerekçe.
+    pub in_flight: usize,
     /// Sonuç kontrolü kovası boşsa en erken ne zaman dolacağı (YYYY-AA-GG) — boşsa "".
     ///
     /// ⚠️ Ölçüldü (2026-08-07): 72 gönderimin tamamı 0–12 gün önce yapılmış, bu kova bugün
@@ -79,6 +84,74 @@ fn completed(conn: &Connection, analyzed_at: &str) -> Vec<(String, String)> {
     )
 }
 
+/// Ürün başına **mağazaya ulaşan** son iş — `(sku, at)`.
+///
+/// ⚠️ Tek yerde: hem sonuç kontrolü kovası (28 günü DOLANLAR) hem uçuş süzgeci (28 günü
+/// DOLMAYANLAR) buradan okuyor. İki ayrı sorgu olsaydı eşikler zamanla ayrışır, madde ikisinin
+/// arasına düşüp kaybolabilirdi.
+fn store_events(conn: &Connection) -> Vec<(String, String)> {
+    sorgu(
+        conn,
+        "SELECT sku, MAX(at) FROM work_events
+         WHERE reaches_store = 1 AND sku IS NOT NULL GROUP BY sku",
+        &[],
+    )
+}
+
+/// Ölçümü **uçuşta** olan referanslar — yapıldı ama sonucu henüz görünemez.
+///
+/// Gerekçe ve ölçüm `seo_core::queue::drop_in_flight`te. Burada yalnızca iki kaynak var:
+///
+/// 1. **Mağazaya ulaşan olaylar** (ürünler) — gerçek gönderim de, "elle yapıldı" beyanı da.
+/// 2. **"Yapıldı" işaretleri** (sayfalar) — EOL sayfalarının sku'su yok, olay günlüğüne
+///    giremiyorlar; onlar için işaretin kendi zaman damgası tek kanıt.
+///
+/// 🔴 **BU ANALİZDE işaretlenenler süzgece GİRMİYOR.** Onlar [`completed`]in işi: listede
+/// yerinde kalıp üstü çizili duruyorlar. Süzgece girselerdi adaylıktan düşer, yerlerine 11.
+/// madde gelir ve 2026-08-08'de düzeltilen *"bu mantık ile günlük iş hiç bitmez"* hatası
+/// geri dönerdi. İki mekanizma aynı işareti okuyor ama farklı zaman ölçeğinde:
+/// `completed` **bu analiz** boyunca, `in_flight` **sonraki analizlerde** konuşuyor.
+fn in_flight(conn: &Connection, analyzed_at: &str) -> std::collections::HashSet<ItemRef> {
+    let mut out = std::collections::HashSet::new();
+    for (sku, at) in store_events(conn) {
+        if days_since(&at) < queue::REVIEW_AFTER_DAYS {
+            out.insert(ItemRef::Product(sku));
+        }
+    }
+    let esik = (chrono::Local::now() - chrono::Duration::days(queue::REVIEW_AFTER_DAYS))
+        .format("%Y-%m-%dT%H:%M:%S")
+        .to_string();
+    for (kind, r) in sorgu(
+        conn,
+        "SELECT kind, ref FROM queue_dismissals
+         WHERE done_at_analysis IS NOT NULL AND at > ?1",
+        &[&esik],
+    ) {
+        out.insert(match kind.as_str() {
+            "page" => ItemRef::Page(r),
+            _ => ItemRef::Product(r),
+        });
+    }
+    for (kind, r) in completed(conn, analyzed_at) {
+        out.remove(&match kind.as_str() {
+            "page" => ItemRef::Page(r),
+            _ => ItemRef::Product(r),
+        });
+    }
+    out
+}
+
+/// Kararı verilmiş EOL sayfalarının slug'ları (Faz D).
+///
+/// 🔑 **`keep` de dahil.** Bilinçli tutulan sayfa bir iş değil; kuyruğun her analizde onu
+/// yeniden önermesi kararı yok saymak olurdu.
+fn decided_pages(conn: &Connection) -> std::collections::HashSet<String> {
+    sorgu(conn, "SELECT slug, action FROM eol_decisions", &[])
+        .into_iter()
+        .map(|(slug, _)| slug)
+        .collect()
+}
+
 pub(crate) fn ref_key(r: &ItemRef) -> (&'static str, String) {
     match r {
         ItemRef::Product(s) => ("product", s.clone()),
@@ -132,7 +205,11 @@ fn days_since(at: &str) -> i64 {
 ///
 /// Her adayın `reason`ı **gerçek bir metrikten** türüyor (yol haritasının şartı): uydurma
 /// bir "iyileştirilmeli" cümlesi yok, hepsinde sayı var.
-fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
+fn candidates(
+    conn: &Connection,
+    report: &OpportunityReport,
+    in_flight: &std::collections::HashSet<ItemRef>,
+) -> Vec<Candidate> {
     let mut out = Vec::new();
     // 🔑 Faz S'in ürünü: kova başına ÖLÇÜLMÜŞ süre. Yeterli örnek yoksa (kova başına 5)
     // aşağıdaki elle yazılmış tahminler kullanılmaya devam ediyor.
@@ -211,7 +288,11 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
     }
 
     // --- 3) KAÇAK TRAFİK: satışta olmayan sayfalar ---
-    for e in &report.eol {
+    // ⚠️ Kararı verilmiş sayfalar dışarıda (Faz D): 301'i panelde tanımladıysanız ya da
+    // sayfayı bilinçli tutuyorsanız bu artık bir iş değil. Uygulama 301'i doğrulayamıyor,
+    // tek kanıt sizin kararınız.
+    let kararli = decided_pages(conn);
+    for e in report.eol.iter().filter(|e| !kararli.contains(&e.slug)) {
         out.push(Candidate {
             // ⚠️ Sayfa kimliği: EOL satırlarında sku YOK, ürün maddeleriyle birleştirilemez.
             reference: ItemRef::Page(e.slug.clone()),
@@ -231,37 +312,30 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
     }
 
     // --- 4) SONUÇ KONTROLÜ: yeterince beklemiş gönderimler ---
+    // 🔑 Uçuş süzgecinin diğer ucu: 28 günü DOLMAYAN madde diğer kovalarda susuyor, dolan
+    // madde burada geri geliyor. Aynı sorgudan okuyorlar (bkz. `store_events`).
     let mut gorulen = std::collections::HashSet::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT sku, MAX(at) FROM work_events
-         WHERE reaches_store = 1 AND sku IS NOT NULL GROUP BY sku",
-    ) {
-        let rows: Vec<(String, String)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-            .map(|it| it.filter_map(Result::ok).collect())
-            .unwrap_or_default();
-        for (sku, at) in rows {
-            let yas = days_since(&at);
-            if yas < queue::REVIEW_AFTER_DAYS || !gorulen.insert(sku.clone()) {
-                continue;
-            }
-            let ad = states
-                .iter()
-                .find(|p| p.sku == sku)
-                .map(|p| p.name.clone())
-                .unwrap_or_else(|| sku.clone());
-            out.push(Candidate {
-                reference: ItemRef::Product(sku.clone()),
-                bucket: Bucket::Review,
-                title: ad,
-                reason: format!("{yas} gün önce mağazaya gönderildi — sonucuna bakılabilir"),
-                clicks: 0.0,
-                page: "products".into(),
-                focus_id: sku,
-                minutes: sure(Bucket::Review, 1).0,
-                minutes_measured: sure(Bucket::Review, 1).1,
-            });
+    for (sku, at) in store_events(conn) {
+        let yas = days_since(&at);
+        if yas < queue::REVIEW_AFTER_DAYS || !gorulen.insert(sku.clone()) {
+            continue;
         }
+        let ad = states
+            .iter()
+            .find(|p| p.sku == sku)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| sku.clone());
+        out.push(Candidate {
+            reference: ItemRef::Product(sku.clone()),
+            bucket: Bucket::Review,
+            title: ad,
+            reason: format!("{yas} gün önce mağazaya gönderildi — sonucuna bakılabilir"),
+            clicks: 0.0,
+            page: "products".into(),
+            focus_id: sku,
+            minutes: sure(Bucket::Review, 1).0,
+            minutes_measured: sure(Bucket::Review, 1).1,
+        });
     }
 
     // --- 5) BAKIM: düşüşte olanlar + yarışan sayfalar ---
@@ -302,7 +376,10 @@ fn candidates(conn: &Connection, report: &OpportunityReport) -> Vec<Candidate> {
         });
     }
 
-    out
+    // ⚠️ Süzgeç EN SONDA ve `pick`ten ÖNCE: kova sayaçları da süzülmüş listeyi saymalı.
+    // "Kaçak trafikte 2.100 aday var" derken ölçümü uçuşta olanları sayarsak kova kendi
+    // gerçeğini abartır — sayaç boş kovanın neden boş olduğunu açıklamak için var.
+    queue::drop_in_flight(out, in_flight)
 }
 
 /// Bugünün kuyruğu. **Hesaplanıyor, saklanmıyor** — bkz. `seo_core::queue` modül başlığı.
@@ -324,7 +401,8 @@ pub fn build_today_queue(conn: &Connection) -> Result<TodayQueue, String> {
         None => OpportunityReport::default(),
     };
 
-    let all = candidates(conn, &report);
+    let ucus = in_flight(conn, &report.analyzed_at);
+    let all = candidates(conn, &report, &ucus);
     let mut bucket_counts: Vec<BucketCount> = Vec::new();
     for b in [Bucket::Urgent, Bucket::Leverage, Bucket::Leak, Bucket::Review, Bucket::Upkeep] {
         bucket_counts.push(BucketCount {
@@ -377,6 +455,7 @@ pub fn build_today_queue(conn: &Connection) -> Result<TodayQueue, String> {
         items,
         analyzed_at: report.analyzed_at.clone(),
         hidden: gizli.len(),
+        in_flight: ucus.len(),
         done_count,
         bucket_counts,
         review_ready_at,
@@ -523,6 +602,110 @@ mod tests {
         );
     }
 
+    /// 🔴 Saha hatası (2026-08-09): yapılan iş, analiz yenilenince kuyruğa geri geliyordu.
+    ///
+    /// Test iki zaman ölçeğinin **ayrı** kaldığını sabitliyor — bu ikisi karışırsa iki ayrı
+    /// hata geri gelir: bu analizde işaretlenen madde düşerse gün bitmez (08-08 hatası),
+    /// önceki analizde işaretlenen madde susmazsa yapılan iş geri gelir (08-09 hatası).
+    #[test]
+    fn ucus_suzgeci_bu_analizi_degil_oncekileri_susturuyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        let simdi = now_str();
+        let bu_analiz = "2026-08-09T18:11:07";
+
+        conn.execute(
+            "INSERT INTO queue_dismissals (kind, ref, until, at, done_at_analysis)
+             VALUES ('product','BU_ANALIZDE',NULL,?1,?2),
+                    ('page','ONCEKI_ANALIZDE',NULL,?1,'2026-08-07T21:27:10')",
+            params![simdi, bu_analiz],
+        )
+        .unwrap();
+
+        let uctakiler = in_flight(&conn, bu_analiz);
+        assert!(
+            uctakiler.contains(&ItemRef::Page("ONCEKI_ANALIZDE".into())),
+            "önceki analizde yapılan iş susturulmalıydı"
+        );
+        assert!(
+            !uctakiler.contains(&ItemRef::Product("BU_ANALIZDE".into())),
+            "bu analizde işaretlenen madde listede kalmalı (üstü çizili) — düşerse gün bitmez"
+        );
+    }
+
+    /// Mağazaya ulaşan iş 28 günü doldurunca susmayı bırakıp sonuç kontrolüne geçiyor.
+    ///
+    /// ⚠️ İki uç aynı sorgudan (`store_events`) okuyor; eşikler ayrışırsa madde ikisinin
+    /// arasına düşüp tamamen kaybolur.
+    #[test]
+    fn ucus_suresi_dolunca_madde_sonuc_kontrolune_geciyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        let gun = |n: i64| {
+            (chrono::Local::now() - chrono::Duration::days(n))
+                .format("%Y-%m-%dT%H:%M:%S")
+                .to_string()
+        };
+        conn.execute(
+            "INSERT INTO work_events (at, sku, kind, reaches_store)
+             VALUES (?1,'TAZE','manual_done',1), (?2,'ESKI','ideasoft_push',1)",
+            params![gun(3), gun(queue::REVIEW_AFTER_DAYS + 1)],
+        )
+        .unwrap();
+
+        let uctakiler = in_flight(&conn, "analiz");
+        assert!(uctakiler.contains(&ItemRef::Product("TAZE".into())), "3 günlük iş uçuşta");
+        assert!(
+            !uctakiler.contains(&ItemRef::Product("ESKI".into())),
+            "29 günlük iş artık uçuşta değil — sonuç kontrolü kovası onu getirecek"
+        );
+
+        let adaylar = candidates(&conn, &OpportunityReport::default(), &uctakiler);
+        let sonuc: Vec<&str> = adaylar
+            .iter()
+            .filter(|c| c.bucket == Bucket::Review)
+            .map(|c| c.reference.key())
+            .collect();
+        assert_eq!(sonuc, vec!["ESKI"], "yalnızca süresi dolan madde sonuç kontrolünde");
+    }
+
+    /// Kararı verilmiş EOL sayfası kaçak kovasında iş çıkarmıyor (Faz D karar deposu).
+    #[test]
+    fn karari_verilmis_eol_sayfasi_kacak_kovasindan_cikiyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO eol_decisions (slug, url, action, source, decided_at)
+             VALUES ('yonlendirildi','u','redirect_301','manual',?1),
+                    ('bilincli-tutuluyor','u','keep','manual',?1)",
+            params![now_str()],
+        )
+        .unwrap();
+
+        let mut report = OpportunityReport::default();
+        for slug in ["yonlendirildi", "bilincli-tutuluyor", "karar-yok"] {
+            report.eol.push(seo_core::opportunity::EolPage {
+                slug: slug.into(),
+                url: format!("https://x/{slug}"),
+                clicks: 100.0,
+                impressions: 1000.0,
+                position: 5.0,
+            });
+        }
+
+        let adaylar = candidates(&conn, &report, &Default::default());
+        let kalan: Vec<&str> = adaylar
+            .iter()
+            .filter(|c| c.bucket == Bucket::Leak)
+            .map(|c| c.reference.key())
+            .collect();
+        assert_eq!(
+            kalan,
+            vec!["karar-yok"],
+            "301'i de bilinçli tutmayı da karar sayıyoruz — ikisi de iş değil"
+        );
+    }
+
     /// Gerçek veritabanı KOPYASI üzerinde kuyruğun ne ürettiğini ölçer.
     ///
     /// `SEO_DB_COPY=/tmp/kopya.db cargo test kuyruk_real -- --ignored --nocapture`
@@ -538,7 +721,7 @@ mod tests {
         let raw = seo_core::db::get_setting(&conn, "opportunity_json").unwrap().unwrap();
         let report: OpportunityReport = serde_json::from_str(&raw).unwrap();
 
-        let all = candidates(&conn, &report);
+        let all = candidates(&conn, &report, &in_flight(&conn, &report.analyzed_at));
         println!("aday havuzu: {}", all.len());
         for b in [Bucket::Urgent, Bucket::Leverage, Bucket::Leak, Bucket::Review, Bucket::Upkeep] {
             println!("  {:16} {}", b.label(), all.iter().filter(|c| c.bucket == b).count());

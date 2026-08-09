@@ -111,6 +111,15 @@ impl Bucket {
             Bucket::Review => "kayıp değil, zamanı gelmiş bir kontrol",
         }
     }
+
+    /// 🔑 Bu kovanın kanıtı **GSC'den** mi geliyor — yani sonucu haftalarca görünmüyor mu?
+    ///
+    /// Acil ve sonuç kontrolü canlı veritabanından besleniyor: feed bugün değiştiyse bugün
+    /// bilinir. Kaldıraç · kaçak · bakım ise 90 günlük GSC penceresine bakıyor; dün yapılan
+    /// bir düzeltme o ortalamayı kıpırdatamaz. Bkz. [`drop_in_flight`].
+    pub fn evidence_lags(&self) -> bool {
+        matches!(self, Bucket::Leverage | Bucket::Leak | Bucket::Upkeep)
+    }
 }
 
 /// Acil maddelerin sabit tabanı.
@@ -126,7 +135,7 @@ pub const REVIEW_SCORE: f64 = 30.0;
 ///
 /// ⚠️ EOL satırlarında **sku YOK** (rapor yalnızca slug/url veriyor, ölçüldü) — bu yüzden
 /// kaçak maddeleri ürün maddeleriyle tekilleştirilemiyor, ayrı kimlik uzayında duruyorlar.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "ref")]
 pub enum ItemRef {
     Product(String),
@@ -201,6 +210,36 @@ pub fn is_urgent_change(changed_fields: &str) -> bool {
         .split(',')
         .map(|f| f.trim())
         .any(|f| TEXT_FIELDS.contains(&f))
+}
+
+/// Ölçümü **uçuşta** olan işleri kanıtı geciken kovalardan düşürür.
+///
+/// ## 🔴 Neden gerekti (saha geri bildirimi, 2026-08-09)
+///
+/// "Yapıldı" işareti analiz damgasına bağlıydı: analizi yeniden çalıştırınca düşüyordu. Gerekçe
+/// makuldü — *"iş işe yaradıysa madde yeni raporda çıkmaz, yaramadıysa geri gelmeli"*. Ama
+/// **kanıtın gelme süresini hesaba katmıyordu.**
+///
+/// Ölçüm: `NB.LEN.21SR006RTX` 7 Ağustos'ta mağazaya gönderildi, 8'inde "yapıldı" işaretlendi,
+/// 9'unda analiz yenilenince **bakım kovasında geri geldi**. Gelmemesi de mümkün değildi: GSC
+/// 90 günlük pencereye bakıyor, iki günlük bir düzeltme o ortalamayı kıpırdatamaz. Kullanıcının
+/// cümlesi: *"28 gün beklersem kalan işi tamamlamaya ömrüm yetmez"*.
+///
+/// Bu yüzden: bir referans için mağazaya ulaşan bir iş yapıldıysa ve üstünden
+/// [`REVIEW_AFTER_DAYS`] geçmediyse, o referans **kanıtı geciken kovalarda** yeniden iş
+/// çıkarmaz. Kaybolmuyor: 28. günde **sonuç kontrolü** kovası onu kendiliğinden geri getiriyor
+/// — Faz Ö'nün omurgası tam bunun için var.
+///
+/// ⚠️ Acil kovası bilinçli olarak DIŞARIDA: kanıtı GSC değil, canlı feed. Dün gönderdiğiniz
+/// üründe bugün metin değiştiyse bu bugün bilinen bir gerçek ve iş gerçekten acil.
+pub fn drop_in_flight(
+    cands: Vec<Candidate>,
+    in_flight: &std::collections::HashSet<ItemRef>,
+) -> Vec<Candidate> {
+    cands
+        .into_iter()
+        .filter(|c| !c.bucket.evidence_lags() || !in_flight.contains(&c.reference))
+        .collect()
 }
 
 /// Bir adayın skoru.
@@ -340,6 +379,51 @@ mod tests {
             minutes: 2,
             minutes_measured: false,
         }
+    }
+
+    /// 🔴 Saha hatası (2026-08-09): yapılan iş, analiz yenilenince kuyruğa geri geliyordu.
+    /// Gerçek örnek `NB.LEN.21SR006RTX` — 7'sinde gönderildi, 9'unda "bakım" kovasında çıktı.
+    #[test]
+    fn olcumu_ucusta_olan_is_kaniti_geciken_kovalarda_geri_gelmiyor() {
+        let uctakiler: std::collections::HashSet<ItemRef> =
+            [ItemRef::Product("NB.LEN.21SR006RTX".into())].into_iter().collect();
+
+        let kalanlar = drop_in_flight(
+            vec![
+                aday("NB.LEN.21SR006RTX", Bucket::Upkeep, 30.0),
+                aday("NB.LEN.21SR006RTX", Bucket::Leverage, 40.0),
+                aday("BASKA.SKU", Bucket::Leverage, 10.0),
+            ],
+            &uctakiler,
+        );
+        let kimlikler: Vec<&str> = kalanlar.iter().map(|c| c.reference.key()).collect();
+        assert_eq!(kimlikler, vec!["BASKA.SKU"], "iki GSC kovası da susmalı");
+    }
+
+    /// ⚠️ İki kova bilinçli olarak muaf — susturmak zararlı olurdu.
+    #[test]
+    fn acil_ve_sonuc_kontrolu_ucus_suresinden_etkilenmiyor() {
+        let uctakiler: std::collections::HashSet<ItemRef> =
+            [ItemRef::Product("SKU".into())].into_iter().collect();
+
+        // Acil: kanıtı GSC değil, canlı feed. Dün gönderilen üründe bugün metin değiştiyse
+        // bu bugün bilinen bir gerçek.
+        // Sonuç kontrolü: maddeyi 28. günde geri getirecek olan kova; susturmak onu
+        // sonsuza dek görünmez yapardı.
+        let kalanlar = drop_in_flight(
+            vec![aday("SKU", Bucket::Urgent, 0.0), aday("SKU", Bucket::Review, 0.0)],
+            &uctakiler,
+        );
+        assert_eq!(kalanlar.len(), 2);
+    }
+
+    #[test]
+    fn kanit_gecikmesi_yalnizca_gsc_kovalarinda() {
+        assert!(Bucket::Leverage.evidence_lags());
+        assert!(Bucket::Leak.evidence_lags());
+        assert!(Bucket::Upkeep.evidence_lags());
+        assert!(!Bucket::Urgent.evidence_lags());
+        assert!(!Bucket::Review.evidence_lags());
     }
 
     #[test]

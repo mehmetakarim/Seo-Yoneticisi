@@ -4,10 +4,11 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-08-09
-**Aktif faz:** **v0.13.0 yayında; Faz D kodda bitti, yayın bekliyor.** Yol haritasının ilk
-altı fazı bitti: **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan
-bağlam seçimi, v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
-**D** (EOL karar deposu + 301 CSV + sağlık skoru).
+**Aktif faz:** **v0.14.0 yayında.** Yol haritasının ilk altı fazı bitti:
+**B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
+v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
+**D** (EOL karar deposu + 301 CSV + sağlık skoru, v0.14.0).
+⚠️ v0.14.0 sonrası kuyruk düzeltmesi (uçuş süzgeci) henüz **yayınlanmadı** — bkz. 0b1.
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -31,12 +32,13 @@ v0.9.0 = Faz B: araç ekranlarında ortak tablo + İşlem sütunu ·
 v0.10.0 = Faz Ö: ölçüm omurgası (GSC geçmişi + olay günlüğü + sonuç rozetleri) ·
 v0.11.0 = Faz A: asistan bağlam seçimi ("+" menüsü) + halef akışı düzeltmeleri ·
 v0.12.0 = Faz K: Bugün ekranı + iş kuyruğu (tasarım turu, "Yapıldı", koyu pencere) ·
-**v0.13.0 = Faz S: odak seansı — kuyruğu ölçerek tüketmek (süreler artık ölçülüyor)**
+v0.13.0 = Faz S: odak seansı — kuyruğu ölçerek tüketmek (süreler artık ölçülüyor) ·
+**v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru**
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **164 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**21 test**; `commands/` 11 dosyaya bölünmüş durumda).
+bağımlı DEĞİL, **167 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**24 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
@@ -295,6 +297,51 @@ değişti ve ikisi de bu maddeyi çürütüyor.
 
    ⚠️ **Sonuç kontrolü kovası bugün BOŞ** ve Eylül ortasına kadar boş kalacak (72 gönderim
    0–12 gün önce, ölçüm için 28 gün gerekiyor). Sessizce boş bırakmak yerine tarihi söylüyor.
+
+0b1. 🔴 **YAPILAN İŞ KUYRUĞA GERİ GELİYORDU — "kanıtın gelme süresi" hesaba katılmamıştı
+   (2026-08-09, saha geri bildirimi).** Kullanıcı: *"daha önce yaptığım ve yapıldı olarak
+   işaretlediğim işler bugün hâlâ listedeydi."*
+
+   Faz K'nın kuralı şuydu: "yapıldı" işareti **analiz damgasına** bağlı, analiz yenilenince
+   düşer — *"iş işe yaradıysa madde yeni raporda çıkmaz, yaramadıysa geri gelmeli."* Mantık
+   doğru, **varsayımı yanlış**: raporun kaynağı GSC ve GSC **90 günlük** pencereye bakıyor.
+
+   🔬 **Ölçüm (kullanıcının gerçek veritabanı):** `NB.LEN.21SR006RTX` 7 Ağustos'ta mağazaya
+   gönderildi, 8'inde "yapıldı" işaretlendi, 9'unda analiz yenilenince **bakım kovasında geri
+   geldi**. Gelmemesi mümkün de değildi — iki günlük düzeltme 90 günlük ortalamayı kıpırdatamaz.
+   Kullanıcının cümlesi kararı verdi: *"28 gün beklersem kalan işi tamamlamaya ömrüm yetmez."*
+
+   **Çözüm — ölçüm uçuştayken madde susuyor** (`queue::drop_in_flight`). Bir referans için
+   mağazaya ulaşan iş yapıldıysa ve üstünden `REVIEW_AFTER_DAYS` (28) geçmediyse, **kanıtı
+   geciken kovalarda** (kaldıraç · kaçak · bakım) yeniden iş çıkarmıyor. Kaybolmuyor: 28. günde
+   **sonuç kontrolü** kovası onu getiriyor — Faz Ö'nün omurgası zaten bunun için vardı.
+
+   ⚠️ **İki kova bilinçli muaf.** Acil'in kanıtı GSC değil canlı feed: dün gönderilen üründe
+   bugün metin değiştiyse bu bugün bilinen bir gerçek. Sonuç kontrolü ise maddeyi geri
+   getirecek olan kova; susturmak onu sonsuza dek görünmez yapardı.
+
+   🔴 **İnce yer — iki zaman ölçeği karışırsa İKİ ayrı hata geri gelir.** `completed` **bu
+   analiz** boyunca konuşuyor (madde yerinde kalır, üstü çizili), `in_flight` **sonraki
+   analizlerde**. Bu analizde işaretlenenler süzgece girseydi adaylıktan düşer, yerlerine 11.
+   madde gelir ve 08-08'de düzeltilen *"gün hiç bitmiyor"* hatası dönerdi. Test ikisini birden
+   sabitliyor: `ucus_suzgeci_bu_analizi_degil_oncekileri_susturuyor`.
+
+   **Ölçülen etki (gerçek veri, 2.188 aday):** kaldıraç 49→**35**, bakım 55→**31**, kaçak
+   2.118→**2.117**. 88 iş uçuşta, 10'u bu analizde işaretli (listede kalıyor) → **81 iş
+   susturuldu.** Ekran bunu söylüyor: *"81 iş ölçüm bekliyor"* — süzgeç sessiz çalışsaydı
+   kullanıcı yaptığı işin neden listeden düştüğünü bilemezdi (`review_ready_at` ile aynı gerekçe).
+
+   ♻️ İkinci düzeltme aynı turda: **kararı verilmiş EOL sayfaları kaçak kovasından çıkıyor**
+   (Faz D'nin `eol_decisions`'ı). 301'i panelde tanımladıysanız uygulama bunu doğrulayamıyor,
+   tek kanıt sizin kararınız. **`keep` de dahil** — bilinçli tutulan sayfa iş değil.
+
+   ♻️ Sonuç kontrolü kovasının sorgusu `store_events`e çıkarıldı: 28 günü **dolanlar** ile
+   **dolmayanlar** aynı sorgudan okuyor. İki kopya olsaydı eşikler ayrışır, madde ikisinin
+   arasına düşüp tamamen kaybolabilirdi.
+
+   **Ders: bir kuralın mantığı doğru olabilir ama girdisinin ne zaman geleceğini bilmiyorsa
+   yanlış davranır.** "İşe yaradıysa listede çıkmaz" cümlesi, kanıtın 28 gün sonra geleceğini
+   hesaba katmadığı için kullanıcıyı iş yapmakla cezalandırıyordu.
 
 0b0. ✅ **EOL KARAR DEPOSU + 301 CSV + SAĞLIK SKORU (Faz D).** Uygulama **2.115 satışta olmayan
    sayfa** buluyor, 673'ü ≥3 tıklama alıyor — projedeki en büyük tek SEO fırsatı. Ama bulgu işe
@@ -1629,7 +1676,7 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 duruyordu (repo 2026-07-26'dan beri public).
 
 - **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 19) ·
-  `cargo test -p seo-core` (164) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+  `cargo test -p seo-core` (167) · canlı testler `-- --ignored` ile ve env değişkenleriyle
   (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
 - **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`

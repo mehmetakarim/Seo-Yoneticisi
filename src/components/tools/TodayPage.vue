@@ -134,6 +134,16 @@ const gunFarki = computed(() => {
               · {{ q.hidden }} madde kuyruktan çıkarıldı
               <a class="link" @click="store.restoreQueueItems()">geri getir</a>
             </template>
+            <!-- Süzgeç sessiz çalışsaydı kullanıcı kovanın neden küçüldüğünü bilemezdi:
+                 yaptığı iş listeden düşmüş ama sebebi görünmüyor olurdu. -->
+            <template v-if="q && q.in_flight">
+              ·
+              <span
+                class="olcum"
+                :title="`Bu işler yapıldı ama sonuçları henüz görünemez: Google Search Console 90 günlük pencereye bakıyor. ${q.in_flight} iş kuyruğa geri konmuyor; 28 gün dolunca sonuç kontrolü kovasında çıkacaklar.`"
+                >{{ q.in_flight }} iş ölçüm bekliyor</span
+              >
+            </template>
           </div>
         </div>
         <div class="s-btns">
@@ -716,6 +726,11 @@ const gunFarki = computed(() => {
   color: var(--accent);
   cursor: pointer;
   font-weight: 560;
+}
+/* Bilgi taşıyan ama tıklanmayan metin: noktalı alt çizgi ipucu olduğunu söylüyor. */
+.olcum {
+  border-bottom: 1px dotted var(--c-border);
+  cursor: help;
 }
 
 /* ---- skor modali ---- */
