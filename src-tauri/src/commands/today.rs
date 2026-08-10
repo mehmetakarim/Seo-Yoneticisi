@@ -68,19 +68,27 @@ fn hidden(conn: &Connection) -> Vec<(String, String)> {
     )
 }
 
-/// "Yapıldı" işaretli maddeler — yalnızca **işaretlendiği analiz** için geçerli.
+/// "Yapıldı" işaretli maddeler — **bugün** ve **bu analiz** için geçerli.
 ///
 /// 🔴 Bu maddeler kuyruktan ÇIKARILMIYOR, yerinde kalıp üstü çizili gösteriliyor. Anında
 /// düşürüldüğünde yerlerine yeni aday geliyor, sayaç hep 10'da kalıyor ve gün hiç bitmiyordu
 /// (saha geri bildirimi, 2026-08-08).
 ///
-/// Analiz yenilendiğinde işaret düşer: iş işe yaradıysa madde zaten yeni raporda çıkmaz,
-/// yaramadıysa geri gelmeli.
+/// 🔴 **GÜN KOŞULU sonradan eklendi (saha geri bildirimi, 2026-08-10):** *"Bugün sayfasında
+/// hâlâ önceki günün yapıldı olarak işaretlenmiş işleri mevcut."* İşaret yalnızca analiz
+/// damgasına bağlıydı; analiz yenilenmediği sürece dünkü bitmiş işler ekranda kalıyordu.
+/// Ekranın adı **Bugün** — içeriği de güne bağlı olmalı, analize değil.
+///
+/// Yarın ne oluyor: işaret düşüyor ama madde geri **gelmiyor** — [`in_flight`] onu
+/// devralıyor (yapılan işin kanıtı 28 gün sonra görünecek). Yani iki mekanizma sırayla
+/// çalışıyor: `completed` bugün, `in_flight` sonrasında.
 fn completed(conn: &Connection, analyzed_at: &str) -> Vec<(String, String)> {
+    let bugun = now_str()[..10].to_string();
     sorgu(
         conn,
-        "SELECT kind, ref FROM queue_dismissals WHERE done_at_analysis = ?1",
-        &[&analyzed_at],
+        "SELECT kind, ref FROM queue_dismissals
+         WHERE done_at_analysis = ?1 AND date(at) = ?2",
+        &[&analyzed_at, &bugun],
     )
 }
 
@@ -657,6 +665,40 @@ mod tests {
             completed(&conn, "2026-08-20T10:00:00").len(),
             0,
             "yeni analizde 'yapıldı' işareti düşmeliydi"
+        );
+    }
+
+    /// 🔴 Saha hatası (2026-08-10): *"Bugün sayfasında hâlâ önceki günün yapıldı olarak
+    /// işaretlenmiş işleri mevcut."* İşaret analize bağlıydı; analiz yenilenmediği sürece
+    /// dünkü bitmiş işler ekranda kalıyordu.
+    ///
+    /// Test iki ucu birden tutuyor: bugünkü işaret **geçerli**, dünkü **değil** — ve dünkü
+    /// madde geri gelmiyor, uçuş süzgeci devralıyor.
+    #[test]
+    fn yapildi_isareti_yalnizca_bugun_gecerli() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        let analiz = "2026-08-09T18:11:07";
+        let dun = (chrono::Local::now() - chrono::Duration::days(1))
+            .format("%Y-%m-%dT%H:%M:%S")
+            .to_string();
+
+        conn.execute(
+            "INSERT INTO queue_dismissals (kind, ref, until, at, done_at_analysis)
+             VALUES ('product','BUGUN',NULL,?1,?3), ('product','DUN',NULL,?2,?3)",
+            params![now_str(), dun, analiz],
+        )
+        .unwrap();
+
+        let bugunku: Vec<String> = completed(&conn, analiz).into_iter().map(|(_, r)| r).collect();
+        assert_eq!(bugunku, vec!["BUGUN"], "dünkü işaret bugünün listesinde durmamalı");
+
+        // ⚠️ Dünkü madde geri GELMİYOR: uçuş süzgeci onu devralıyor.
+        let uctakiler = in_flight(&conn, analiz);
+        assert!(uctakiler.contains(&ItemRef::Product("DUN".into())));
+        assert!(
+            !uctakiler.contains(&ItemRef::Product("BUGUN".into())),
+            "bugün işaretlenen madde listede kalmalı (üstü çizili)"
         );
     }
 

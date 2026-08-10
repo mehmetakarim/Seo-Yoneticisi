@@ -41,7 +41,7 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
 bağımlı DEĞİL, **183 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**32 test**; `commands/` 11 dosyaya bölünmüş durumda).
+**33 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
@@ -300,6 +300,39 @@ değişti ve ikisi de bu maddeyi çürütüyor.
 
    ⚠️ **Sonuç kontrolü kovası bugün BOŞ** ve Eylül ortasına kadar boş kalacak (72 gönderim
    0–12 gün önce, ölçüm için 28 gün gerekiyor). Sessizce boş bırakmak yerine tarihi söylüyor.
+
+0b3. 🔴 **İKİ SAHA HATASI VE BİR DOĞRULAMA AÇIĞI (2026-08-10).** Kullanıcı `npm run tauri dev`
+   ile test etti: *"Müşteriler ekranının tasarımını göremiyorum"* ve *"Bugün sayfasında hâlâ
+   önceki günün yapıldı olarak işaretlenmiş işleri mevcut."*
+
+   **1) Müşteriler ekranı bomboş açılıyordu — TDZ.** `ContactCard.vue`'da
+   `watch(..., { immediate: true })` kurulum sırasında hemen çalışıp `temas` ref'ine yazıyordu
+   ama `const temas` **20 satır aşağıdaydı**: *"Cannot access 'temas' before initialization"*.
+   Vue kurulum hatasını yutuyor ve `<component :is>` hiçbir şey çizmiyor — üst şeritte başlık
+   görünüyor, gövde bomboş. Düzeltme: tanım `watch`tan öncesine alındı.
+
+   🔴 **ASIL MESELE BU DEĞİL — DOĞRULAMA YÖNTEMİM AÇIK VERDİ.** Bu hata harness'ta da VARDI:
+   ölçüldü, üretim paketleri aynı hatayı küçültülmüş hâlde (`Cannot access 'c'…`) atıyordu.
+   Ama ekran **yine de doğru çiziliyordu** ve ben ekran görüntüsüne bakıp "çalışıyor" dedim.
+   **Piksele baktım, konsola bakmadım.**
+
+   → Görsel doğrulama artık iki adımlı: ekran görüntüsü **ve** `read_console_messages`.
+   ⚠️ Konsol tamponu sayfa yenilemede temizlenmiyor; eski hatalarla yenileri karışmasın diye
+   `console.log("ISARET")` işareti bırakılıp **işaretten sonrasına** bakılıyor. Bu oturumda
+   tam olarak böyle ayrıştırıldı (5 hatanın hepsi işaretten önceydi, güncel paket temiz).
+
+   **2) "Bugün" listesi güne değil ANALİZE bağlıydı.** "Yapıldı" işareti yalnızca
+   `done_at_analysis` ile eşleşiyordu; analiz yenilenmediği sürece dünkü bitmiş işler ekranda
+   kalıyordu. Ölçüm (kullanıcının veritabanı, 10 Ağustos): eski kural **11 madde** döndürüyor,
+   gün koşulu eklenince **0**. Ekranın adı *Bugün* — içeriği de güne bağlı olmalı.
+
+   Düzeltme: `completed()` artık `done_at_analysis = ?1 AND date(at) = bugün`. Yarın işaret
+   düşüyor ama madde **geri gelmiyor** — v0.14.1'in uçuş süzgeci devralıyor (ölçüldü: bu
+   maddelerin karşılığı 89 uçuştaki iş). İki mekanizma sırayla: `completed` bugün,
+   `in_flight` sonrasında.
+
+   **Ders: ekranın adı bir sözleşmedir.** "Bugün" diyen bir liste analiz damgasına değil güne
+   bağlanmalı; kullanıcı ekranın adına inanıyor, koddaki anahtara değil.
 
 0b2. ✅ **CRM İNCE DİLİM (Faz C).** Uygulama **ziyaretçiyi** görüyordu, **müşteriyi**
    görmüyordu: bir ürün 955 gösterimden 36 tıklama getiriyor, o tıklamalardan biri mail
@@ -1750,6 +1783,10 @@ duruyordu (repo 2026-07-26'dan beri public).
   sürüyor) · `?hepsiyapildi=1` (günün işi bitmiş) · `?kararlar=1` (EOL'de karar verilmiş satırlar) ·
   `?musteri=0` (CRM boş) · `?sessizlik=1` (eşik önerisi hazır)
   ⚠️ `npm run build` `dist/`i siler → harness HER ZAMAN derlemeden sonra üretilir.
+  🔴 **Ekran görüntüsü YETMİYOR, konsol da okunmalı** (`read_console_messages`). Ölçüldü
+  (2026-08-10): harness ekranı doğru çiziyordu ama konsolda kurulum hatası vardı ve aynı kod
+  `npm run tauri dev`'de ekranı bomboş açıyordu. ⚠️ Konsol tamponu yenilemede temizlenmiyor →
+  `console.log("ISARET")` bırakıp işaretten SONRASINA bak.
   🔴 **`file://` ile AÇILMAZ** — derlenen `index.html` varlıkları `/assets/...` mutlak yolundan
   istiyor ve dosya protokolünde bunlar bulunamıyor, sayfa sessizce boş açılıyor. HTTP üzerinden
   servis edilmeli (`npx vite preview --port 4173`). Bir kez bu tuzağa düşüldü (2026-08-07).

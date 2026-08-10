@@ -33,6 +33,16 @@ const TEMAS_ETIKET: Record<string, string> = {
 
 /** Düzenleme kopyası — kullanıcı kaydetmeden store'daki kayıt değişmesin. */
 const f = ref(bos());
+
+/**
+ * Temas formu.
+ *
+ * 🔴 **Tanım aşağıdaki `watch`tan ÖNCE olmak ZORUNDA.** `immediate: true` olan izleyici
+ * kurulum sırasında hemen çalışıp bu değişkene yazıyor; aşağıda kalsaydı geçici ölüm
+ * bölgesine (TDZ) düşer ve *"Cannot access 'temas' before initialization"* ile **tüm ekran
+ * boş açılırdı**. Saha hatası, 2026-08-10 — bkz. brain.md.
+ */
+const temas = ref({ kind: "call", note: "", nextStepAt: "", nextStepNote: "" });
 function bos() {
   return {
     name: "",
@@ -83,8 +93,6 @@ async function kaydet() {
     nextStepNote: f.value.nextStepNote,
   });
 }
-
-const temas = ref({ kind: "call", note: "", nextStepAt: "", nextStepNote: "" });
 
 // --- İlgi etiketleri (Faz C2) ---
 // ⚠️ Sabit liste yok: bir mağazanın etiketleri ("sunucu") diğerininkine benzemez. Öneriler
