@@ -39,6 +39,13 @@ pub struct DueContact {
     pub note: String,
     /// Kaç gün gecikti. 0 = bugün, negatif = gelecek (kuyruğa girmez).
     pub overdue_days: i64,
+    /// Sessizlik dalıysa: son temastan bu yana geçen gün. 0 = bu bir sonraki-adım maddesi.
+    ///
+    /// ⚠️ İki dal ayrı cümle kuruyor. Ayrılmasaydı sessiz kişi *"bugün dönülecek"* derdi —
+    /// çünkü sonraki adım tarihi yok, gecikme de 0 çıkıyor. Kullanıcıya söylenen sebep
+    /// yanlış olurdu ve kuyruğun "her gerekçe gerçek bir ölçümden" kuralı çiğnenirdi.
+    #[serde(default)]
+    pub silent_days: i64,
 }
 
 impl DueContact {
@@ -54,6 +61,10 @@ impl DueContact {
     /// Kuyruk gerekçesi — **her zaman bir tarih gerçeğine dayanıyor**, tıpkı SEO
     /// maddelerindeki gibi ("515 tıklama kaçıyor"). Uydurma bir "ilgilenilmeli" cümlesi yok.
     pub fn reason(&self) -> String {
+        if self.silent_days > 0 {
+            // Sessizlik: söz verilmiş bir tarih yok, ilişki soğumuş.
+            return format!("{} gündür temas yok", self.silent_days);
+        }
         let ne_zaman = match self.overdue_days {
             d if d <= 0 => "bugün dönülecek".to_string(),
             1 => "dünden beri bekliyor".to_string(),
@@ -102,6 +113,7 @@ mod tests {
             company: "Kurumsal BT".into(),
             note: note.into(),
             overdue_days: overdue,
+            silent_days: 0,
         }
     }
 
@@ -128,6 +140,17 @@ mod tests {
         assert!(is_due(0), "bugünü kapsıyor");
         assert!(is_due(9));
         assert!(!is_due(-1), "yarın için verilen söz bugün iş değil");
+    }
+
+    /// 🔴 İki dal ayrılmasaydı sessiz kişi "bugün dönülecek" derdi: sonraki adım tarihi yok,
+    /// gecikme 0 çıkıyor. Kuyruğun her gerekçesi gerçek bir ölçümü söylemeli.
+    #[test]
+    fn sessiz_kisi_kendi_cumlesini_kuruyor() {
+        let mut k = kisi(0, "");
+        k.silent_days = 41;
+        assert_eq!(k.reason(), "41 gündür temas yok");
+        // Sonraki adım maddesi etkilenmiyor.
+        assert_eq!(kisi(0, "").reason(), "bugün dönülecek");
     }
 
     #[test]

@@ -387,6 +387,10 @@ fn candidates(
     // 🔑 Kuyruğun tek insan işi ve tek "bozulabilir" işi: dönülmezse iş rakibe gider, oysa
     // bir sayfa bir gün beklemekle hiçbir şey kaybetmez. Skoru bu yüzden gecikme sürüyor.
     let mut kisiler = super::due_contacts(conn);
+    // Sessizlik eşiği (Faz C2) — varsayılan KAPALI, açıksa sonraki adımı olmayan soğumuş
+    // kişileri getiriyor. ⚠️ `due_contacts` ile aynı kimlikler gelemez: biri "next_step_at
+    // dolu", öteki "next_step_at boş" diyor, kesişimleri boş.
+    kisiler.extend(super::silent_contacts(conn));
     // ⚠️ Bu analizde "yapıldı" denen kişiler listeye GERİ konuyor: dönüş yapılınca sonraki
     // adım temizleniyor ve kişi adaylıktan tamamen düşerdi — yerine 11. madde gelir, 08-08'de
     // düzeltilen "gün hiç bitmiyor" hatası CRM tarafında yeniden doğardı.

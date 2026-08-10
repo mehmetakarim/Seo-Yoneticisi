@@ -331,6 +331,23 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         "chat_sessions",
         &["id", "title", "tool_page", "messages_json", "model", "created_at", "updated_at"],
     )?;
+    // 🔴 CRM (Faz C) — yedeğe DAHİL. Kişi kayıtları yeniden üretilemez: feed'den gelmiyor,
+    // GSC'den tazelenmiyor, tamamen kullanıcının emeği. Dışarıda bırakmak K2'de öğrenilen
+    // "geri yükledim ama eksik" sürprizinin en ağır hâli olurdu.
+    // ⚠️ Bu tablolarla birlikte yedek dosyası KİŞİSEL VERİ taşıyor; Ayarlar ekranı bunu
+    // kullanıcıya açıkça söylüyor.
+    let contacts = dump(
+        conn,
+        "contacts",
+        &[
+            "id", "name", "company", "email", "phone", "channel", "note", "last_contact_at",
+            "next_step_at", "next_step_note", "created_at", "updated_at", "archived",
+        ],
+    )?;
+    let contact_events = dump(conn, "contact_events", &["id", "contact_id", "at", "kind", "note"])?;
+    let contact_tags = dump(conn, "contact_tags", &["contact_id", "tag"])?;
+    let contact_products = dump(conn, "contact_products", &["contact_id", "sku", "at"])?;
+
     let root = json!({
         "app": "seo-yoneticisi",
         "exported_at": now_str(),
@@ -342,6 +359,10 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         "work_events": events,
         "metric_snapshots": snaps,
         "metric_page_rows": snap_rows,
+        "contacts": contacts,
+        "contact_events": contact_events,
+        "contact_tags": contact_tags,
+        "contact_products": contact_products,
     });
     serde_json::to_string_pretty(&root).map_err(|e| format!("JSON oluşturulamadı: {e}"))
 }
@@ -384,7 +405,9 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
     let tx = conn.transaction().map_err(|e| format!("İşlem başlatılamadı: {e}"))?;
     tx.execute_batch(
         "DELETE FROM seo_status; DELETE FROM products; DELETE FROM sync_log; DELETE FROM settings;
-         DELETE FROM work_events; DELETE FROM metric_page_rows; DELETE FROM metric_snapshots;",
+         DELETE FROM work_events; DELETE FROM metric_page_rows; DELETE FROM metric_snapshots;
+         DELETE FROM contact_products; DELETE FROM contact_tags; DELETE FROM contact_events;
+         DELETE FROM contacts;",
     )
     .map_err(|e| format!("Mevcut veriler temizlenemedi: {e}"))?;
 
@@ -497,6 +520,51 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
             ],
         );
     }
+    // CRM. ⚠️ Sıra önemli: alt tablolar `contacts.id`e yabancı anahtarla bağlı.
+    for c in arr("contacts") {
+        let _ = tx.execute(
+            "INSERT OR REPLACE INTO contacts (id, name, company, email, phone, channel, note,
+                last_contact_at, next_step_at, next_step_note, created_at, updated_at, archived)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+            params![
+                i(&c, "id"),
+                s(&c, "name").unwrap_or_default(),
+                s(&c, "company").unwrap_or_default(),
+                s(&c, "email").unwrap_or_default(),
+                s(&c, "phone").unwrap_or_default(),
+                s(&c, "channel").unwrap_or_default(),
+                s(&c, "note").unwrap_or_default(),
+                s(&c, "last_contact_at"),
+                s(&c, "next_step_at"),
+                s(&c, "next_step_note").unwrap_or_default(),
+                s(&c, "created_at").unwrap_or_default(),
+                s(&c, "updated_at").unwrap_or_default(),
+                i(&c, "archived").unwrap_or(0)
+            ],
+        );
+    }
+    for e in arr("contact_events") {
+        let _ = tx.execute(
+            "INSERT OR REPLACE INTO contact_events (id, contact_id, at, kind, note)
+             VALUES (?1,?2,?3,?4,?5)",
+            params![
+                i(&e, "id"), i(&e, "contact_id"), s(&e, "at"), s(&e, "kind"),
+                s(&e, "note").unwrap_or_default()
+            ],
+        );
+    }
+    for t in arr("contact_tags") {
+        let _ = tx.execute(
+            "INSERT OR IGNORE INTO contact_tags (contact_id, tag) VALUES (?1,?2)",
+            params![i(&t, "contact_id"), s(&t, "tag")],
+        );
+    }
+    for cp in arr("contact_products") {
+        let _ = tx.execute(
+            "INSERT OR IGNORE INTO contact_products (contact_id, sku, at) VALUES (?1,?2,?3)",
+            params![i(&cp, "contact_id"), s(&cp, "sku"), s(&cp, "at")],
+        );
+    }
     for sn in arr("metric_snapshots") {
         let _ = tx.execute(
             "INSERT OR REPLACE INTO metric_snapshots
@@ -528,6 +596,62 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 🔴 **Kişi kayıtları da yeniden üretilemez** (Faz C): feed'den gelmiyor, GSC'den
+    /// tazelenmiyor — tamamen kullanıcının emeği. Dört tablo birlikte taşınmalı, yoksa
+    /// "kişi geri geldi ama temas geçmişi ve ürün bağları gitti" olur.
+    #[test]
+    fn yedek_crm_verisini_dort_tabloyla_tasiyor() {
+        let src = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&src).unwrap();
+        src.execute(
+            "INSERT INTO contacts (id, name, company, email, next_step_at, next_step_note,
+                created_at, updated_at) VALUES (7,'Ahmet Yılmaz','Kurumsal BT','a@b.com',
+                '2026-08-20','fiyat ver','2026-08-01T09:00:00','2026-08-01T09:00:00')",
+            [],
+        )
+        .unwrap();
+        src.execute(
+            "INSERT INTO contact_events (contact_id, at, kind, note)
+             VALUES (7,'2026-08-01T09:00:00','call','fiyat sordu')",
+            [],
+        )
+        .unwrap();
+        src.execute("INSERT INTO contact_tags (contact_id, tag) VALUES (7,'sunucu')", []).unwrap();
+        src.execute(
+            "INSERT INTO contact_products (contact_id, sku, at) VALUES (7,'A-1','2026-08-01T09:00:00')",
+            [],
+        )
+        .unwrap();
+
+        let json = export_json(&src).expect("dışa aktarılamadı");
+        let mut dst = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&dst).unwrap();
+        import_json(&mut dst, &json).expect("içe aktarılamadı");
+
+        let (ad, adim): (String, Option<String>) = dst
+            .query_row("SELECT name, next_step_at FROM contacts WHERE id=7", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("kişi geri yüklenmedi");
+        assert_eq!(ad, "Ahmet Yılmaz");
+        assert_eq!(adim.as_deref(), Some("2026-08-20"), "sonraki adım kuyruğu besliyor, kaybolamaz");
+
+        let temas: String = dst
+            .query_row("SELECT note FROM contact_events WHERE contact_id=7", [], |r| r.get(0))
+            .expect("temas geçmişi geri yüklenmedi");
+        assert_eq!(temas, "fiyat sordu");
+
+        let etiket: String = dst
+            .query_row("SELECT tag FROM contact_tags WHERE contact_id=7", [], |r| r.get(0))
+            .expect("etiket geri yüklenmedi");
+        assert_eq!(etiket, "sunucu");
+
+        let sku: String = dst
+            .query_row("SELECT sku FROM contact_products WHERE contact_id=7", [], |r| r.get(0))
+            .expect("ürün bağı geri yüklenmedi");
+        assert_eq!(sku, "A-1");
+    }
 
     /// 🔴 **`work_events` yeniden ÜRETİLEMEZ.** Hangi işi ne zaman yaptığımızın tek kaydı;
     /// yedekte taşınmazsa geri yüklemede "işe yaradı mı?" sorusu kalıcı olarak cevapsız kalır.

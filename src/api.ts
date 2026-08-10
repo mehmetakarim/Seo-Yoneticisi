@@ -31,6 +31,10 @@ import type {
   ExportSummary,
   Contact,
   ContactEvent,
+  ContactProduct,
+  CsvPreview,
+  ImportSummary,
+  SilenceState,
 } from "./types";
 
 export const api = {
@@ -205,8 +209,8 @@ export const api = {
 
   // --- CRM ince dilim (Faz C) ---
   // ⚠️ Kişisel veri. Bu uçlardan gelen hiçbir alan asistan bağlamına konmuyor.
-  listContacts: (search: string, includeArchived: boolean) =>
-    invoke<Contact[]>("list_contacts", { search, includeArchived }),
+  listContacts: (search: string, includeArchived: boolean, channel: string, tag: string) =>
+    invoke<Contact[]>("list_contacts", { search, includeArchived, channel, tag }),
   getContact: (id: number) => invoke<Contact>("get_contact", { id }),
   /** `id` null ise yeni kayıt açar; her iki durumda kişi kimliğini döner. */
   saveContact: (c: {
@@ -233,4 +237,28 @@ export const api = {
     nextStepAt: string | null,
     nextStepNote: string | null,
   ) => invoke<void>("add_contact_event", { contactId, kind, note, nextStepAt, nextStepNote }),
+
+  /** Kullanılan bütün etiketler — süzgeç ve öneri listesi (sabit liste YOK). */
+  listContactTags: () => invoke<string[]>("list_contact_tags"),
+  /** Etiketleri tamamen değiştirir; ekle/çıkar ayrı komut değil (ayrışma riski). */
+  setContactTags: (contactId: number, tags: string[]) =>
+    invoke<void>("set_contact_tags", { contactId, tags }),
+
+  getContactProducts: (contactId: number) =>
+    invoke<ContactProduct[]>("get_contact_products", { contactId }),
+  /** Ürün detayında "bu ürünle ilgilenenler" — aynı tablodan, kopya sayaç yok. */
+  contactsOfProduct: (sku: string) => invoke<ContactProduct[]>("contacts_of_product", { sku }),
+  linkContactProduct: (contactId: number, sku: string) =>
+    invoke<void>("link_contact_product", { contactId, sku }),
+  unlinkContactProduct: (contactId: number, sku: string) =>
+    invoke<void>("unlink_contact_product", { contactId, sku }),
+
+  /** ⚠️ Hiçbir şey YAZMAZ — eşleştirme ekranının girdisi. */
+  previewContactCsv: (path: string) => invoke<CsvPreview>("preview_contact_csv", { path }),
+  importContactsCsv: (path: string, mapping: (number | null)[]) =>
+    invoke<ImportSummary>("import_contacts_csv", { path, mapping }),
+
+  getSilenceState: () => invoke<SilenceState>("get_silence_state"),
+  /** `0` = kapalı. Öneri kendiliğinden yazılmıyor; bu yalnızca kullanıcı onayıyla çağrılır. */
+  setSilenceDays: (days: number) => invoke<void>("set_silence_days", { days }),
 };

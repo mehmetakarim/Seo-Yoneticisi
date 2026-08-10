@@ -12,6 +12,7 @@ import TechTableCard from "./TechTableCard.vue";
 import SchemaCard from "./SchemaCard.vue";
 import FeedChangeNotice from "./FeedChangeNotice.vue";
 import OutcomeTimeline from "./OutcomeTimeline.vue";
+import ProductContacts from "./contacts/ProductContacts.vue";
 import IdeasoftPushModal from "./IdeasoftPushModal.vue";
 
 const store = useStore();
@@ -197,6 +198,9 @@ async function openProduct() {
 
       <!-- JSON-LD teknik tablodan besleniyor → hemen onun altında -->
       <SchemaCard />
+
+      <!-- İlgilenen kişiler de bir sonuçtur: üretim kartlarından sonra, geçmişten önce. -->
+      <ProductContacts />
 
       <!-- "Ne yaptık, sonra ne oldu" — en altta: geçmiş, üretim kartlarının ardından okunur -->
       <OutcomeTimeline />

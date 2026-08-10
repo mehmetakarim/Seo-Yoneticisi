@@ -3,16 +3,18 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-08-09
-**Aktif faz:** **v0.14.0 yayında.** Yol haritasının ilk altı fazı bitti:
+**Son güncelleme:** 2026-08-10
+**Aktif faz:** **v0.14.1 yayında; Faz C kodda bitti, yayın bekliyor.** Yol haritasının ilk
+yedi fazı bitti:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
-**D** (EOL karar deposu + 301 CSV + sağlık skoru, v0.14.0).
+**D** (EOL karar deposu + 301 CSV + sağlık skoru, v0.14.0) · **C** (CRM ince dilim).
+⚠️ Faz C henüz **yayınlanmadı** — bkz. 0b2.
 **v0.14.1 = kuyruk uçuş süzgeci** — yapılan iş kanıtı gelene kadar geri gelmiyor (0b1).
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
-**Sıradaki faz: C (CRM ince dilim).** Ardından T · P (+ serbest G).
+**Sıradaki faz: T (teklif/offline satış).** Ardından P (+ serbest G).
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -38,8 +40,8 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **167 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**24 test**; `commands/` 11 dosyaya bölünmüş durumda).
+bağımlı DEĞİL, **183 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**32 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
@@ -298,6 +300,68 @@ değişti ve ikisi de bu maddeyi çürütüyor.
 
    ⚠️ **Sonuç kontrolü kovası bugün BOŞ** ve Eylül ortasına kadar boş kalacak (72 gönderim
    0–12 gün önce, ölçüm için 28 gün gerekiyor). Sessizce boş bırakmak yerine tarihi söylüyor.
+
+0b2. ✅ **CRM İNCE DİLİM (Faz C).** Uygulama **ziyaretçiyi** görüyordu, **müşteriyi**
+   görmüyordu: bir ürün 955 gösterimden 36 tıklama getiriyor, o tıklamalardan biri mail
+   atıyor — ve bu noktadan sonra uygulama kördü.
+
+   ⚠️ **Bu fazda "fırsatı ölçen" bir sayı YOK ve bu dürüstçe söylendi.** Önceki fazlar mevcut
+   veriden besleniyordu (2.115 sayfa, 279 ürün); CRM'in verisini kullanıcı sıfırdan üretiyor.
+   Ölçüm ancak veri birikince mümkün — fazın eşik kararı doğrudan buna dayanıyor.
+
+   **C1 — çekirdek (`8d6d937`).** `contacts` + `contact_events` + `contact_tags` +
+   `contact_products`; kişi listesi/kartı; `next_step_at` (yol haritasının deyimiyle "CRM'in
+   %80'i"); kuyruğun **6. kovası**.
+   - **`TOTAL` 10 → 13** (kullanıcı kararı: *"günlük iş sayısını artırabiliriz"*). Ölçüm
+     gerekçeyi verdi: 10 slotun tamamı doluydu (Bakım 3 · Kaçak 3 · Acil 3 · Kaldıraç 1),
+     yani CRM ancak SEO işlerini düşürerek girebilirdi.
+   - Skor `CONTACT_BASE (40) + gecikme`, tavan +30. Taban `URGENT_BASE` ile aynı: ikisi de
+     "çözülmemiş bir şey duruyor" sınıfı. Fark, bekleyen insanın **bozulabilir** olması.
+   - ⚠️ `evidence_lags() = false` — v0.14.1'in uçuş süzgeci CRM'e dokunmuyor; kanıtı GSC değil.
+   - 🔴 **08-08 hatası CRM'de yeniden doğuyordu:** "yapıldı" sonraki adımı temizliyor, kişi
+     adaylıktan düşüyor, yerine 11. madde geliyordu. `contacts_by_ids` o maddeleri günün
+     listesinde tutuyor. Aynı tuzağın üçüncü görünüşü — mekanizma değişti, hata aynı kaldı.
+
+   **C2 — bağlar ve toplu giriş.** Etiketler (kanal sütun / ilgi tablo), "bu ürünle ilgilendi"
+   bağı (iki yön de **tek tablodan sorguyla**, kopya sayaç yok), CSV içe aktarma, sessizlik
+   eşiği, yedek kapsamı.
+   - 🔬 **CSV gerçek dosyayla ölçüldü** (Türkçe Excel taklidi: BOM + `;` + CRLF + tırnaklı
+     alan + tekrar eden e-posta + adsız satır): ayraç `;` sezildi, BOM temizlendi, tahmin
+     `Yetkili→ad · Ünvan→firma · E-Posta→e-posta · Cep→telefon` çıktı, *"Anadolu Yapı, A.Ş."*
+     bozulmadan geçti → **3 eklendi · 1 güncellendi · 1 atlandı**. Tekrar eden kişi
+     ikizlenmedi, güncellendi.
+   - ⚠️ **Önizleme atlanamaz adım:** 300 satırlık yanlış eşleşmiş aktarım geri alınamaz.
+   - **Sessizlik eşiği KAPALI doğuyor** ve veriden öğreniyor: ≥5 kişide ≥2 temas biriktiğinde
+     medyan aralık öneriliyor (*"25 gün diyelim mi?"*), **sessizce yazılmıyor**. Faz D'de stok
+     eşiği "veri yokken eşik uydurma" diye elenmişti; buradaki fark eşiğin kullanıcının kendi
+     verisinden çıkması. ⚠️ Sonraki adımı olan kişi eşikten etkilenmiyor — çift hatırlatma.
+   - ⚠️ Sessiz kişi **kendi cümlesini** kuruyor (*"41 gündür temas yok"*). Ayrılmasaydı
+     sonraki adım tarihi olmadığı için gecikme 0 çıkar ve *"bugün dönülecek"* derdi.
+
+   🔴 **GİZLİLİK — bu fazın yeni sorumluluğu.** Veritabanına ilk kez kişisel veri girdi.
+   Kişiler asistana **açılmıyor**: asistan bağlamı Gemini'ye gidiyor. Projede JS test koşucusu
+   olmadığı için garanti bir test değil, **dev kipinde açılışta patlayan kilit**
+   (`assistantSources.ts` · `YASAKLI_KAYNAKLAR`). Yedek dört tabloyu da taşıyor (K2 dersi) ama
+   Ayarlar artık dosyanın kişisel veri içerdiğini **söylüyor**.
+
+   ♻️ **ÜÇ KOPYA BULUNDU VE PAYLAŞIMA ÇIKARILDI** — hepsi altıncı kova eklenirken görüldü:
+   | Kopya | Nereye | Nasıl yakalandı |
+   |---|---|---|
+   | Liste kroması (arama + sekmeler, ~70 satır) | `styles.css` | ikinci liste ekranı yazılırken |
+   | Kova etiketi/tonu (`TodayPage` + `FocusBar`) | `buckets.ts` | **derleyici** (`Record<Bucket, …>`) |
+   | Kova adları (`SettingsPage`) | `buckets.ts` | ölçümle — derleyici SUSMUŞTU |
+
+   🔴 **Üçüncüsünün dersi:** ilk ikisi `Record<Bucket, string>` olduğu için 6. kova eklenince
+   **anında patladı**; üçüncüsü `Record<string, string>` olduğu için sessiz kaldı ve Ayarlar'da
+   kova adı ham `contact` görünecekti. **Gevşek tip, kopyayı görünmez yapıyor.** Aynı dosyada
+   satır tipi de elle yeniden yazılmıştı (`CalibrationRow` yerine anonim nesne) — o da
+   bağlandı.
+
+   🔴 **`.hint` cümleleri bozuyormuş (ölçüldü, 2026-08-10).** Global sınıf `display: flex`
+   olduğu için içindeki her `<b>` ayrı bir sütun oluyordu: *"… bu eşikten | etkilenmez |
+   — zaten söz verdiğiniz gün…"*. Ekrandaki 6 ipucunun **4'ü** bu hâldeydi, yani istisna değil
+   kuraldı. Blok akış + satır içi ikona çevrildi; dört mevcut satır da düzeldi.
+   **Ders: bir yardımcı sınıf, en sık kullanıldığı içerikle sınanmalı.**
 
 0b1. 🔴 **YAPILAN İŞ KUYRUĞA GERİ GELİYORDU — "kanıtın gelme süresi" hesaba katılmamıştı
    (2026-08-09, saha geri bildirimi).** Kullanıcı: *"daha önce yaptığım ve yapıldı olarak
@@ -1677,13 +1741,14 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 duruyordu (repo 2026-07-26'dan beri public).
 
 - **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 19) ·
-  `cargo test -p seo-core` (167) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+  `cargo test -p seo-core` (183) · canlı testler `-- --ignored` ile ve env değişkenleriyle
   (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
 - **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`
   `dist/harness.html` · kipler: `?empty=1` `?setup=1` `?changed=1` `?nosnap=1` `?nosonuc=1`
   `?nav=<ekran>` `&tema=koyu` · `?halefyok=1` (halef bulunamadı) · `?boskuyruk=1` (Bugün boş) · `?seans=1` (odak seansı
-  sürüyor) · `?hepsiyapildi=1` (günün işi bitmiş) · `?kararlar=1` (EOL'de karar verilmiş satırlar)
+  sürüyor) · `?hepsiyapildi=1` (günün işi bitmiş) · `?kararlar=1` (EOL'de karar verilmiş satırlar) ·
+  `?musteri=0` (CRM boş) · `?sessizlik=1` (eşik önerisi hazır)
   ⚠️ `npm run build` `dist/`i siler → harness HER ZAMAN derlemeden sonra üretilir.
   🔴 **`file://` ile AÇILMAZ** — derlenen `index.html` varlıkları `/assets/...` mutlak yolundan
   istiyor ve dosya protokolünde bunlar bulunamıyor, sayfa sessizce boş açılıyor. HTTP üzerinden

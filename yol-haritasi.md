@@ -303,24 +303,32 @@ yerinde ve refactor küçük değil.
 
 ---
 
-### Faz C — CRM ince dilim
+### Faz C — CRM ince dilim ✅ (tamamlandı)
 
 **Amaç.** Site vitrin; asıl satış mail/telefon/teklif üzerinden yürüyor. SEO ziyaretçi
 getiriyor, ama ne olduğu uygulamanın dışında kalıyor.
 
-**Kapsam.** Kişi/firma kartı · kanal etiketi (mail/telefon/IG/fuar) · ilgi etiketleri ·
-**son temas + sonraki adım tarihi** (CRM'in %80'i) · zaman çizelgesi · "bu ürünle ilgilendi"
-SKU bağı · sessiz müşteri uyarısı · CSV içe aktarma. Kuyruğa `crm.followup` düşürür.
+**Kapsam.** ~~Kişi/firma kartı~~ ✅ · ~~kanal etiketi~~ ✅ · ~~ilgi etiketleri~~ ✅ ·
+~~**son temas + sonraki adım tarihi**~~ ✅ · ~~zaman çizelgesi~~ ✅ · ~~"bu ürünle ilgilendi"
+SKU bağı~~ ✅ · ~~sessiz müşteri uyarısı~~ ✅ (**kapalı doğuyor, veriden öğreniyor**) ·
+~~CSV içe aktarma~~ ✅ (sütun eşleştirme ekranıyla). Kuyruğa **6. kova** olarak düşüyor.
+
+⚠️ İki sayı bilinçli değişti: `TOTAL` 10 → **13** (aşağıdaki "5–10 net aksiyon" hedefi
+kullanıcı kararıyla aşıldı) ve veritabanı ilk kez **kişisel veri** tutuyor — kişiler asistana
+açılmıyor. Gerekçeler `brain.md` 0b2'de.
 
 **Ertelenenler.** Gmail gelen kutusu entegrasyonu, otomatik mail okuma, ekip yetkileri.
 
-**Başlama koşulu.** Faz K + S bitmiş olmalı — CRM işleri kuyruğa ve seansa bağlanmazsa ayrı
-bir ada olur, "iki yarım ürün" riski tam olarak burada doğar.
+**Başlama koşulu.** ~~Faz K + S bitmiş olmalı~~ ✅ — CRM işleri kuyruğa **ve** seansa bağlandı:
+müşteri maddesi diğerleriyle aynı listede, odak seansı onu kilitleyebiliyor.
 
-**Bitti sayılır.** Bir müşteri kaydı üzerinden "sonraki adım" tarihi kuyruğa iş düşürüyor ve
-tamamlandığında olay günlüğüne yazılıyor.
+**Bitti sayılır.** ✅ "Sonraki adım" tarihi kuyruğa iş düşürüyor ve tamamlandığında
+`contact_events`e yazılıyor. ⚠️ Olay günlüğü olarak `work_events` DEĞİL kendi tablosu
+kullanılıyor: o günlük sku-anahtarlı ve `reaches_store` eksenli, bir telefon görüşmesi
+oraya ait değil — aynı olguyu iki yere yazmak sapma üretirdi.
 
-**Ekran gerekiyor mu.** Evet — müşteri listesi + kartı.
+**Ekran gerekiyor mu.** ~~Evet~~ ✅ Müşteriler ekranı (liste + kart) eklendi; ayrı tasarım turu
+gerekmedi, kroma Ürünler ekranıyla paylaşıldı.
 
 ---
 

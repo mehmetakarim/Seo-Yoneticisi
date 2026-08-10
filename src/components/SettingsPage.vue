@@ -5,6 +5,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "../api";
 import { useStore } from "../store";
+import { BUCKET_LABEL } from "../buckets";
+import type { CalibrationRow, SilenceState } from "../types";
 import Icon from "./Icon.vue";
 
 const store = useStore();
@@ -12,14 +14,30 @@ const store = useStore();
 // --- Odak seansı (Faz S) ---
 const seansDk = ref(25);
 const molaDk = ref(5);
-const kalibrasyon = ref<{ bucket: string; samples: number; minutes: number | null }[]>([]);
-const KOVA: Record<string, string> = {
-  urgent: "Acil",
-  leverage: "Yüksek kaldıraç",
-  leak: "Kaçak trafik",
-  review: "Sonuç kontrolü",
-  upkeep: "Bakım",
-};
+const kalibrasyon = ref<CalibrationRow[]>([]);
+// ♻️ Kova adları `buckets.ts`te. 🔴 Burada ÜÇÜNCÜ kopya duruyordu ve `Record<string, string>`
+// olduğu için Faz C'nin 6. kovası eklendiğinde derleyici uyarmadı: Ayarlar'daki kalibrasyon
+// listesi "Müşteri" yerine ham "contact" yazacaktı. Diğer iki kopya `Record<Bucket, string>`
+// olduğu için anında patlamıştı. Ders: gevşek tip, kopyayı görünmez yapıyor.
+
+// --- Sessizlik eşiği (Faz C2) ---
+// 🔴 Eşik KAPALI doğuyor (0). Veri yokken eşik uydurmak Faz D'de elenen kalemin aynısı olurdu;
+// buradaki fark, uygulamanın zamanla kullanıcının KENDİ verisinden bir sayı önermesi — ve o
+// sayının yine de sessizce yazılmaması.
+const sessizlik = ref<SilenceState>({ days: 0, suggestion: null, sample_contacts: 0 });
+const sessizGun = ref(0);
+
+async function sessizlikKaydet(gun: number) {
+  try {
+    await api.setSilenceDays(gun);
+    sessizlik.value = await api.getSilenceState();
+    sessizGun.value = sessizlik.value.days;
+    store.toast(gun > 0 ? `Sessizlik eşiği ${gun} gün.` : "Sessizlik uyarısı kapatıldı.", "ok");
+    void store.loadToday();
+  } catch (e) {
+    store.toast(String(e), "error");
+  }
+}
 
 async function seansAyarKaydet() {
   try {
@@ -74,6 +92,10 @@ onMounted(async () => {
   seansDk.value = store.session?.planned_minutes ?? 25;
   molaDk.value = store.session?.break_minutes ?? 5;
   kalibrasyon.value = await api.getFocusCalibration().catch(() => []);
+  sessizlik.value = await api
+    .getSilenceState()
+    .catch(() => ({ days: 0, suggestion: null, sample_contacts: 0 }));
+  sessizGun.value = sessizlik.value.days;
 });
 
 async function persist() {
@@ -589,7 +611,7 @@ async function doImport() {
             <label class="lbl">Ölçüm durumu</label>
             <div v-if="kalibrasyon.length" class="kal">
               <div v-for="k in kalibrasyon" :key="k.bucket" class="kal-row">
-                <span class="kk">{{ KOVA[k.bucket] ?? k.bucket }}</span>
+                <span class="kk">{{ BUCKET_LABEL[k.bucket] }}</span>
                 <span class="ks">{{ k.samples }} ölçüm</span>
                 <span class="kv" :class="{ yok: k.minutes === null }">
                   {{ k.minutes === null ? "henüz yeterli değil" : `${k.minutes} dk` }}
@@ -608,6 +630,51 @@ async function doImport() {
             <Icon name="info" :size="13" />
             Seans puan, rozet veya seri tutmuyor. Amaç sakin bir çalışma ritmi ve gerçek süre
             ölçümü — mola önerilir, zorunlu değildir.
+          </div>
+        </div>
+      </div>
+
+      <!-- Müşteri takibi (Faz C2) -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ch-title">
+            <Icon name="users" :size="17" style="color:var(--accent)" />
+            Müşteri takibi
+          </div>
+          <div class="ch-sub">
+            Uzun süre temas edilmemiş kişiler Bugün listesine düşsün mü? Bu uyarı
+            <b>varsayılan olarak kapalı</b>.
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="sure-row">
+            <div>
+              <label class="lbl">Sessizlik eşiği (gün · 0 = kapalı)</label>
+              <input v-model.number="sessizGun" class="inp kisa" type="number" min="0" max="365" />
+            </div>
+            <button class="solid" @click="sessizlikKaydet(sessizGun)">Kaydet</button>
+          </div>
+
+          <!-- Öneri kullanıcının KENDİ verisinden; tek tıkla kabul, sessizce yazılmıyor. -->
+          <div v-if="sessizlik.suggestion" class="hint">
+            <Icon name="info" :size="13" />
+            {{ sessizlik.sample_contacts }} kişinin temas geçmişine göre ortalama
+            <b>{{ sessizlik.suggestion }} günde</b> bir dönüyorsunuz.
+            <a class="oneri" @click="sessizlikKaydet(sessizlik.suggestion!)">
+              Eşiği {{ sessizlik.suggestion }} gün yap
+            </a>
+          </div>
+          <div v-else class="hint">
+            <Icon name="info" :size="13" />
+            Eşik için henüz öneri yok: en az <b>5 kişide ikişer temas</b> biriktiğinde
+            uygulama sizin temas ritminizi ölçüp bir sayı önerecek. O zamana kadar sayıyı
+            uydurmuyoruz.
+          </div>
+
+          <div class="hint">
+            <Icon name="info" :size="13" />
+            Sonraki adım tarihi verdiğiniz kişiler bu eşikten <b>etkilenmez</b> — zaten söz
+            verdiğiniz gün listede çıkıyorlar, ikinci kez hatırlatmak gürültü olurdu.
           </div>
         </div>
       </div>
@@ -635,6 +702,13 @@ async function doImport() {
             </div>
             <button class="solid" @click="doExport('db')">.db</button>
             <button class="ghost" @click="doExport('json')">.json</button>
+          </div>
+          <!-- 🔴 Faz C ile birlikte yedek KİŞİSEL VERİ taşıyor. Kullanıcı dosyayı nereye
+               koyduğunu bilerek seçmeli; sessiz kalmak bunu gizlemek olurdu. -->
+          <div class="hint">
+            <Icon name="alert" :size="13" />
+            Yedek dosyası <b>müşteri adlarını, telefon ve e-postalarını, görüşme notlarını</b>
+            içerir. Paylaşırken ve saklarken buna dikkat edin.
           </div>
           <div class="backup-row">
             <div class="bi neutral">
@@ -1202,5 +1276,12 @@ async function doImport() {
   .guide-leave-to .guide-modal {
     transform: none;
   }
+}
+/* Öneriyi kabul bağlantısı: bilgi satırının içinde, düğme değil — kullanıcı isterse tıklar. */
+.oneri {
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: 4px;
 }
 </style>

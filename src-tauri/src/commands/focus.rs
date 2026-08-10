@@ -73,7 +73,9 @@ pub struct FocusSummary {
     pub buckets: Vec<(String, i64)>,
 }
 
-fn setting_i64(conn: &Connection, key: &str, fallback: i64) -> i64 {
+/// ⚠️ `pub(crate)`: Faz C'nin sessizlik eşiği de bunu okuyor. Kopyalanmadı — `.filter(> 0)`
+/// davranışı orada da doğru: eşikte **0 = kapalı** ve fallback de 0.
+pub(crate) fn setting_i64(conn: &Connection, key: &str, fallback: i64) -> i64 {
     db::get_setting(conn, key)
         .ok()
         .flatten()

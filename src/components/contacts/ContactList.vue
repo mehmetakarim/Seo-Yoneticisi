@@ -10,10 +10,15 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { useStore } from "../../store";
+import ContactImportModal from "./ContactImportModal.vue";
 import Icon from "../Icon.vue";
 
 const store = useStore();
 const searchInput = ref<HTMLInputElement | null>(null);
+
+/** Kanal listesi `seo_core::contacts::CHANNELS` ile aynı sırada. */
+const KANALLAR = ["mail", "telefon", "instagram", "fuar", "referans", "diğer"];
+const iceAktarAcik = ref(false);
 defineExpose({ focusSearch: () => searchInput.value?.focus() });
 
 onMounted(() => void store.loadContacts());
@@ -40,6 +45,8 @@ function tarihMetni(c: { next_step_at: string | null }) {
 
 <template>
   <section class="list-panel">
+    <!-- ⚠️ Eylemler arama satırında, süzgeç şeridinde DEĞİL: altı denetim 300px'lik panele
+         sığmıyordu ve şerit yatay kayıyordu (ölçüldü). Süzgeç şeridi yalnızca süzgeç. -->
     <div class="search-wrap">
       <div class="search">
         <Icon name="search" :size="16" class="search-icon" />
@@ -48,15 +55,18 @@ function tarihMetni(c: { next_step_at: string | null }) {
           class="fx"
           :value="store.contactSearch"
           @input="store.setContactSearch(($event.target as HTMLInputElement).value)"
-          placeholder="Ad, firma, e-posta veya telefon ara"
+          placeholder="Ad, firma, telefon ara"
         />
       </div>
+      <button class="eylem birincil" title="Yeni kişi ekle" @click="store.contact = null">
+        <Icon name="plus" :size="15" :stroke-width="2.4" />
+      </button>
+      <button class="eylem" title="CSV'den içe aktar" @click="iceAktarAcik = true">
+        <Icon name="upload" :size="15" :stroke-width="2" />
+      </button>
     </div>
 
     <div class="filters">
-      <button class="filter on-yeni" @click="store.contact = null">
-        <Icon name="plus" :size="13" :stroke-width="2.4" /><span>Yeni kişi</span>
-      </button>
       <button
         class="filter"
         :class="{ on: store.contactArchived }"
@@ -67,6 +77,34 @@ function tarihMetni(c: { next_step_at: string | null }) {
       >
         <span>Arşiv dahil</span>
       </button>
+      <!-- ⚠️ Süzgeçler ARKA UÇTA: liste 300 kişiye çıktığında istemcide süzmek tüm kayıtları
+           çekmeyi gerektirirdi. Kanal tek değerli (sütun), etiket çoklu (tablo). -->
+      <select
+        class="filter sec"
+        :class="{ on: store.contactChannel }"
+        :value="store.contactChannel"
+        @change="
+          store.contactChannel = ($event.target as HTMLSelectElement).value;
+          store.loadContacts();
+        "
+      >
+        <option value="">Kanal: hepsi</option>
+        <option v-for="k in KANALLAR" :key="k" :value="k">{{ k }}</option>
+      </select>
+      <select
+        v-if="store.contactTags.length"
+        class="filter sec"
+        :class="{ on: store.contactTag }"
+        :value="store.contactTag"
+        @change="
+          store.contactTag = ($event.target as HTMLSelectElement).value;
+          store.loadContacts();
+        "
+      >
+        <option value="">Etiket: hepsi</option>
+        <option v-for="t in store.contactTags" :key="t" :value="t">{{ t }}</option>
+      </select>
+
       <!-- Bilgi, filtre değil: kaç kişiye bugün dönülecek. -->
       <span v-if="bekleyen" class="filter bilgi">
         <Icon name="calendarClock" :size="13" :stroke-width="2" />
@@ -91,6 +129,7 @@ function tarihMetni(c: { next_step_at: string | null }) {
             <div class="row-sub">
               {{ c.company || "—" }}
               <template v-if="c.event_count"> · {{ c.event_count }} temas</template>
+              <template v-if="c.tags.length"> · {{ c.tags.join(", ") }}</template>
             </div>
           </div>
           <span
@@ -116,21 +155,59 @@ function tarihMetni(c: { next_step_at: string | null }) {
         </template>
       </div>
     </div>
+
+    <ContactImportModal :open="iceAktarAcik" @close="iceAktarAcik = false" />
   </section>
 </template>
 
 <style scoped>
 /* ⚠️ Panel kroması `styles.css`te (Ürünler ile ortak). Buradakiler kişiye özel satırlar. */
-.filter.on-yeni {
+.search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.search-wrap .search {
+  flex: 1;
+  min-width: 0;
+}
+.eylem {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-input);
+  color: var(--c-mid);
+  cursor: pointer;
+  transition: all 0.14s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.eylem:hover {
   color: var(--accent);
   border-color: var(--accent);
-  font-weight: 600;
+}
+.eylem.birincil {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.eylem.birincil:hover {
+  color: #fff;
+  opacity: 0.9;
 }
 .filter.bilgi {
   cursor: default;
   background: transparent;
   border-color: transparent;
   color: var(--c-faint);
+}
+/* Süzgeç kutuları `.filter` kromasını paylaşıyor; yalnızca ok işareti için pay veriliyor. */
+.filter.sec {
+  padding-right: 6px;
+  font-family: inherit;
 }
 .rows {
   flex: 1;

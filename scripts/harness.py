@@ -210,18 +210,20 @@ def main():
         {"id": 1, "name": "Ahmet Yılmaz", "company": "Kurumsal BT", "email": "ahmet@kurumsalbt.com",
          "phone": "0532 000 00 00", "channel": "mail", "note": "Sunucu yenileme projesi.",
          "last_contact_at": _g(-11) + "T10:12:00", "next_step_at": _g(-4),
-         "next_step_note": "fiyat teklifi verilecek", "archived": False, "event_count": 3},
+         "next_step_note": "fiyat teklifi verilecek", "archived": False, "event_count": 3,
+         "tags": ["sunucu", "yenileme"]},
         {"id": 2, "name": "Zeynep Kaya", "company": "Anadolu Yapı", "email": "zeynep@anadoluyapi.com",
          "phone": "0555 111 11 11", "channel": "fuar", "note": "",
          "last_contact_at": _g(-2) + "T15:40:00", "next_step_at": _g(0),
-         "next_step_note": "numune sonucu sorulacak", "archived": False, "event_count": 1},
+         "next_step_note": "numune sonucu sorulacak", "archived": False, "event_count": 1,
+         "tags": ["3D yazıcı"]},
         {"id": 3, "name": "Mert Demir", "company": "Demir Elektrik", "email": "", "phone": "0312 222 22 22",
          "channel": "telefon", "note": "", "last_contact_at": _g(-40) + "T09:00:00",
          "next_step_at": _g(12), "next_step_note": "bütçe sonrası tekrar", "archived": False,
-         "event_count": 2},
+         "event_count": 2, "tags": []},
         {"id": 4, "name": "Elif Şahin", "company": "", "email": "elif@ornek.com", "phone": "",
          "channel": "instagram", "note": "Tek seferlik alım.", "last_contact_at": None,
-         "next_step_at": None, "next_step_note": "", "archived": True, "event_count": 0},
+         "next_step_at": None, "next_step_note": "", "archived": True, "event_count": 0, "tags": []},
     ]
     CONTACT_EVENTS = {
         1: [{"id": 3, "at": _g(-11) + "T10:12:00", "kind": "call", "note": "Fiyat aralığı soruldu."},
@@ -230,6 +232,29 @@ def main():
         2: [{"id": 4, "at": _g(-2) + "T15:40:00", "kind": "email", "note": "Numune kargoya verildi."}],
         3: [{"id": 6, "at": _g(-40) + "T09:00:00", "kind": "note", "note": "Bütçe yılbaşında."},
             {"id": 5, "at": _g(-70) + "T09:00:00", "kind": "call", "note": "İlk görüşme."}],
+    }
+
+    # Kişi → ürün bağı ve CSV önizlemesi (Faz C2).
+    _urun0 = live[0] if live else {"slug": "ornek-urun", "name": "Örnek Ürün"}
+    CONTACT_PRODUCTS = {
+        1: [{"sku": _urun0["slug"], "name": _urun0["name"], "contact_id": 1, "at": _g(-11)}],
+    }
+    CSV_PREVIEW = {
+        # ⚠️ Gerçek tuzağı taklit ediyor: Türkçe Excel `;` ile ayırıyor ve sütun adları
+        # uygulamanınkilerle birebir değil ("Yetkili", "Ünvan").
+        "headers": ["Yetkili", "Ünvan", "E-Posta", "Cep", "Adres"],
+        "rows": [
+            ["Ahmet Yılmaz", "Kurumsal BT", "ahmet@kurumsalbt.com", "0532 000 00 00", "Ankara"],
+            ["Zeynep Kaya", "Anadolu Yapı", "zeynep@anadoluyapi.com", "0555 111 11 11", "İzmir"],
+            ["Mert Demir", "Demir Elektrik", "", "0312 222 22 22", "Bursa"],
+            ["Elif Şahin", "", "elif@ornek.com", "", "İstanbul"],
+            ["Can Öz", "Öz Bilişim", "can@ozbilisim.com", "0216 333 33 33", "İstanbul"],
+        ],
+        "total_rows": 42,
+        "delimiter": ";",
+        "mapping": [0, 1, 2, 3, None, None],
+        "fields": [["name", "Ad soyad"], ["company", "Firma"], ["email", "E-posta"],
+                   ["phone", "Telefon"], ["channel", "Kanal"], ["note", "Not"]],
     }
 
     # Canonical hedefi araması: gerçek feed ürünleri üzerinde, terimle süzülerek.
@@ -369,6 +394,10 @@ def main():
         "// Tauri IPC taklidi — yalnızca harness için. Uygulama bundle'ı gerçek.\n"
         "window.__TAURI_INTERNALS__ = {\n"
         "  invoke: (cmd, args) => {\n"
+        # Tauri eklentileri de aynı köprüden geçiyor ("plugin:dialog|open"). Dosya seçiciyi
+        # taklit ediyoruz ki CSV içe aktarma akışı harness'ta baştan sona görülebilsin.
+        "    if (cmd === 'plugin:dialog|open') return Promise.resolve('/tmp/musteriler.csv');\n"
+        "    if (cmd === 'plugin:dialog|save') return Promise.resolve('/tmp/cikti.csv');\n"
         # ⚠️ `</` kaçışı ZORUNLU: JSON-LD örneği gövdesinde `</script>` geçiyor ve HTML
         # ayrıştırıcısı bunu gördüğü anda DIŞ script'i kapatıyor → sayfa sessizce boş açılıyor.
         # (Bu tuzağa bir kez düşüldü; `seo_core::jsonld::render_script` aynı kaçışı yapıyor.)
@@ -377,6 +406,8 @@ def main():
         f"    const TQ = {json.dumps(TODAY_Q, ensure_ascii=False)};\n"
         f"    const CT = {json.dumps(CONTACTS, ensure_ascii=False)};\n"
         f"    const CE = {json.dumps(CONTACT_EVENTS, ensure_ascii=False)};\n"
+        f"    const CP = {json.dumps(CONTACT_PRODUCTS, ensure_ascii=False)};\n"
+        f"    const CSVP = {json.dumps(CSV_PREVIEW, ensure_ascii=False)};\n"
         "    if (new URLSearchParams(location.search).has('empty')\n"
         "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
         # `?setup=1` → taze kurulum benzetimi. Sihirbaz kullanıcının GERÇEK veritabanına
@@ -478,6 +509,24 @@ def main():
         "    if (cmd === 'get_contact_events')\n"
         "      return Promise.resolve(CE[args.contactId] || []);\n"
         "    if (cmd === 'save_contact') return Promise.resolve(args.id || 9);\n"
+        "    if (cmd === 'list_contact_tags')\n"
+        "      return Promise.resolve([...new Set(CT.flatMap(c => c.tags))]);\n"
+        "    if (cmd === 'get_contact_products')\n"
+        "      return Promise.resolve(CP[args.contactId] || []);\n"
+        "    if (cmd === 'contacts_of_product')\n"
+        "      return Promise.resolve([{ sku: args.sku, name: 'Ahmet Yılmaz · Kurumsal BT',\n"
+        "        contact_id: 1, at: '' }]);\n"
+        "    if (cmd === 'set_contact_tags' || cmd === 'link_contact_product'\n"
+        "        || cmd === 'unlink_contact_product' || cmd === 'set_silence_days')\n"
+        "      return Promise.resolve(null);\n"
+        # Sessizlik eşiği: `?sessizlik=1` → yeterli veri birikmiş, öneri gösteriliyor.
+        "    if (cmd === 'get_silence_state') return Promise.resolve(\n"
+        "      new URLSearchParams(location.search).has('sessizlik')\n"
+        "        ? { days: 0, suggestion: 25, sample_contacts: 7 }\n"
+        "        : { days: 0, suggestion: null, sample_contacts: 2 });\n"
+        "    if (cmd === 'preview_contact_csv') return Promise.resolve(CSVP);\n"
+        "    if (cmd === 'import_contacts_csv') return Promise.resolve(\n"
+        "      { added: 38, updated: 4, skipped: 0, skip_reason: '' });\n"
         "    if (cmd === 'archive_contact' || cmd === 'add_contact_event')\n"
         "      return Promise.resolve(null);\n"
         "    if (cmd === 'dismiss_queue_item') {\n"

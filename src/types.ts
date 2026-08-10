@@ -544,7 +544,9 @@ export interface FocusSummary {
 
 /** Ayarlar ekranı için: kova başına kaç ölçüm birikti. */
 export interface CalibrationRow {
-  bucket: string;
+  /** ⚠️ `string` DEĞİL: gevşek tip yüzünden Faz C'nin 6. kovası Ayarlar'da ham anahtar
+   *  olarak görünecekti (bkz. SettingsPage.vue'daki not). */
+  bucket: Bucket;
   samples: number;
   /** Yeterli örnek yoksa null — "henüz ölçülmedi". */
   minutes: number | null;
@@ -603,6 +605,43 @@ export interface Contact {
   next_step_note: string;
   archived: boolean;
   event_count: number;
+  /** İlgi etiketleri — tek sorguda geliyor, satır başına ek istek yok. */
+  tags: string[];
+}
+
+/** Kişi ↔ ürün bağı. İki yön de aynı tabloyu sorguluyor, kopya kayıt yok. */
+export interface ContactProduct {
+  sku: string;
+  /** Kişi kartında ürün adı, ürün detayında kişi adı ("Ahmet Yılmaz · Kurumsal BT"). */
+  name: string;
+  contact_id: number;
+  at: string;
+}
+
+/** CSV önizlemesi — hiçbir şey yazılmadan önce gösterilen zorunlu adım. */
+export interface CsvPreview {
+  headers: string[];
+  rows: string[][];
+  total_rows: number;
+  delimiter: string;
+  /** Uygulamanın tahmini: `fields` sırasıyla sütun indeksleri. */
+  mapping: (number | null)[];
+  /** [anahtar, okunur ad] — eşleştirme satırları buradan çiziliyor. */
+  fields: [string, string][];
+}
+
+export interface ImportSummary {
+  added: number;
+  updated: number;
+  skipped: number;
+  skip_reason: string;
+}
+
+/** Sessizlik eşiği. ⚠️ `days: 0` = KAPALI; öneri yalnızca yeterli veride dolu. */
+export interface SilenceState {
+  days: number;
+  suggestion: number | null;
+  sample_contacts: number;
 }
 
 /** Temas kaydı — CRM'in kendi olay günlüğü (`work_events` DEĞİL). */

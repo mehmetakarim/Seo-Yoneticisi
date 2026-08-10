@@ -14,6 +14,7 @@
 //! ihtiyaç duyuyorsa, o ihtiyaç Tauri katmanında çözülmelidir.
 
 pub mod contacts;
+pub mod csv_import;
 pub mod db;
 pub mod feed;
 pub mod fingerprint;

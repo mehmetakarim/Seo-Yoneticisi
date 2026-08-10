@@ -26,6 +26,7 @@ import type {
   EolDecision,
   Contact,
   ContactEvent,
+  ContactProduct,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -134,6 +135,12 @@ interface State {
   /** Açık olan kişi kartı; kimse seçili değilse null. */
   contact: Contact | null;
   contactEvents: ContactEvent[];
+  /** Açık kartın ilgilendiği ürünler (Faz C2). */
+  contactProducts: ContactProduct[];
+  /** Kullanılan bütün etiketler — süzgeç ve öneri kaynağı. */
+  contactTags: string[];
+  contactChannel: string;
+  contactTag: string;
   /** Ölçüm omurgası (Faz Ö) — sonuç özeti ve satır rozetleri. */
   outcomeSummary: OutcomeSummary | null;
   outcomeBadges: Record<string, OutcomeBadge>;
@@ -206,6 +213,10 @@ export const useStore = defineStore("app", {
     contactArchived: false,
     contact: null,
     contactEvents: [],
+    contactProducts: [],
+    contactTags: [],
+    contactChannel: "",
+    contactTag: "",
     focus: null,
     session: null,
     sessionElapsed: 0,
@@ -1203,7 +1214,13 @@ export const useStore = defineStore("app", {
     async loadContacts() {
       this.contactsBusy = true;
       try {
-        this.contacts = await api.listContacts(this.contactSearch, this.contactArchived);
+        this.contacts = await api.listContacts(
+          this.contactSearch,
+          this.contactArchived,
+          this.contactChannel,
+          this.contactTag,
+        );
+        this.contactTags = await api.listContactTags();
       } catch (e) {
         this.toast(String(e), "error");
       } finally {
@@ -1220,6 +1237,7 @@ export const useStore = defineStore("app", {
       try {
         this.contact = await api.getContact(id);
         this.contactEvents = await api.getContactEvents(id);
+        this.contactProducts = await api.getContactProducts(id);
       } catch (e) {
         this.toast(String(e), "error");
       }
@@ -1228,6 +1246,36 @@ export const useStore = defineStore("app", {
     closeContact() {
       this.contact = null;
       this.contactEvents = [];
+      this.contactProducts = [];
+    },
+
+    /** Etiketleri toptan yazar — ekle/çıkar ayrı değil (ekranla veri ayrışmasın). */
+    async setContactTags(id: number, tags: string[]) {
+      try {
+        await api.setContactTags(id, tags);
+        await this.openContact(id);
+        await this.loadContacts();
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    async linkContactProduct(id: number, sku: string) {
+      try {
+        await api.linkContactProduct(id, sku);
+        this.contactProducts = await api.getContactProducts(id);
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    async unlinkContactProduct(id: number, sku: string) {
+      try {
+        await api.unlinkContactProduct(id, sku);
+        this.contactProducts = await api.getContactProducts(id);
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
     },
 
     /** Kişiyi kaydeder ve kartı açık tutar — kaydettikten sonra listeye atmak sinir bozucu. */

@@ -10,6 +10,8 @@
  */
 import { computed, ref, watch } from "vue";
 import { useStore } from "../../store";
+import { api } from "../../api";
+import type { CatalogMatch } from "../../types";
 import Icon from "../Icon.vue";
 
 const store = useStore();
@@ -84,6 +86,58 @@ async function kaydet() {
 
 const temas = ref({ kind: "call", note: "", nextStepAt: "", nextStepNote: "" });
 
+// --- İlgi etiketleri (Faz C2) ---
+// ⚠️ Sabit liste yok: bir mağazanın etiketleri ("sunucu") diğerininkine benzemez. Öneriler
+// kullanıcının kendi verisinden geliyor, yenisini yazmak engellenmiyor.
+const yeniEtiket = ref("");
+const etiketOnerileri = computed(() =>
+  store.contactTags.filter((t) => !(store.contact?.tags ?? []).includes(t)).slice(0, 8),
+);
+
+async function etiketEkle(t: string) {
+  const c = store.contact;
+  const ad = t.trim();
+  if (!c || !ad || c.tags.includes(ad)) return;
+  await store.setContactTags(c.id, [...c.tags, ad]);
+  yeniEtiket.value = "";
+}
+
+async function etiketCikar(t: string) {
+  const c = store.contact;
+  if (!c) return;
+  await store.setContactTags(
+    c.id,
+    c.tags.filter((x) => x !== t),
+  );
+}
+
+// --- "Bu ürünle ilgilendi" (Faz C2) ---
+// ♻️ Arama EOL halef seçicisiyle aynı uçtan: satıştaki ürünlerde arıyor.
+const urunArama = ref("");
+const urunSonuc = ref<CatalogMatch[]>([]);
+let urunZaman: ReturnType<typeof setTimeout> | null = null;
+
+function urunAra(v: string) {
+  urunArama.value = v;
+  if (urunZaman) clearTimeout(urunZaman);
+  // 3 karakterin altında arka uç zaten boş dönüyor; gereksiz çağrı yapmıyoruz.
+  if (v.trim().length < 3) {
+    urunSonuc.value = [];
+    return;
+  }
+  urunZaman = setTimeout(async () => {
+    urunSonuc.value = await api.searchLiveProducts(v).catch(() => []);
+  }, 220);
+}
+
+async function urunBagla(m: CatalogMatch) {
+  const c = store.contact;
+  if (!c) return;
+  await store.linkContactProduct(c.id, m.slug);
+  urunArama.value = "";
+  urunSonuc.value = [];
+}
+
 async function temasEkle() {
   const c = store.contact;
   if (!c) return;
@@ -149,6 +203,56 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
     </div>
 
     <label class="tam">Not <textarea v-model="f.note" class="fx" rows="2"></textarea></label>
+
+    <template v-if="store.contact">
+      <!-- İlgi etiketleri: kanal "nereden geldi", etiket "neyle ilgileniyor". -->
+      <div class="etiket">
+        <label class="lbl">İlgi etiketleri</label>
+        <div class="et-satir">
+          <span v-for="t in store.contact.tags" :key="t" class="chip on">
+            {{ t }}
+            <button class="et-x" title="Etiketi kaldır" @click="etiketCikar(t)">
+              <Icon name="x" :size="11" :stroke-width="2.6" />
+            </button>
+          </span>
+          <input
+            v-model="yeniEtiket"
+            class="fx et-giris"
+            placeholder="Etiket ekle…"
+            @keyup.enter="etiketEkle(yeniEtiket)"
+          />
+        </div>
+        <div v-if="etiketOnerileri.length" class="et-oneri">
+          <span class="ono">Kullandıklarınız:</span>
+          <button v-for="t in etiketOnerileri" :key="t" class="chip" @click="etiketEkle(t)">
+            {{ t }}
+          </button>
+        </div>
+      </div>
+
+      <!-- SEO tarafıyla CRM'i birleştiren tek yer. -->
+      <div class="etiket">
+        <label class="lbl">İlgilendiği ürünler</label>
+        <div v-for="p in store.contactProducts" :key="p.sku" class="urun-sat">
+          <Icon name="box" :size="13" :stroke-width="1.9" />
+          <span class="urun-ad">{{ p.name }}</span>
+          <button class="et-x" title="Bağı kaldır" @click="store.unlinkContactProduct(store.contact!.id, p.sku)">
+            <Icon name="x" :size="11" :stroke-width="2.6" />
+          </button>
+        </div>
+        <input
+          class="fx"
+          :value="urunArama"
+          placeholder="Ürün ara ve bağla (en az 3 harf)"
+          @input="urunAra(($event.target as HTMLInputElement).value)"
+        />
+        <div v-if="urunSonuc.length" class="urun-sonuc om-scroll">
+          <button v-for="m in urunSonuc" :key="m.slug" class="us-sat" @click="urunBagla(m)">
+            {{ m.name }}
+          </button>
+        </div>
+      </div>
+    </template>
 
     <template v-if="store.contact">
       <div class="ayrac"></div>
@@ -302,6 +406,89 @@ textarea {
 .adim-alan input:first-child {
   flex: none;
   width: 150px;
+}
+.etiket {
+  margin-top: 16px;
+}
+.lbl {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 560;
+  color: var(--c-faint);
+  margin-bottom: 6px;
+}
+.et-satir {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.et-giris {
+  width: 150px;
+  margin-top: 0;
+  padding: 5px 9px;
+  font-size: 12.5px;
+}
+.et-x {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+  opacity: 0.6;
+}
+.et-x:hover {
+  opacity: 1;
+}
+.et-oneri {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ono {
+  font-size: 11.5px;
+  color: var(--c-faint);
+}
+.urun-sat {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 0;
+  font-size: 12.5px;
+  color: var(--c-text);
+  border-bottom: 1px solid var(--c-border);
+}
+.urun-ad {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.urun-sonuc {
+  max-height: 148px;
+  overflow-y: auto;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  margin-top: 6px;
+}
+.us-sat {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  color: var(--c-text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.us-sat:hover {
+  background: var(--c-hover);
 }
 .ayrac {
   height: 1px;
