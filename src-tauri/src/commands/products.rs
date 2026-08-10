@@ -433,4 +433,46 @@ mod tests {
         assert_eq!(d.images_old, vec!["https://cdn/a.jpg"]);
         assert_eq!(d.images_new, vec!["https://cdn/z.jpg"]);
     }
+
+    /// 🔧 **BAKIM ARACI — diğer `_real` testlerin aksine VERİ YAZIYOR.**
+    ///
+    /// Belirtilen ürünlerin feed bayrağını, uygulamadaki "gözden geçirdim" düğmesiyle **aynı
+    /// kod yolundan** (`mark_reviewed`) temizler: parmak izi damgalanır, karşılaştırma
+    /// anlık görüntüsü saklanır, not silinir. SQL'i elle taklit etmek üç adımdan birini
+    /// atlayıp "Neler değişti?" ekranını sessizce boşaltırdı.
+    ///
+    /// ```text
+    /// SEO_DB=~/Library/.../seo-yoneticisi.db SEO_SKUS=A-1,B-2 \
+    ///   cargo test feed_ack_real -- --ignored --nocapture
+    /// ```
+    ///
+    /// ⚠️ Önce yedek alın; bu test geri alınamaz bir yazma yapıyor.
+    #[test]
+    #[ignore]
+    fn feed_ack_real() {
+        let db = std::env::var("SEO_DB").expect("SEO_DB yok");
+        let skus = std::env::var("SEO_SKUS").expect("SEO_SKUS yok");
+        let conn = Connection::open(&db).unwrap();
+
+        for sku in skus.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            let onceki: Option<String> = conn
+                .query_row("SELECT feed_changed FROM products WHERE sku = ?1", [sku], |r| r.get(0))
+                .unwrap_or(None);
+            match onceki {
+                Some(b) => {
+                    mark_reviewed(&conn, sku).unwrap();
+                    log_event(&conn, sku, "feed_ack", false);
+                    println!("{sku}: '{b}' temizlendi");
+                }
+                None => println!("{sku}: bayrak zaten yok, dokunulmadı"),
+            }
+        }
+
+        let kalan: i64 = conn
+            .query_row("SELECT COUNT(*) FROM products WHERE feed_changed IS NOT NULL", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        println!("katalogda kalan bayrak: {kalan}");
+    }
 }

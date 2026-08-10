@@ -13,6 +13,19 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.15.0
+- Yeni: **Müşteriler ekranı.** Site vitrin, asıl satış mail ve telefonla yürüyor — bu taraf bugüne kadar uygulamanın dışındaydı. Kişi/firma kartı, kanal, ilgi etiketleri ve temas geçmişi artık burada
+- **Sonraki adım tarihi** fazın kalbi: bir kişiye tarih verdiğinizde o gün Bugün listesinde çıkıyor, dönüş yapınca temizleniyor. Odak seansı da müşteri işini kilitleyebiliyor
+- Günlük liste **10'dan 13 maddeye** çıktı: müşteri işleri SEO işlerinin yerini almasın diye
+- Yeni: **CSV'den kişi aktarma.** Excel listenizi yükleyip sütunları kendiniz eşliyorsunuz — Türkçe Excel'in noktalı virgüllü biçimi de okunuyor. Aktarmadan önce ilk 5 satırın nasıl geleceğini gösteriyor
+- Aynı e-posta veya telefona sahip kişi varsa yeni kayıt açılmıyor, mevcut kayıt güncelleniyor. CSV'de boş bıraktığınız sütunlar uygulamadaki bilgiyi silmiyor
+- Yeni: **"Bu ürünle ilgilendi"** bağı — kişiyi kataloğunuzdaki ürüne bağlıyorsunuz, ürün detayında "3 kişi bu ürünle ilgilendi" görünüyor
+- Yeni: **sessiz müşteri uyarısı**, varsayılan olarak kapalı. Yeterli temas biriktiğinde uygulama sizin kendi ritminizi ölçüp bir eşik öneriyor ("ortalama 25 günde bir dönüyorsunuz") — kabul etmek sizin kararınız
+- ⚠️ Müşteri bilgileri **AI asistanına gönderilmiyor**; asistan bağlamı Google'a gidiyor, kişisel veri oraya girmez. Yedek dosyası kişi kayıtlarını içeriyor ve Ayarlar ekranı bunu artık söylüyor
+- Düzeltme: **"Yapıldı" dediğiniz iş artık ertesi gün geri gelmiyor.** İki sebebi vardı: liste güne değil son analize bağlıydı, ayrıca "yapıldı" acil maddelerin sebebini (feed değişiklik notu) temizlemiyordu
+- Düzeltme: içeriği mağazaya elle yapıştırdığınızda ürün "hiç gönderilmemiş" olarak listede kalıyordu; artık "Yapıldı" işareti gönderim sayılıyor
+- Düzeltme: bilgi satırlarındaki kalın yazılar cümleyi üç parçaya bölüyordu
+
 ## v0.14.1
 - Düzeltme: **Yaptığınız iş artık kuyruğa geri gelmiyor.** "Yapıldı" işareti analiz yenilenince düşüyordu; oysa bir düzeltmenin sonucu Google Search Console'da haftalar sonra görünüyor (90 günlük pencere). Yani işi yapmanız maddeyi listeden düşürmüyordu
 - Mağazaya ulaşan bir iş yaptıysanız o madde **28 gün boyunca** yüksek kaldıraç, kaçak trafik ve bakım kovalarında yeniden çıkmıyor. Kaybolmuyor: süre dolunca **sonuç kontrolü** kovasında, bu kez "sonucuna bakılabilir" diye geliyor

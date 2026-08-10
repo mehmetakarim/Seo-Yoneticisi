@@ -4,13 +4,12 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-08-10
-**Aktif faz:** **v0.14.1 yayında; Faz C kodda bitti, yayın bekliyor.** Yol haritasının ilk
-yedi fazı bitti:
+**Aktif faz:** **v0.15.0 yayında.** Yol haritasının ilk yedi fazı bitti:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
-**D** (EOL karar deposu + 301 CSV + sağlık skoru, v0.14.0) · **C** (CRM ince dilim).
-⚠️ Faz C henüz **yayınlanmadı** — bkz. 0b2.
-**v0.14.1 = kuyruk uçuş süzgeci** — yapılan iş kanıtı gelene kadar geri gelmiyor (0b1).
+**D** (EOL karar deposu + 301 CSV + sağlık skoru, v0.14.0) · **C** (CRM ince dilim, v0.15.0).
+v0.14.1 = kuyruk uçuş süzgeci (0b1) ·
+**v0.15.0 = Faz C: CRM ince dilim + kuyruk saha düzeltmeleri (0b2, 0b3)**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -36,12 +35,12 @@ v0.11.0 = Faz A: asistan bağlam seçimi ("+" menüsü) + halef akışı düzelt
 v0.12.0 = Faz K: Bugün ekranı + iş kuyruğu (tasarım turu, "Yapıldı", koyu pencere) ·
 v0.13.0 = Faz S: odak seansı — kuyruğu ölçerek tüketmek (süreler artık ölçülüyor) ·
 v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
-**v0.14.1 = kuyruk uçuş süzgeci (yapılan iş geri gelmiyor)**
+**v0.14.1 = kuyruk uçuş süzgeci (yapılan iş geri gelmiyor)
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
 bağımlı DEĞİL, **183 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**33 test**; `commands/` 11 dosyaya bölünmüş durumda).
+**35 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
