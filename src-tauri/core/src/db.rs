@@ -256,6 +256,15 @@ pub fn init(conn: &Connection) -> Result<(), String> {
 fn migrate(conn: &Connection) -> Result<(), String> {
     // Faz K sonrası: "Yapıldı" işareti hangi analize karşı verildi. ⚠️ CREATE TABLE ile
     // eklenemez — tablo v0.11.0 sonrası kurulumlarda zaten var, `IF NOT EXISTS` sütun eklemez.
+    // Faz T: katalog fiyatları. ⚠️ `feed_fp` parmak izine GİRMİYOR — fiyat üretimi
+    // beslemiyor ve dolar günlük oynuyor (fingerprint.rs'in `quantity` gerekçesinin aynısı).
+    add_column_if_missing(conn, "products", "buying_price", "REAL")?;
+    add_column_if_missing(conn, "products", "price1", "REAL")?;
+    add_column_if_missing(conn, "products", "tax_rate", "REAL")?;
+    // 🔴 Katalog tek para biriminde DEĞİL (ölçüldü: USD 273 · EUR 8 · TL 1).
+    add_column_if_missing(conn, "products", "currency_abbr", "TEXT")?;
+    // Mağazanın kendi TL fiyatı (KDV dahil) — TL teklifte kur sormaya gerek bırakmıyor.
+    add_column_if_missing(conn, "products", "price_tl", "REAL")?;
     add_column_if_missing(conn, "queue_dismissals", "done_at_analysis", "TEXT")?;
     add_column_if_missing(conn, "seo_status", "draft_details", "TEXT")?;
     // Faz 4: SEO araştırma çıktısı (SeoInsights JSON) ürün başına saklanır.

@@ -101,11 +101,15 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
         let exists = before.is_some();
         if exists {
             tx.execute(
+                // ⚠️ Fiyat alanları güncelleniyor ama `feed_fp`ye GİRMİYOR (bkz. fingerprint.rs):
+                // dolar günlük oynuyor, girseydi her senkronda tüm katalog "değişti" olurdu.
                 "UPDATE products SET id=?2, name=?3, brand=?4, main_category=?5, category=?6,
                    quantity=?7, url=?8, img_url=?9, title=?10, descriptions=?11, keywords=?12,
                    search_keywords=?13, details=?14, last_synced_at=?15,
                    picture2=?16, picture3=?17, picture4=?18,
-                   feed_fp=?19, feed_changed=COALESCE(?20, feed_changed)
+                   feed_fp=?19, feed_changed=COALESCE(?20, feed_changed),
+                   buying_price=?21, price1=?22, tax_rate=?23,
+                   currency_abbr=?24, price_tl=?25
                  WHERE sku=?1",
                 params![
                     sku,
@@ -128,6 +132,11 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
                     p.picture4,
                     fp,
                     changed,
+                    p.buying_price_f64(),
+                    p.price1_f64(),
+                    p.tax_f64(),
+                    p.currency_abbr.as_deref(),
+                    p.price_tl_f64(),
                 ],
             )
             .map_err(|e| format!("Ürün güncellenemedi ({sku}): {e}"))?;
@@ -136,8 +145,9 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
             tx.execute(
                 "INSERT INTO products (sku, id, name, brand, main_category, category, quantity,
                    url, img_url, title, descriptions, keywords, search_keywords, details, last_synced_at,
-                   picture2, picture3, picture4, feed_fp)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
+                   picture2, picture3, picture4, feed_fp, buying_price, price1, tax_rate,
+                   currency_abbr, price_tl)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
                 params![
                     sku,
                     p.id,
@@ -158,6 +168,11 @@ pub fn sync_products(conn: &mut Connection, feed: Vec<FeedProduct>) -> Result<Sy
                     p.picture3,
                     p.picture4,
                     fp,
+                    p.buying_price_f64(),
+                    p.price1_f64(),
+                    p.tax_f64(),
+                    p.currency_abbr.as_deref(),
+                    p.price_tl_f64(),
                 ],
             )
             .map_err(|e| format!("Ürün eklenemedi ({sku}): {e}"))?;
@@ -273,6 +288,75 @@ mod tests {
     /// Gerçek veritabanının KOPYASI + canlı feed üzerinde uçtan uca doğrulama.
     /// Kullanıcının asıl veritabanına dokunmaz — kopya yolu env ile verilir.
     ///
+    /// 🔬 Faz T ölçümü: fiyatlar geliyor mu ve **bayrak sayısı ARTIYOR mu**?
+    ///
+    /// `SEO_DB_COPY=/tmp/k.db SEO_FEED_FILE=/tmp/feed.xml cargo test fiyat_senkron_real -- --ignored --nocapture`
+    ///
+    /// ⚠️ Asıl sınav ikincisi: fiyat parmak izine sızsaydı dolar her oynadığında tüm katalog
+    /// "feed değişti" diye bayraklanır ve acil kovası çöpe dönerdi.
+    #[test]
+    #[ignore]
+    fn fiyat_senkron_real() {
+        let db = std::env::var("SEO_DB_COPY").expect("SEO_DB_COPY yok");
+        let dosya = std::env::var("SEO_FEED_FILE").expect("SEO_FEED_FILE yok");
+        let mut conn = Connection::open(&db).unwrap();
+        db::init(&conn).unwrap();
+
+        let bayrak = |c: &Connection| -> i64 {
+            c.query_row("SELECT COUNT(*) FROM products WHERE feed_changed IS NOT NULL", [], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+        let once = bayrak(&conn);
+
+        let xml = std::fs::read_to_string(&dosya).unwrap();
+        let urunler = feed::parse(&xml).unwrap();
+        println!("feed: {} ürün", urunler.len());
+        let ozet = sync_products(&mut conn, urunler).unwrap();
+        println!("senkron: {} eklendi · {} güncellendi", ozet.added, ozet.updated);
+
+        let (fiyatli, maliyetli, kdvli): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(price1), COUNT(buying_price), COUNT(tax_rate) FROM products",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+
+        // 🔴 Katalog tek para biriminde değil — dağılım yazılıyor.
+        let mut stmt = conn
+            .prepare("SELECT COALESCE(currency_abbr,'?'), COUNT(*), COUNT(price_tl)
+                      FROM products GROUP BY 1 ORDER BY 2 DESC")
+            .unwrap();
+        let birimler: Vec<(String, i64, i64)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        drop(stmt);
+        for (b, n, tl) in &birimler {
+            println!("  para birimi {b}: {n} ürün · TL fiyatı dolu {tl}");
+        }
+        let toplam: i64 =
+            conn.query_row("SELECT COUNT(*) FROM products", [], |r| r.get(0)).unwrap();
+        println!("fiyat dolu: {fiyatli}/{toplam} · maliyet: {maliyetli} · KDV: {kdvli}");
+
+        let sonra = bayrak(&conn);
+        println!("feed bayrağı: {once} → {sonra}");
+        assert_eq!(once, sonra, "🔴 fiyat parmak izine sızmış: bayrak sayısı değişti");
+        assert_eq!(fiyatli, toplam, "her üründe satış fiyatı olmalı");
+
+        let negatif: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM products WHERE price1 > 0 AND buying_price > price1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        println!("negatif marjlı ürün: {negatif}");
+    }
+
     /// `SEO_DB_COPY=/tmp/kopya.db FEED_URL=... cargo test sync_fingerprint_real -- --ignored --nocapture`
     ///
     /// Ölçtüğü şey: ilk senkronda kaç ürün bayraklanıyor. Beklenen **0** — bu senkron taban
