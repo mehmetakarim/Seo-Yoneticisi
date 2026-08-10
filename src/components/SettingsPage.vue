@@ -20,6 +20,21 @@ const kalibrasyon = ref<CalibrationRow[]>([]);
 // listesi "Müşteri" yerine ham "contact" yazacaktı. Diğer iki kopya `Record<Bucket, string>`
 // olduğu için anında patlamıştı. Ders: gevşek tip, kopyayı görünmez yapıyor.
 
+// --- Teklif varsayılanları (Faz T) ---
+// ⚠️ Buradaki KDV oranı YALNIZCA elle satırlar için. Katalog satırları ürünün kendi oranını
+// alıyor — ölçüldü (2026-08-10): katalogda %20 ve %10 birlikte var, tek ayara indirgenemez.
+const teklifKdv = ref(20);
+const teklifGun = ref(15);
+
+async function teklifAyarKaydet() {
+  try {
+    await api.setQuoteDefaults(teklifKdv.value, teklifGun.value);
+    store.toast("Teklif varsayılanları kaydedildi.", "ok");
+  } catch (e) {
+    store.toast(String(e), "error");
+  }
+}
+
 // --- Sessizlik eşiği (Faz C2) ---
 // 🔴 Eşik KAPALI doğuyor (0). Veri yokken eşik uydurmak Faz D'de elenen kalemin aynısı olurdu;
 // buradaki fark, uygulamanın zamanla kullanıcının KENDİ verisinden bir sayı önermesi — ve o
@@ -92,6 +107,11 @@ onMounted(async () => {
   seansDk.value = store.session?.planned_minutes ?? 25;
   molaDk.value = store.session?.break_minutes ?? 5;
   kalibrasyon.value = await api.getFocusCalibration().catch(() => []);
+  const td = await api.getQuoteDefaults().catch(() => null);
+  if (td) {
+    teklifKdv.value = td.tax_rate;
+    teklifGun.value = td.valid_days;
+  }
   sessizlik.value = await api
     .getSilenceState()
     .catch(() => ({ days: 0, suggestion: null, sample_contacts: 0 }));
@@ -630,6 +650,39 @@ async function doImport() {
             <Icon name="info" :size="13" />
             Seans puan, rozet veya seri tutmuyor. Amaç sakin bir çalışma ritmi ve gerçek süre
             ölçümü — mola önerilir, zorunlu değildir.
+          </div>
+        </div>
+      </div>
+
+      <!-- Teklif (Faz T) -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ch-title">
+            <Icon name="fileEdit" :size="17" style="color:var(--accent)" />
+            Teklif
+          </div>
+          <div class="ch-sub">
+            Yeni tekliflerin varsayılanları. Katalogdan eklenen satırlar <b>ürünün kendi KDV
+            oranını</b> kullanıyor; buradaki oran yalnızca elle yazdığınız kalemler için.
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="sure-row">
+            <div>
+              <label class="lbl">Elle satır KDV (%)</label>
+              <input v-model.number="teklifKdv" class="inp kisa" type="number" min="0" max="100" />
+            </div>
+            <div>
+              <label class="lbl">Geçerlilik (gün)</label>
+              <input v-model.number="teklifGun" class="inp kisa" type="number" min="1" max="365" />
+            </div>
+            <button class="solid" @click="teklifAyarKaydet()">Kaydet</button>
+          </div>
+          <div class="hint">
+            <Icon name="info" :size="13" />
+            Kataloğunuzda <b>USD, EUR ve TL</b> fiyatlı ürünler birlikte var. TL teklifte kur
+            sorulmuyor (mağazanızın kendi TL fiyatı kullanılıyor); USD teklifte yalnızca USD
+            olmayan ürünler için kur giriyorsunuz.
           </div>
         </div>
       </div>

@@ -487,6 +487,37 @@ pub fn snapshot_quote(state: State<'_, AppState>, id: i64) -> Result<i64, String
     Ok(sirada)
 }
 
+/// Teklif varsayılanları — ekranda okunup yazılıyor.
+#[derive(Serialize)]
+pub struct QuoteDefaults {
+    /// Elle satırlarda kullanılan KDV oranı. ⚠️ Katalog satırları **ürünün kendi oranını**
+    /// alıyor (ölçüm: %20 ve %10 birlikte var); bu yalnızca kataloğda olmayan kalemler için.
+    pub tax_rate: i64,
+    /// Yeni teklifin kaç gün geçerli sayılacağı.
+    pub valid_days: i64,
+}
+
+#[tauri::command]
+pub fn get_quote_defaults(state: State<'_, AppState>) -> Result<QuoteDefaults, String> {
+    let conn = state.conn.lock().unwrap();
+    Ok(QuoteDefaults {
+        tax_rate: super::setting_i64(&conn, "quote_tax_rate", 20),
+        valid_days: super::setting_i64(&conn, "quote_valid_days", 15),
+    })
+}
+
+#[tauri::command]
+pub fn set_quote_defaults(
+    state: State<'_, AppState>,
+    tax_rate: i64,
+    valid_days: i64,
+) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    db::set_setting(&conn, "quote_tax_rate", &tax_rate.clamp(0, 100).to_string())?;
+    db::set_setting(&conn, "quote_valid_days", &valid_days.clamp(1, 365).to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

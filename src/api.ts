@@ -295,4 +295,8 @@ export const api = {
   setQuoteStatus: (id: number, status: string, reason: string) =>
     invoke<void>("set_quote_status", { id, status, reason }),
   snapshotQuote: (id: number) => invoke<number>("snapshot_quote", { id }),
+  getQuoteDefaults: () =>
+    invoke<{ tax_rate: number; valid_days: number }>("get_quote_defaults"),
+  setQuoteDefaults: (taxRate: number, validDays: number) =>
+    invoke<void>("set_quote_defaults", { taxRate, validDays }),
 };

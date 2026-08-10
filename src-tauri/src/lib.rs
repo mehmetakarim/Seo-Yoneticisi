@@ -98,6 +98,8 @@ pub fn run() {
             commands::delete_quote_item,
             commands::set_quote_status,
             commands::snapshot_quote,
+            commands::get_quote_defaults,
+            commands::set_quote_defaults,
             commands::dismiss_queue_item,
             commands::complete_queue_item,
             commands::restore_queue_item,

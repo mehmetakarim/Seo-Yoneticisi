@@ -566,7 +566,7 @@ def main():
         "    if (cmd === 'get_contact_events')\n"
         "      return Promise.resolve(CE[args.contactId] || []);\n"
         "    if (cmd === 'save_contact') return Promise.resolve(args.id || 9);\n"
-        "    if (cmd === 'list_quotes') return Promise.resolve(\n"
+        "    if (cmd === 'get_quote_defaults')\n      return Promise.resolve({ tax_rate: 20, valid_days: 15 });\n    if (cmd === 'set_quote_defaults') return Promise.resolve(null);\n    if (cmd === 'list_quotes') return Promise.resolve(\n"
         "      args.status ? QT.filter(q => q.status === args.status) : QT);\n"
         "    if (cmd === 'get_quote') return Promise.resolve(QT.find(q => q.id === args.id) || QT[0]);\n"
         "    if (cmd === 'create_quote') return Promise.resolve(1);\n"
