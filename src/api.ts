@@ -35,6 +35,7 @@ import type {
   CsvPreview,
   ImportSummary,
   SilenceState,
+  Quote,
 } from "./types";
 
 export const api = {
@@ -261,4 +262,37 @@ export const api = {
   getSilenceState: () => invoke<SilenceState>("get_silence_state"),
   /** `0` = kapalı. Öneri kendiliğinden yazılmıyor; bu yalnızca kullanıcı onayıyla çağrılır. */
   setSilenceDays: (days: number) => invoke<void>("set_silence_days", { days }),
+
+  // --- Teklif (Faz T) ---
+  listQuotes: (status: string) => invoke<Quote[]>("list_quotes", { status }),
+  getQuote: (id: number) => invoke<Quote>("get_quote", { id }),
+  createQuote: (contactId: number | null, currency: string) =>
+    invoke<number>("create_quote", { contactId, currency }),
+  saveQuote: (q: {
+    id: number;
+    contactId: number | null;
+    currency: string;
+    fxRate: number | null;
+    fxDate: string | null;
+    validUntil: string | null;
+    note: string;
+  }) => invoke<void>("save_quote", q),
+  deleteQuote: (id: number) => invoke<void>("delete_quote", { id }),
+  /** Fiyat ve maliyet teklifin para birimine ÇEVRİLEREK ekleniyor (bir kez, donuyor). */
+  addQuoteItemFromCatalog: (quoteId: number, sku: string, qty: number) =>
+    invoke<void>("add_quote_item_from_catalog", { quoteId, sku, qty }),
+  addQuoteItemManual: (quoteId: number, name: string) =>
+    invoke<void>("add_quote_item_manual", { quoteId, name }),
+  updateQuoteItem: (
+    itemId: number,
+    name: string,
+    qty: number,
+    unitPrice: number,
+    taxRate: number,
+  ) => invoke<void>("update_quote_item", { itemId, name, qty, unitPrice, taxRate }),
+  deleteQuoteItem: (itemId: number) => invoke<void>("delete_quote_item", { itemId }),
+  /** Geçiş kuralları arka uçta; geçersiz geçiş hata döner. */
+  setQuoteStatus: (id: number, status: string, reason: string) =>
+    invoke<void>("set_quote_status", { id, status, reason }),
+  snapshotQuote: (id: number) => invoke<number>("snapshot_quote", { id }),
 };

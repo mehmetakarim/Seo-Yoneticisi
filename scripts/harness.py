@@ -257,6 +257,62 @@ def main():
                    ["phone", "Telefon"], ["channel", "Kanal"], ["note", "Not"]],
     }
 
+    # Teklif (Faz T). Satırlar GERÇEK katalog fiyatlarından: 600→749 (marj %19,9) ve
+    # negatif marjlı bir satır — uyarının ekranda gerçekten göründüğü doğrulanabilsin.
+    def _kalem(i, sku, ad, adet, birim, kdv, maliyet):
+        net = round(adet * birim, 2)
+        marj = None
+        if maliyet is not None:
+            tutar = round(net - maliyet * adet, 2)
+            pct = round(tutar / net * 100, 1) if net else 0
+            durum = "negative" if pct < 0 else ("low" if pct < 10 else "ok")
+            marj = {"amount": tutar, "pct": pct, "state": durum}
+        return {"id": i, "sku": sku, "name": ad, "qty": adet, "unit_price": birim,
+                "tax_rate": kdv, "cost": maliyet, "net": net, "margin": marj}
+
+    _kalemler = [
+        _kalem(1, "PC.LEN.13B9001MTR", "Lenovo ThinkCentre Neo 50q G5", 2, 949.0, 20, 860.0),
+        _kalem(2, "MNL.GNX.4008050066", "Bambu Lab P2S Combo 3D Yazıcı", 1, 749.0, 20, 600.0),
+        _kalem(3, None, "Kurulum ve montaj", 1, 150.0, 20, None),
+        # 🔴 Zararına satır: katalogda 7 tane var.
+        _kalem(4, "KAB.ZAR.1", "Zararına satılan kablo", 5, 10.0, 10, 20.67),
+    ]
+    _ara = round(sum(k["net"] for k in _kalemler), 2)
+    _kdv20 = round(sum(k["net"] for k in _kalemler if k["tax_rate"] == 20) * 0.20, 2)
+    _kdv10 = round(sum(k["net"] for k in _kalemler if k["tax_rate"] == 10) * 0.10, 2)
+    _maliyetli = [k for k in _kalemler if k["cost"] is not None]
+    _msat = round(sum(k["net"] for k in _maliyetli), 2)
+    _mmal = round(sum(k["cost"] * k["qty"] for k in _maliyetli), 2)
+    _mpct = round((_msat - _mmal) / _msat * 100, 1)
+    QUOTES = [
+        {"id": 1, "no": "T-2026-001", "contact_id": 1, "contact_name": "Ahmet Yılmaz",
+         "status": "draft", "status_label": "Taslak", "currency": "USD", "fx_rate": None,
+         "fx_date": None, "valid_until": _g(12), "note": "", "close_reason": "",
+         "created_at": _g(-1), "sent_at": None, "items": _kalemler, "subtotal": _ara,
+         "taxes": [
+             {"rate": 10.0, "base": round(sum(k["net"] for k in _kalemler if k["tax_rate"] == 10), 2), "amount": _kdv10},
+             {"rate": 20.0, "base": round(sum(k["net"] for k in _kalemler if k["tax_rate"] == 20), 2), "amount": _kdv20},
+         ],
+         "tax_total": round(_kdv10 + _kdv20, 2),
+         "grand_total": round(_ara + _kdv10 + _kdv20, 2),
+         "margin": {"amount": round(_msat - _mmal, 2), "pct": _mpct,
+                    "state": "negative" if _mpct < 0 else ("low" if _mpct < 10 else "ok")},
+         "version_count": 0},
+        {"id": 2, "no": "T-2026-002", "contact_id": 2, "contact_name": "Zeynep Kaya",
+         "status": "sent", "status_label": "Gönderildi", "currency": "TRY", "fx_rate": 47.5911,
+         "fx_date": _g(-3), "valid_until": _g(-1), "note": "", "close_reason": "",
+         "created_at": _g(-6), "sent_at": _g(-3), "items": [], "subtotal": 35645.73,
+         "taxes": [{"rate": 20.0, "base": 35645.73, "amount": 7129.15}],
+         "tax_total": 7129.15, "grand_total": 42774.88,
+         "margin": {"amount": 7093.5, "pct": 19.9, "state": "ok"}, "version_count": 1},
+        {"id": 3, "no": "T-2026-003", "contact_id": 3, "contact_name": "Mert Demir",
+         "status": "lost", "status_label": "Kaybedildi", "currency": "USD", "fx_rate": None,
+         "fx_date": None, "valid_until": _g(-20), "note": "", "close_reason": "fiyat",
+         "created_at": _g(-30), "sent_at": _g(-28), "items": [], "subtotal": 1200.0,
+         "taxes": [{"rate": 20.0, "base": 1200.0, "amount": 240.0}], "tax_total": 240.0,
+         "grand_total": 1440.0, "margin": None, "version_count": 0},
+    ]
+
     # Canonical hedefi araması: gerçek feed ürünleri üzerinde, terimle süzülerek.
     live_json = json.dumps(live, ensure_ascii=False)
 
@@ -408,6 +464,7 @@ def main():
         f"    const CE = {json.dumps(CONTACT_EVENTS, ensure_ascii=False)};\n"
         f"    const CP = {json.dumps(CONTACT_PRODUCTS, ensure_ascii=False)};\n"
         f"    const CSVP = {json.dumps(CSV_PREVIEW, ensure_ascii=False)};\n"
+        f"    const QT = {json.dumps(QUOTES, ensure_ascii=False)};\n"
         "    if (new URLSearchParams(location.search).has('empty')\n"
         "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
         # `?setup=1` → taze kurulum benzetimi. Sihirbaz kullanıcının GERÇEK veritabanına
@@ -509,6 +566,18 @@ def main():
         "    if (cmd === 'get_contact_events')\n"
         "      return Promise.resolve(CE[args.contactId] || []);\n"
         "    if (cmd === 'save_contact') return Promise.resolve(args.id || 9);\n"
+        "    if (cmd === 'list_quotes') return Promise.resolve(\n"
+        "      args.status ? QT.filter(q => q.status === args.status) : QT);\n"
+        "    if (cmd === 'get_quote') return Promise.resolve(QT.find(q => q.id === args.id) || QT[0]);\n"
+        "    if (cmd === 'create_quote') return Promise.resolve(1);\n"
+        "    if (cmd === 'save_quote' || cmd === 'delete_quote' || cmd === 'update_quote_item'\n"
+        "        || cmd === 'delete_quote_item' || cmd === 'add_quote_item_manual'\n"
+        "        || cmd === 'set_quote_status') return Promise.resolve(null);\n"
+        # ⚠️ USD teklifte EUR ürün kur olmadan eklenemiyor — hata metni ekranda görünmeli.
+        "    if (cmd === 'add_quote_item_from_catalog') return Promise.reject(\n"
+        "      'TP-Link Switch için USD cinsinden fiyat hesaplanamadı. Ürünün para birimi EUR — "
+        "USD teklifte kur girmeniz gerekiyor.');\n"
+        "    if (cmd === 'snapshot_quote') return Promise.resolve(2);\n"
         "    if (cmd === 'list_contact_tags')\n"
         "      return Promise.resolve([...new Set(CT.flatMap(c => c.tags))]);\n"
         "    if (cmd === 'get_contact_products')\n"

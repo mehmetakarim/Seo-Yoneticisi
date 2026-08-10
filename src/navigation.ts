@@ -60,6 +60,16 @@ export const NAV = [
     group: "Müşteriler",
   },
 
+  // Teklif kişiye ait: Kişiler'in hemen altında, aynı grupta.
+  {
+    key: "quotes",
+    label: "Teklifler",
+    icon: "fileEdit",
+    title: "Teklifler",
+    sub: "Katalog fiyatından teklif — marj yalnızca sizde görünür",
+    group: "Müşteriler",
+  },
+
   // SEO araçları: her analiz kendi ekranında. Sıra bilinçli — önce "nereye bakayım"
   // (Genel Bakış), sonra en çok iş çıkaran araç, sonra sorgu düzeyi analizler.
   {

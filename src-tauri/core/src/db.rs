@@ -244,6 +244,68 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           PRIMARY KEY (contact_id, sku)
         );
         CREATE INDEX IF NOT EXISTS idx_contact_products_sku ON contact_products(sku);
+
+        -- ===== Teklif (Faz T) =====
+        -- Teklif bugüne kadar Excel'de veya mail gövdesinde hazırlanıyordu: hangi fiyatın
+        -- verildiği, teklifin ne olduğu ve niye kaybedildiği hiçbir yerde kayıtlı değildi.
+        --
+        -- 🔑 Teklif bir **KAYIT**, canlı bir hesap tablosu değil. Bu yüzden satırlar o günkü
+        -- fiyat ve maliyeti DONMUŞ hâlde taşıyor: katalog yarın değişse de teklifin ne
+        -- olduğu değişmiyor. Aynı sebeple `fx_rate`/`fx_date` teklifin üstünde duruyor.
+        --
+        -- `status`: 'draft' | 'sent' | 'won' | 'lost' | 'expired' (geçişler quote::can_transition)
+        CREATE TABLE IF NOT EXISTS quotes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          no TEXT NOT NULL UNIQUE,
+          contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+          status TEXT NOT NULL DEFAULT 'draft',
+          -- 'USD' | 'TRY'
+          currency TEXT NOT NULL DEFAULT 'USD',
+          -- USD/TRY kuru; yalnızca USD teklifte USD OLMAYAN ürün varsa gerekiyor.
+          fx_rate REAL,
+          fx_date TEXT,
+          valid_until TEXT,
+          note TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          sent_at TEXT,
+          closed_at TEXT,
+          -- Kazanma/kaybetme nedeni — raporlanabilmesi fazın bitiş şartı.
+          close_reason TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_quotes_contact ON quotes(contact_id);
+        CREATE INDEX IF NOT EXISTS idx_quotes_status ON quotes(status, updated_at);
+
+        -- 🔴 `cost` MÜŞTERİYE GİDEN ÇIKTIYA ASLA GİRMEZ. Burada duruyor çünkü marj onsuz
+        -- hesaplanamaz ve "bu işi ne marjla aldık?" sorusunun cevabı O GÜNKÜ maliyet olmalı.
+        -- Sızıntı bir dikkat meselesi değil: çıktı üreten kod ayrı bir yapı alıyor ve o
+        -- yapıda maliyet ALANI YOK (bkz. quote_html).
+        --
+        -- `sku` NULL = elle satır (montaj, nakliye). `unit_price` ve `cost` teklifin para
+        -- biriminde — çevrim satır eklenirken bir kez yapıldı (quote::catalog_line).
+        CREATE TABLE IF NOT EXISTS quote_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+          sku TEXT,
+          name TEXT NOT NULL,
+          qty REAL NOT NULL DEFAULT 1,
+          unit_price REAL NOT NULL DEFAULT 0,
+          tax_rate REAL NOT NULL DEFAULT 0,
+          cost REAL,
+          sort INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_quote_items_quote ON quote_items(quote_id, sort);
+
+        -- Gönderilmiş teklif düzenlenirse önce anlık görüntüsü saklanıyor → v1/v2 fiyat
+        -- geçmişi. ⚠️ Müşteriye giden belge değişti mi, sonradan bunu kanıtlayabilmek gerek.
+        CREATE TABLE IF NOT EXISTS quote_versions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+          version INTEGER NOT NULL,
+          snapshot_json TEXT NOT NULL,
+          at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_quote_versions_quote ON quote_versions(quote_id, version);
         "#,
     )
     .map_err(|e| format!("Şema oluşturulamadı: {e}"))?;

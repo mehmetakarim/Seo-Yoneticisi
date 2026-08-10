@@ -652,3 +652,64 @@ export interface ContactEvent {
   kind: string;
   note: string;
 }
+
+// ---------------------------------------------------------------------------
+// Teklif (Faz T)
+// ---------------------------------------------------------------------------
+
+export type MarginState = "ok" | "low" | "negative";
+
+/** Marj — **teklifin para biriminde**. Çevrim satır eklenirken bir kez yapıldı. */
+export interface Margin {
+  amount: number;
+  pct: number;
+  state: MarginState;
+}
+
+export interface TaxRow {
+  rate: number;
+  base: number;
+  amount: number;
+}
+
+export interface QuoteItem {
+  id: number;
+  /** null = elle satır (montaj, nakliye). */
+  sku: string | null;
+  name: string;
+  qty: number;
+  unit_price: number;
+  tax_rate: number;
+  /** 🔴 Yalnızca uygulama içi — müşteriye giden çıktıya ASLA girmez. */
+  cost: number | null;
+  net: number;
+  margin: Margin | null;
+}
+
+export interface Quote {
+  id: number;
+  no: string;
+  contact_id: number | null;
+  contact_name: string;
+  /** "draft" | "sent" | "won" | "lost" | "expired" */
+  status: string;
+  status_label: string;
+  /** "USD" | "TRY" */
+  currency: string;
+  /** Yalnızca USD teklifte USD OLMAYAN ürün varsa gerekiyor. */
+  fx_rate: number | null;
+  fx_date: string | null;
+  valid_until: string | null;
+  note: string;
+  close_reason: string;
+  created_at: string;
+  sent_at: string | null;
+  items: QuoteItem[];
+  subtotal: number;
+  /** Orana göre kırılım — katalogda iki KDV oranı var (%20 ve %10). */
+  taxes: TaxRow[];
+  tax_total: number;
+  grand_total: number;
+  margin: Margin | null;
+  version_count: number;
+}

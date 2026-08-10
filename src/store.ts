@@ -27,6 +27,7 @@ import type {
   Contact,
   ContactEvent,
   ContactProduct,
+  Quote,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -141,6 +142,11 @@ interface State {
   contactTags: string[];
   contactChannel: string;
   contactTag: string;
+  /** Teklifler (Faz T). ⚠️ `quote.items[].cost` yalnızca ekranda; çıktıya girmiyor. */
+  quotes: Quote[];
+  quotesBusy: boolean;
+  quoteStatusFilter: string;
+  quote: Quote | null;
   /** Ölçüm omurgası (Faz Ö) — sonuç özeti ve satır rozetleri. */
   outcomeSummary: OutcomeSummary | null;
   outcomeBadges: Record<string, OutcomeBadge>;
@@ -217,6 +223,10 @@ export const useStore = defineStore("app", {
     contactTags: [],
     contactChannel: "",
     contactTag: "",
+    quotes: [],
+    quotesBusy: false,
+    quoteStatusFilter: "",
+    quote: null,
     focus: null,
     session: null,
     sessionElapsed: 0,
@@ -1207,6 +1217,119 @@ export const useStore = defineStore("app", {
       }
       this.focus = { page, id };
       this.page = page as Page;
+    },
+
+    // --- Teklif (Faz T) ---
+
+    async loadQuotes() {
+      this.quotesBusy = true;
+      try {
+        this.quotes = await api.listQuotes(this.quoteStatusFilter);
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.quotesBusy = false;
+      }
+    },
+
+    async openQuote(id: number) {
+      try {
+        this.quote = await api.getQuote(id);
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    async createQuote(contactId: number | null, currency: string) {
+      try {
+        const id = await api.createQuote(contactId, currency);
+        await this.loadQuotes();
+        await this.openQuote(id);
+        return id;
+      } catch (e) {
+        this.toast(String(e), "error");
+        return null;
+      }
+    },
+
+    async saveQuote(q: Parameters<typeof api.saveQuote>[0]) {
+      try {
+        await api.saveQuote(q);
+        await this.openQuote(q.id);
+        await this.loadQuotes();
+        this.toast("Teklif kaydedildi.", "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    async deleteQuote(id: number) {
+      try {
+        await api.deleteQuote(id);
+        if (this.quote?.id === id) this.quote = null;
+        await this.loadQuotes();
+        this.toast("Teklif silindi.", "ok");
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    /** ⚠️ Hata mesajı olduğu gibi gösteriliyor: "kur girin" gibi eyleme dönük bilgi taşıyor. */
+    async addQuoteLine(sku: string | null, name: string) {
+      const q = this.quote;
+      if (!q) return;
+      try {
+        if (sku) await api.addQuoteItemFromCatalog(q.id, sku, 1);
+        else await api.addQuoteItemManual(q.id, name);
+        await this.openQuote(q.id);
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    async updateQuoteLine(
+      itemId: number,
+      name: string,
+      qty: number,
+      unitPrice: number,
+      taxRate: number,
+    ) {
+      const q = this.quote;
+      if (!q) return;
+      try {
+        await api.updateQuoteItem(itemId, name, qty, unitPrice, taxRate);
+        await this.openQuote(q.id);
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    async deleteQuoteLine(itemId: number) {
+      const q = this.quote;
+      if (!q) return;
+      try {
+        await api.deleteQuoteItem(itemId);
+        await this.openQuote(q.id);
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    /** Durum geçişi. Kişi bağlıysa zaman çizelgesine de yazılıyor (arka uçta). */
+    async setQuoteStatus(status: string, reason = "") {
+      const q = this.quote;
+      if (!q) return;
+      try {
+        await api.setQuoteStatus(q.id, status, reason);
+        await this.openQuote(q.id);
+        await this.loadQuotes();
+        if (q.contact_id) {
+          void this.loadContacts();
+          if (this.contact?.id === q.contact_id) void this.openContact(q.contact_id);
+        }
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
     },
 
     // --- CRM (Faz C) ---

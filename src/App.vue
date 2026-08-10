@@ -5,6 +5,7 @@ import { subOf, titleOf, TOOL_PAGES, type Page } from "./navigation";
 import Sidebar from "./components/Sidebar.vue";
 import ProductsPage from "./components/ProductsPage.vue";
 import ContactsPage from "./components/contacts/ContactsPage.vue";
+import QuotesPage from "./components/quotes/QuotesPage.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 // SEO araçları: her analiz kendi ekranında (v0.7.0). Hepsi TEK `opportunity_json`
 // önbelleğinin dilimlerini okur — ekran başına GSC çağrısı yok.
@@ -35,6 +36,7 @@ const PAGES: Record<Page, Component> = {
   today: TodayPage,
   products: ProductsPage,
   contacts: ContactsPage,
+  quotes: QuotesPage,
   overview: OverviewPage,
   opportunities: OpportunitiesPage,
   striking: StrikingPage,
