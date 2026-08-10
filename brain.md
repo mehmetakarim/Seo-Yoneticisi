@@ -331,6 +331,31 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    maddelerin karşılığı 89 uçuştaki iş). İki mekanizma sırayla: `completed` bugün,
    `in_flight` sonrasında.
 
+   **3) "Yapıldı" ACİL koşulunu kaldırmıyordu — madde her gün geri geliyordu.** Kullanıcı
+   ikinci turda sordu: *"birbirimizi anlayamıyor olabilir miyiz?"* — haklıydı, eksik bendeydi.
+
+   Uçuş süzgeci (v0.14.1) bilinçli olarak **acil kovasını kapsamıyor**: acilin kanıtı GSC
+   değil canlı feed, yarın yine değişirse madde çıkmalı. Ama "yapıldı" acil koşulunu da
+   kaldırmayınca madde ertesi gün geri geliyordu. Ölçüm (kullanıcının veritabanı): işaretli
+   9 üründen **3'ü** hâlâ acil koşulunu sağlıyordu — 2'sinde feed bayrağı duruyordu, 1'i
+   "hiç gönderilmemiş" görünüyordu **oysa `manual_done` beyanı vardı**.
+
+   🔑 **Ayrım net: kanıtı kim tutuyor?**
+   | Kova | Kanıt | "Yapıldı" ne yapıyor |
+   |---|---|---|
+   | Kaldıraç · Kaçak · Bakım | GSC (90 gün gecikmeli) | madde **susturuluyor** (28 gün) |
+   | Acil | uygulamanın kendi verisi | **veri düzeltiliyor** (feed bayrağı kapanıyor) |
+   | Müşteri | uygulamanın kendi verisi | **veri düzeltiliyor** (sonraki adım temizleniyor) |
+
+   Yani susturma, kanıtı bekleyemediğimiz yerlerde bir çare; kanıtı biz tutuyorsak doğru
+   davranış veriyi düzeltmek. Faz C'de kişi tarafında zaten böyle yapılmıştı, acil kovası
+   geride kalmıştı.
+
+   İkinci delik: *"içerik hazır ama mağazaya hiç gönderilmemiş"* koşulu yalnızca
+   `ideasoft_pushed_at`e bakıyordu. İçeriği elle mağazaya yapıştıran kullanıcının o alanı
+   hiç dolmuyor — Faz Ö'nün itiraf ettiği boşluğun aynısı. Artık `reaches_store = 1` olayı
+   da gönderim sayılıyor.
+
    **Ders: ekranın adı bir sözleşmedir.** "Bugün" diyen bir liste analiz damgasına değil güne
    bağlanmalı; kullanıcı ekranın adına inanıyor, koddaki anahtara değil.
 

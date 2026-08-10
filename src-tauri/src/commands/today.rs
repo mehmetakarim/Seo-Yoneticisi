@@ -237,6 +237,12 @@ fn candidates(
         }
     };
     let states = product_states(conn);
+    // 🔑 Mağazaya ULAŞMIŞ sayılan ürünler: gerçek gönderim (`ideasoft_pushed_at`) **veya**
+    // kullanıcının "yapıldı" beyanı (`manual_done`, reaches_store = 1). İkincisi olmadan,
+    // içeriği elle mağazaya yapıştıran kullanıcının işi hiç bitmiyordu — madde her gün
+    // "hiç gönderilmemiş" diye geri geliyordu (saha hatası, 2026-08-10).
+    let magazaya_ulasan: std::collections::HashSet<String> =
+        store_events(conn).into_iter().map(|(sku, _)| sku).collect();
     // Ürünün GSC tıklaması — acil maddelerinin skorunu da tıklama sürüyor.
     let clicks_of: std::collections::HashMap<&str, f64> = report
         .opportunities
@@ -266,7 +272,9 @@ fn candidates(
         }
         // İş yerelde bitmiş ama mağazaya hiç ulaşmamış → Faz Ö'nün merkezi kuralına göre
         // bu iş Google için HİÇ yapılmamış sayılır ve ölçülemez.
-        if p.meta_done && p.details_done && p.pushed_at.is_none() {
+        if p.meta_done && p.details_done && p.pushed_at.is_none()
+            && !magazaya_ulasan.contains(&p.sku)
+        {
             out.push(Candidate {
                 reference: ItemRef::Product(p.sku.clone()),
                 bucket: Bucket::Urgent,
@@ -582,6 +590,20 @@ pub fn complete_queue_item(
 
     if kind == "product" {
         super::log_event(&conn, &reference, "manual_done", true);
+        // 🔴 Feed bayrağı da kapanıyor (saha hatası, 2026-08-10). Acil kovası canlı veriden
+        // besleniyor ve uçuş süzgecinden MUAF — haklı olarak: feed yarın yine değişirse madde
+        // yeniden çıkmalı. Ama "yapıldı" bayrağı temizlemeyince madde her gün geri geliyordu.
+        //
+        // ⚠️ Uçuş süzgeciyle aynı fikir değil, TERSİ: orada kanıt beklendiği için madde
+        // susturuluyor; burada kanıtı uygulamanın kendisi tutuyor, o yüzden VERİ düzeltiliyor.
+        // Faz C'de aynı ilke: dönüş yapılınca kişinin sonraki adımı temizleniyor.
+        let bayrak: Option<String> = conn
+            .query_row("SELECT feed_changed FROM products WHERE sku = ?1", [&reference], |r| r.get(0))
+            .ok()
+            .flatten();
+        if bayrak.is_some() {
+            super::mark_reviewed(&conn, &reference)?;
+        }
     }
     // ⚠️ Müşteri maddesi `work_events`e YAZILMIYOR: o günlük sku-anahtarlı ve `reaches_store`
     // eksenli, bir telefon görüşmesi oraya ait değil. CRM'in kendi günlüğü `contact_events`.
@@ -666,6 +688,76 @@ mod tests {
             0,
             "yeni analizde 'yapıldı' işareti düşmeliydi"
         );
+    }
+
+    /// 🔴 Saha hatası (2026-08-10, ikinci tur): *"daha önce yapıldı olarak işaretlediğim
+    /// işlerin bazıları yeniden listeleniyor."* Uçuş süzgeci **acil kovasını kapsamıyor**
+    /// (haklı olarak: feed yarın yine değişirse madde çıkmalı), ama "yapıldı" acil koşulunu
+    /// da kaldırmıyordu — madde her gün geri geliyordu.
+    ///
+    /// Ölçüm (kullanıcının veritabanı): 9 işaretli üründen **3'ü** acil koşulunu hâlâ
+    /// sağlıyordu — 2'sinde feed bayrağı duruyordu, 1'i "hiç gönderilmemiş" görünüyordu
+    /// (oysa `manual_done` beyanı vardı).
+    #[test]
+    fn yapildi_acil_kosulunu_da_kaldiriyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO products (sku, name, url, feed_changed, feed_fp)
+             VALUES ('BAYRAKLI','Feed değişti','https://x/a','açıklama','fp1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO seo_status (sku, meta_status, details_status, ideasoft_pushed_at)
+             VALUES ('BAYRAKLI','done','done','2026-08-01T10:00:00')",
+            [],
+        )
+        .unwrap();
+
+        let bos = OpportunityReport::default();
+        let acil = |c: &Connection| {
+            candidates(c, &bos, &Default::default())
+                .iter()
+                .filter(|x| x.bucket == Bucket::Urgent)
+                .count()
+        };
+        assert_eq!(acil(&conn), 1, "feed bayrağı duruyor, madde acil");
+
+        // "Yapıldı" → bayrak temizleniyor, koşul ortadan kalkıyor.
+        super::super::mark_reviewed(&conn, "BAYRAKLI").unwrap();
+        assert_eq!(acil(&conn), 0, "yapıldı dendikten sonra madde geri gelmemeli");
+    }
+
+    /// 🔑 "Hiç gönderilmemiş" koşulu kullanıcının **beyanını** da saymalı: içeriği elle
+    /// mağazaya yapıştıran kullanıcının `ideasoft_pushed_at`i hiç dolmuyor.
+    #[test]
+    fn elle_yapildi_beyani_magazaya_ulasmis_sayiliyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO products (sku, name, url) VALUES ('ELLE','Elle gönderilen','https://x/b')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO seo_status (sku, meta_status, details_status)
+             VALUES ('ELLE','done','done')",
+            [],
+        )
+        .unwrap();
+
+        let bos = OpportunityReport::default();
+        let acil = |c: &Connection| {
+            candidates(c, &bos, &Default::default())
+                .iter()
+                .filter(|x| x.bucket == Bucket::Urgent)
+                .count()
+        };
+        assert_eq!(acil(&conn), 1, "içerik hazır ama mağazaya ulaşmamış");
+
+        super::super::log_event(&conn, "ELLE", "manual_done", true);
+        assert_eq!(acil(&conn), 0, "kullanıcı beyanı gönderim yerine geçmeli");
     }
 
     /// 🔴 Saha hatası (2026-08-10): *"Bugün sayfasında hâlâ önceki günün yapıldı olarak

@@ -415,7 +415,8 @@ fn feed_change_note(
     Some(changed.unwrap_or_else(|| "feed verisi".into()))
 }
 
-fn mark_reviewed(conn: &Connection, sku: &str) -> Result<(), String> {
+/// ⚠️ `pub(crate)`: kuyruğun "yapıldı" düğmesi de çağırıyor (bkz. `today::complete_queue_item`).
+pub(crate) fn mark_reviewed(conn: &Connection, sku: &str) -> Result<(), String> {
     // Parmak izi "değişti mi?", bu kayıt "NE değişti?" sorusunu cevaplıyor. İz geri
     // döndürülemez bir özet; onaylanan değerler saklanmazsa kullanıcıya yalnızca alan ADI
     // gösterilebiliyor ("görseller değişti") — hangi görselin gittiğini göremiyor.
