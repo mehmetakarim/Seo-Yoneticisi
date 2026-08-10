@@ -4,16 +4,18 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-08-10
-**Aktif faz:** **v0.15.0 yayında.** Yol haritasının ilk yedi fazı bitti:
+**Aktif faz:** **v0.16.0 yayında — Faz T KISMEN (T1 çıktı, T2 duruyor).** İlk yedi faz bitti:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
 **D** (EOL karar deposu + 301 CSV + sağlık skoru, v0.14.0) · **C** (CRM ince dilim, v0.15.0).
 v0.14.1 = kuyruk uçuş süzgeci (0b1) ·
-**v0.15.0 = Faz C: CRM ince dilim + kuyruk saha düzeltmeleri (0b2, 0b3)**
+v0.15.0 = Faz C: CRM ince dilim + kuyruk saha düzeltmeleri (0b2, 0b3) ·
+**v0.16.0 = Faz T1: teklif çekirdeği (katalog fiyatları + teklif ekranı)**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
-**Sıradaki faz: T (teklif/offline satış).** Ardından P (+ serbest G).
+**Sıradaki iş: Faz T2** — HTML çıktı + panoya kopyalama, gönderimde takip önerisi,
+kazanma/kaybetme raporu. Ardından P (+ serbest G).
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -39,8 +41,8 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **183 test** + 30 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**35 test**; `commands/` 11 dosyaya bölünmüş durumda).
+bağımlı DEĞİL, **191 test** + 31 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**38 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
@@ -1798,14 +1800,15 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 duruyordu (repo 2026-07-26'dan beri public).
 
 - **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 19) ·
-  `cargo test -p seo-core` (183) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+  `cargo test -p seo-core` (191) · canlı testler `-- --ignored` ile ve env değişkenleriyle
   (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
 - **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`
   `dist/harness.html` · kipler: `?empty=1` `?setup=1` `?changed=1` `?nosnap=1` `?nosonuc=1`
   `?nav=<ekran>` `&tema=koyu` · `?halefyok=1` (halef bulunamadı) · `?boskuyruk=1` (Bugün boş) · `?seans=1` (odak seansı
   sürüyor) · `?hepsiyapildi=1` (günün işi bitmiş) · `?kararlar=1` (EOL'de karar verilmiş satırlar) ·
-  `?musteri=0` (CRM boş) · `?sessizlik=1` (eşik önerisi hazır)
+  `?musteri=0` (CRM boş) · `?sessizlik=1` (eşik önerisi hazır) ·
+  `?nav=quotes` (teklif düzenleyici, marj uyarıları dahil)
   ⚠️ `npm run build` `dist/`i siler → harness HER ZAMAN derlemeden sonra üretilir.
   🔴 **Ekran görüntüsü YETMİYOR, konsol da okunmalı** (`read_console_messages`). Ölçüldü
   (2026-08-10): harness ekranı doğru çiziyordu ama konsolda kurulum hatası vardı ve aynı kod

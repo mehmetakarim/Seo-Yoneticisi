@@ -13,6 +13,17 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.16.0
+- Yeni: **Teklifler ekranı.** Satırları kataloğunuzdan seçiyorsunuz; fiyat, KDV ve maliyet ürünün kendi verisinden geliyor. Katalogda olmayan kalemler (montaj, nakliye) elle yazılıyor
+- ⚠️ Bu özellik feed'inizde **fiyat alanları** ister: `buyingPrice`, `price1`, `tax`, `currencyAbbr`, `priceTaxWithCur`. Alanlar yoksa teklif satırları boş fiyatla gelir
+- **KDV oranı ürün başına** uygulanıyor — kataloğunuzda %20 ve %10 birlikte varsa teklifte ikisi ayrı satırda görünüyor
+- Teklif **USD veya TL** olabilir. TL teklifte kur sorulmuyor: mağazanızın kendi TL fiyatı kullanılıyor. USD teklifte yalnızca USD olmayan ürünler (EUR, TL fiyatlı) için kur giriyorsunuz
+- 🔴 **Marj yalnızca sizde.** Her satırda ve teklif toplamında kâr yüzdesi görünüyor; %10 altı sarı, zararına olan kırmızı uyarı veriyor. Maliyet bilgisi müşteriye giden hiçbir yere yazılmıyor
+- Teklif durumu izleniyor: taslak → gönderildi → kazanıldı/kaybedildi. Her değişiklik, teklif bir müşteriye bağlıysa **o kişinin zaman çizelgesine** düşüyor
+- Kaybedilen teklifte neden kaydediliyor (fiyat, termin, rakip…) — sonradan raporlanabilmesi için
+- Listede açık tekliflerin toplamı, süresi geçenler ayrı rozetle görünüyor
+- Ayarlar'da teklif varsayılanları: elle satırların KDV oranı ve geçerlilik süresi
+
 ## v0.15.0
 - Yeni: **Müşteriler ekranı.** Site vitrin, asıl satış mail ve telefonla yürüyor — bu taraf bugüne kadar uygulamanın dışındaydı. Kişi/firma kartı, kanal, ilgi etiketleri ve temas geçmişi artık burada
 - **Sonraki adım tarihi** fazın kalbi: bir kişiye tarih verdiğinizde o gün Bugün listesinde çıkıyor, dönüş yapınca temizleniyor. Odak seansı da müşteri işini kilitleyebiliyor
