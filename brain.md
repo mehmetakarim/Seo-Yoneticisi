@@ -4,7 +4,7 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-08-10
-**Aktif faz:** **v0.16.0 yayında — Faz T KISMEN (T1 çıktı, T2 duruyor).** İlk yedi faz bitti:
+**Aktif faz:** **Faz T kodda BİTTİ (T1 v0.16.0'da yayında, T2 yayın bekliyor).** İlk yedi faz bitti:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
 **D** (EOL karar deposu + 301 CSV + sağlık skoru, v0.14.0) · **C** (CRM ince dilim, v0.15.0).
@@ -14,8 +14,7 @@ v0.15.0 = Faz C: CRM ince dilim + kuyruk saha düzeltmeleri (0b2, 0b3) ·
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
-**Sıradaki iş: Faz T2** — HTML çıktı + panoya kopyalama, gönderimde takip önerisi,
-kazanma/kaybetme raporu. Ardından P (+ serbest G).
+**Sıradaki faz: P (çoklu mağaza)** — ikinci mağaza gelince. Serbest kalemler: G.
 **Repo:** https://github.com/mehmetakarim/Seo-Yoneticisi (main) · **PUBLIC** (2026-07-26'dan beri)
 **Yayınlanan sürümler:** v0.1.0 → v0.5.2 · v0.5.3 = Gemini 404 düzeltmesi ·
 v0.5.4 = zincir + model rozeti · v0.5.5 = rozet kart başlığına ·
@@ -41,8 +40,8 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **191 test** + 31 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**38 test**; `commands/` 11 dosyaya bölünmüş durumda).
+bağımlı DEĞİL, **196 test** + 31 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**39 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
@@ -301,6 +300,64 @@ değişti ve ikisi de bu maddeyi çürütüyor.
 
    ⚠️ **Sonuç kontrolü kovası bugün BOŞ** ve Eylül ortasına kadar boş kalacak (72 gönderim
    0–12 gün önce, ölçüm için 28 gün gerekiyor). Sessizce boş bırakmak yerine tarihi söylüyor.
+
+0b4. ✅ **TEKLİF VE OFFLINE SATIŞ (Faz T).** Faz C müşteriyi uygulamaya soktu; satışın
+   kendisi hâlâ dışarıdaydı. Teklif Excel'de hazırlanıyor, hangi fiyatın verildiği ve niye
+   kaybedildiği hiçbir yerde durmuyordu.
+
+   🔴 **FAZIN ÖN KOŞULU ÖLÇÜMLE ÇIKTI: KATALOGDA HİÇ FİYAT YOKTU.** `products` tablosunda,
+   `ideasoft_catalog`ta ve feed'in 24 alanında tek bir fiyat/kur/KDV alanı yoktu. Kullanıcı
+   planlama sırasında feed'e beş alan ekledi: `buyingPrice` · `price1` · `tax` ·
+   `currencyAbbr` · `priceTaxWithCur`. Yani faz, veri kaynağı hazırlanarak başladı.
+
+   🔴 **İKİNCİ ÖLÇÜM İKİNCİ VARSAYIMI ÇÜRÜTTÜ: KATALOG TEK PARA BİRİMİNDE DEĞİL.**
+   `priceTaxWithCur`ın örtük kuru 1,00 ile 54,93 arasında değişiyordu; `currencyAbbr` sebebini
+   söyledi: **USD 273 · EUR 8 · TL 1**. Elle girilen tek bir kur o 9 üründe yanlış fiyat
+   üretirdi. Beyan güvenilir çıktı (USD 47,5906–47,5917 · EUR 54,9344 sabit · TL 1,0000).
+
+   **Çözüm: çevrim satır eklenirken BİR KEZ yapılıp donuyor** (`quote::catalog_line`):
+   | Teklif | Ürün | Kaynak |
+   |---|---|---|
+   | TL | hepsi | `priceTaxWithCur ÷ (1+KDV)` — mağazanın kendi TL fiyatı, **kur gerekmiyor** |
+   | USD | USD | `price1` birebir |
+   | USD | EUR/TL | TL fiyatı ÷ kullanıcının USD/TRY kuru (tek kur, N kur değil) |
+
+   🔑 Yan faydası büyük: **marj aritmetiği para biriminden bağımsız kaldı.** Fiyat da maliyet
+   de aynı birimde donduğu için TL teklifte de USD teklifte de aynı yüzde çıkıyor; kur mantığı
+   hesaba hiç bulaşmıyor. Ayrıca teklif bir **kayıt**: altı ay sonra bakıldığında o günkü
+   maliyet ve kur donmuş hâlde duruyor.
+
+   🔴 **MALİYET MÜŞTERİYE GİDEN BELGEYE GİREMEZ — DERLEME MESELESİ.** `QuoteOut` ve `OutLine`
+   yapılarında maliyet/marj **alanı yok**; `Quote → QuoteOut` dönüşümü bilinçli **kayıplı**.
+   Belge üreten kod göremediği şeyi basamaz. Üstüne bir test davranışı da sabitliyor.
+   ⚠️ İlk hâlinde o test **yanlış sebeple** patladı: ham HTML'de "600" arıyordu ve
+   `font-weight:600`a takıldı. Testin sorusu düzeltildi — belgede **ne yazdığı** (etiketler
+   ayıklanmış görünür metin), biçim değerlerinde hangi rakamların geçtiği değil.
+
+   **Ölçümler (282 ürün):** KDV %20'de 276 ürün, %10'da 6 → teklif KDV'yi **orana göre
+   kırıyor**, tek satır yetmiyor. Marj medyanı %46,7 ama **7 ürün negatif** (en düşük −%106,7)
+   ve 31 ürün %10 altı → uyarı süs değil. Senkron sonrası **feed bayrağı 80 → 80**: fiyat
+   parmak izine girmedi (`fingerprint.rs`in `quantity` gerekçesinin aynısı — girseydi dolar
+   her oynadığında 282 ürün bayraklanır, acil kovası çöpe dönerdi).
+
+   ♻️ **Kuyruğa yeni kova EKLENMEDİ.** Teklif gönderilince kişinin **sonraki adımı öneriliyor**
+   (Faz C); madde Müşteri kovasında çıkıyor. ⚠️ Kişinin mevcut randevusu varsa **ezilmiyor**,
+   hatırlatılıyor. İkinci bir hatırlatma sistemi kurulsaydı hangisinin doğru olduğu
+   belirsizleşirdi.
+
+   ⚠️ Durum geçişleri `contact_events`e yazılıyor, `work_events`e **değil**: o günlük
+   sku-anahtarlı ve `reaches_store` eksenli, bir teklif oraya ait değil (Faz C kararının
+   devamı).
+
+   🔴 **YEDEKTE İNCELİK:** `settings.rs`'in mevcut `f()` yardımcısı eksik sayıyı **0.0**
+   yapıyor. Teklif satırının `NULL` maliyeti 0'a düşseydi elle satır geri yüklemede **%100
+   marjlı** görünür ve teklifin kârı olduğundan yüksek okunurdu. Nullable için `fo()` eklendi,
+   testle sabitlendi. **Ders: "eksikse sıfır" varsayılanı, eksikliğin kendisi bilgi taşıyan
+   alanlarda sessiz bir yalan üretiyor.**
+
+   🔴 **AYNI TDZ HATASI İKİ KEZ YAPILDI** (`ContactCard`, sonra `QuoteEditor`): `immediate`
+   izleyici, ref'ler altta. **İkisini de yalnızca konsol yakaladı** — ekran her iki durumda da
+   doğru çiziliyordu. 0b3'te eklenen konsol adımı ikinci kez işe yaradı.
 
 0b3. 🔴 **İKİ SAHA HATASI VE BİR DOĞRULAMA AÇIĞI (2026-08-10).** Kullanıcı `npm run tauri dev`
    ile test etti: *"Müşteriler ekranının tasarımını göremiyorum"* ve *"Bugün sayfasında hâlâ
@@ -1800,7 +1857,7 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 duruyordu (repo 2026-07-26'dan beri public).
 
 - **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 19) ·
-  `cargo test -p seo-core` (191) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+  `cargo test -p seo-core` (196) · canlı testler `-- --ignored` ile ve env değişkenleriyle
   (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
 - **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`

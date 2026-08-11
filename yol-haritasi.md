@@ -332,20 +332,26 @@ gerekmedi, kroma Ürünler ekranıyla paylaşıldı.
 
 ---
 
-### Faz T — Teklif ve offline satış
+### Faz T — Teklif ve offline satış ✅ (tamamlandı)
 
 **Amaç.** Teklifi katalog gerçeğine bağlamak ve takibini kuyruğa taşımak.
 
-**Kapsam.** Teklif taslağı (satır = SKU, elle satır da mümkün) · durum makinesi (taslak →
-gönderildi → … → kazandı/kaybetti) · PDF/HTML kopyala (mail'e yapıştırılır, entegrasyon yok) ·
-versiyon (v1/v2 fiyat geçmişi) · kazanma/kaybetme nedeni · tekliften görev üretme · marj notu.
+**Kapsam.** ~~Teklif taslağı~~ ✅ · ~~durum makinesi~~ ✅ · ~~HTML kopyala~~ ✅ (biçimli, +
+tarayıcıdan PDF) · ~~versiyon~~ ✅ (`quote_versions`) · ~~kazanma/kaybetme nedeni~~ ✅
+(raporlanıyor) · ~~tekliften görev üretme~~ ✅ (kişinin sonraki adımı **öneriliyor**) ·
+~~marj notu~~ ✅ (satır + toplam, düşük/negatif uyarısı).
 
-**Başlama koşulu.** Faz C bitmiş olmalı.
+⚠️ Fazın ön koşulu ölçümle çıktı: **katalogda hiç fiyat yoktu**; feed'e beş alan eklendi.
+Gerçek PDF üretimi kullanıcı kararıyla kapsam dışı (tarayıcıdan yazdırılıyor).
+Gerekçeler `brain.md` 0b4'te.
 
-**Bitti sayılır.** Bir teklif taslaktan sonuca kadar yürütüldü; her durum değişimi olay
-günlüğüne düştü; kayıp nedeni raporlanabiliyor.
+**Başlama koşulu.** ~~Faz C bitmiş olmalı~~ ✅
 
-**Ekran gerekiyor mu.** Evet — teklif listesi + teklif düzenleyici.
+**Bitti sayılır.** ✅ Teklif taslaktan sonuca yürüyor; her durum değişimi **kişinin zaman
+çizelgesine** (`contact_events`) düşüyor; kayıp nedenleri Teklifler ekranında raporlanıyor.
+
+**Ekran gerekiyor mu.** ~~Evet~~ ✅ Teklifler ekranı (liste + düzenleyici) + belge modali;
+kroma mevcut ekranlarla paylaşıldı, ayrı tasarım turu gerekmedi.
 
 ---
 
