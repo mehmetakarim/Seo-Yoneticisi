@@ -456,35 +456,3 @@ textarea, input, button { font-family: inherit; }
   background: rgba(255, 255, 255, 0.22);
   color: #fff;
 }
-
-/* ---------------------------------------------------------------------------
-   Yazdırma — teklif belgesi (Faz T2)
-
-   🔴 Neden ayrı pencere DEĞİL: `window.open` Tauri penceresinde `null` dönüyor (açılır
-   pencere desteği kapalı) ve kullanıcı *"Yazdırma penceresi açılamadı"* uyarısını alıyordu.
-   Saha hatası, 2026-08-11.
-
-   Çözüm: belge `body`ye ışınlanıyor (`Teleport`), yazdırmada **uygulama gizleniyor** ve
-   yalnızca belge basılıyor. Yazıcı olmasa da macOS/Windows yazdırma penceresinden
-   "PDF olarak kaydet" seçilebiliyor — asıl ihtiyaç buydu.
-   --------------------------------------------------------------------------- */
-.yazdir-kap {
-  display: none;
-}
-
-@media print {
-  /* Uygulamanın kendisi basılmıyor; yalnızca belge. */
-  body > #app {
-    display: none !important;
-  }
-  .yazdir-kap {
-    display: block !important;
-  }
-  /* Belge kendi rengini taşıyor: koyu temada da beyaz kâğıt basılıyor. */
-  body {
-    background: #fff !important;
-  }
-  @page {
-    margin: 18mm;
-  }
-}

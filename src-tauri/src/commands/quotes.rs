@@ -558,6 +558,39 @@ pub fn render_quote(state: State<'_, AppState>, id: i64) -> Result<QuoteDoc, Str
     Ok(QuoteDoc { html: quote_html::render(&out), text: quote_html::render_text(&out) })
 }
 
+/// Belgeyi geçici bir HTML dosyasına yazar ve **yolunu** döner; ekran onu varsayılan
+/// tarayıcıda açıyor.
+///
+/// 🔴 **Neden uygulama içinden yazdırmıyoruz:** macOS'ta WKWebView `window.print()`'i
+/// uygulamıyor — düğme sessizce hiçbir şey yapardı. Kullanıcının ihtiyacı *"PDF
+/// kaydedilebilir olmalı"*; tarayıcıda yazdırma penceresi her platformda **PDF olarak
+/// kaydet** seçeneğini veriyor. İlk denemede `window.open` kullanılmıştı, o da Tauri'de
+/// `null` dönüyordu (saha hatası, 2026-08-11) — bu üçüncü ve çalışan yol.
+///
+/// ⚠️ Dosya adı teklif numarasından: kullanıcı indirdiği PDF'i tanısın.
+#[tauri::command]
+pub fn export_quote_html(state: State<'_, AppState>, id: i64) -> Result<String, String> {
+    let conn = state.conn.lock().unwrap();
+    let q = read_quote(&conn, id)?;
+    let seller = db::get_setting(&conn, "quote_seller")?.unwrap_or_default();
+    let footer = db::get_setting(&conn, "quote_footer")?.unwrap_or_default();
+    let govde = quote_html::render(&to_out(&q, seller, footer));
+    drop(conn);
+
+    // Tam belge: yazdırma kenar boşlukları ve başlık burada; `render` yalnızca gövdeyi üretiyor
+    // (aynı gövde mail'e de yapıştırılıyor, orada `<html>` sarmalayıcı istenmiyor).
+    let tam = format!(
+        "<!doctype html><html lang=\"tr\"><head><meta charset=\"utf-8\">\
+         <title>Teklif {}</title><style>@page{{margin:18mm}}\
+         body{{margin:24px;background:#fff}}</style></head><body>{govde}</body></html>",
+        q.no
+    );
+    let ad = format!("teklif-{}.html", q.no.replace(['/', '\\', ' '], "-"));
+    let yol = std::env::temp_dir().join(ad);
+    std::fs::write(&yol, tam).map_err(|e| format!("Belge dosyası yazılamadı: {e}"))?;
+    Ok(yol.to_string_lossy().to_string())
+}
+
 /// Teklif özeti — Teklifler ekranının üst şeridi ve kayıp nedenleri raporu.
 ///
 /// Yol haritasının bitiş şartı: *"kayıp nedeni raporlanabiliyor"*.

@@ -299,6 +299,8 @@ export const api = {
   snapshotQuote: (id: number) => invoke<number>("snapshot_quote", { id }),
   /** 🔴 Maliyet İÇERMEZ: arka uçtaki dönüşüm kayıplı (bkz. quotes.rs `to_out`). */
   renderQuote: (id: number) => invoke<QuoteDoc>("render_quote", { id }),
+  /** Belgeyi geçici dosyaya yazar, yolunu döner — tarayıcıda açılıp PDF'e kaydediliyor. */
+  exportQuoteHtml: (id: number) => invoke<string>("export_quote_html", { id }),
   quoteSummary: () => invoke<QuoteSummary>("quote_summary"),
   quotesOfContact: (contactId: number) =>
     invoke<Quote[]>("quotes_of_contact", { contactId }),

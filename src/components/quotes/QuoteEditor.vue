@@ -12,7 +12,7 @@
 import { computed, ref, watch } from "vue";
 import { api } from "../../api";
 import { useStore } from "../../store";
-import type { CatalogMatch, QuoteItem } from "../../types";
+import type { CatalogMatch, Quote, QuoteItem } from "../../types";
 import Icon from "../Icon.vue";
 import QuoteDocModal from "./QuoteDocModal.vue";
 
@@ -32,22 +32,45 @@ const urunArama = ref("");
 const urunSonuc = ref<CatalogMatch[]>([]);
 
 /** Başlık düzenleme kopyası — kaydetmeden store değişmesin. */
-const f = ref({ contactId: null as number | null, currency: "USD", fxRate: "", validUntil: "", note: "" });
+const f = ref(formdan(null));
+
+/** Kayıtlı teklifin başlık alanlarını forma çevirir — hem ilk yükleme hem "Vazgeç" bunu kullanıyor. */
+function formdan(v: Quote | null) {
+  return {
+    contactId: v?.contact_id ?? null,
+    currency: v?.currency ?? "USD",
+    fxRate: v?.fx_rate ? String(v.fx_rate) : "",
+    validUntil: v?.valid_until?.slice(0, 10) ?? "",
+    note: v?.note ?? "",
+  };
+}
+
 watch(
   () => store.quote,
   (v) => {
-    f.value = {
-      contactId: v?.contact_id ?? null,
-      currency: v?.currency ?? "USD",
-      fxRate: v?.fx_rate ? String(v.fx_rate) : "",
-      validUntil: v?.valid_until?.slice(0, 10) ?? "",
-      note: v?.note ?? "",
-    };
+    f.value = formdan(v);
     urunArama.value = "";
     urunSonuc.value = [];
   },
   { immediate: true },
 );
+
+/**
+ * Kaydedilmemiş başlık değişikliği var mı?
+ *
+ * ⚠️ Yalnızca **başlık** alanlarını kapsıyor (müşteri, para birimi, kur, geçerlilik, not).
+ * Satırlar anında kaydediliyor — bir hücreden çıktığınızda yazılıyorlar. Bu yüzden "Vazgeç"
+ * satırları geri almıyor ve düğmenin yanındaki not bunu açıkça söylüyor: sessizce yarım bir
+ * söz vermektense sınırı yazmak doğru.
+ */
+const kirli = computed(
+  () => JSON.stringify(f.value) !== JSON.stringify(formdan(store.quote)),
+);
+
+/** Kaydedilmemiş başlık değişikliklerini geri alır. */
+function vazgec() {
+  f.value = formdan(store.quote);
+}
 
 function kaydet() {
   const v = q.value;
@@ -183,9 +206,18 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
         >
           {{ e.label }}
         </button>
-        <button class="primary" @click="kaydet">Kaydet</button>
+        <!-- Vazgeç yalnızca değişiklik VARKEN görünüyor: hep duran bir düğme, hiçbir şey
+             yapmadığı anlarda gürültüdür. -->
+        <button v-if="kirli" class="ghost" @click="vazgec">Vazgeç</button>
+        <button class="primary" :disabled="!kirli" @click="kaydet">Kaydet</button>
       </div>
     </div>
+
+    <p v-if="kirli" class="hint kirli-not">
+      <Icon name="info" :size="13" />
+      Başlık alanlarında kaydedilmemiş değişiklik var. <b>Satır değişiklikleri anında
+      kaydediliyor</b>, "Vazgeç" onları geri almaz.
+    </p>
 
     <!-- Takip önerisi: kabul edilirse kişinin sonraki adımı yazılıyor, madde Bugün'e düşüyor. -->
     <div v-if="takipOnerisi" class="takip">
@@ -291,9 +323,9 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
                 @change="satirKaydet(it, { tax_rate: Number(($event.target as HTMLInputElement).value) })"
               />
             </td>
-            <td class="sag tut">{{ bicim(it.net) }}</td>
+            <td class="sag metin tut">{{ bicim(it.net) }}</td>
             <!-- 🔴 Yalnızca ekranda. -->
-            <td class="sag">
+            <td class="sag metin">
               <span v-if="it.margin" class="marj" :class="it.margin.state">
                 %{{ it.margin.pct.toFixed(0) }}
               </span>
@@ -456,6 +488,13 @@ h2 {
   border-color: var(--c-border);
   color: var(--c-mid);
 }
+.kirli-not {
+  margin-bottom: 12px;
+}
+.primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .neden {
   width: 100%;
   margin-bottom: 12px;
@@ -523,6 +562,34 @@ th {
 }
 .sag {
   text-align: right;
+}
+/* 🔴 Sütun hizası: başlık metni hücrenin sağ kenarında, sayı ise GİRİŞİN iç boşluğu kadar
+   içeride duruyordu — üstelik tarayıcının artırma okları sağdan ~18px daha yiyordu, sayı
+   gözle görülür biçimde sola kayıyordu (saha geri bildirimi, 2026-08-11).
+   Çözüm: okları kaldır, başlık ile girişin sağ iç boşluğunu eşitle. */
+th.sag {
+  padding-right: 15px;
+}
+/* Girişli hücrede sağ boşluk ikiye bölünüyor: hücrenin 9px'i + girişin 6px'i = 15px,
+   yani başlıkla birebir. */
+.hucre.num {
+  padding-right: 6px;
+}
+/* Girişi olmayan (düz metin) sağ hücrelerde o 6px yok — eksiği burada tamamlanıyor,
+   yoksa Tutar ve Marj sütunları başlıklarından 6px kayıyor. */
+td.sag.metin {
+  padding-right: 15px;
+}
+/* Artırma/azaltma okları gizli: hem hizayı bozuyorlardı hem de bu ekranın diline
+   (sakin, az çizgi) yabancıydılar. Değer yazılarak giriliyor. */
+.hucre[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.hucre[type="number"]::-webkit-outer-spin-button,
+.hucre[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .w-ad {
   min-width: 200px;

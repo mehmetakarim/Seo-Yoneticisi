@@ -18,6 +18,7 @@
  */
 import { ref, watch } from "vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { api } from "../../api";
 import { useStore } from "../../store";
 import Icon from "../Icon.vue";
@@ -66,18 +67,27 @@ async function kopyala() {
 }
 
 /**
- * Yazdırma / PDF.
+ * PDF / yazdırma — belge varsayılan tarayıcıda açılıyor.
  *
- * 🔴 **Ayrı pencere KULLANILMIYOR.** İlk sürüm `window.open` ile yeni pencere açıyordu;
- * Tauri penceresinde açılır pencere desteği kapalı olduğu için `null` dönüyor ve kullanıcı
- * *"Yazdırma penceresi açılamadı"* uyarısını alıyordu (saha hatası, 2026-08-11).
+ * 🔴 **Üçüncü deneme; ilk ikisi çalışmadı.**
+ * 1. `window.open` + yazdır → Tauri'de açılır pencere yok, `null` döndü.
+ * 2. Uygulama içinden `window.print()` → macOS'ta WKWebView bu çağrıyı **uygulamıyor**;
+ *    düğme sessizce hiçbir şey yapardı ki bu en kötüsü.
+ * 3. ✅ Belge geçici dosyaya yazılıp tarayıcıda açılıyor. Yazdırma penceresi her platformda
+ *    **PDF olarak kaydet** seçeneğini veriyor — kullanıcının istediği buydu.
  *
- * Şimdi belge `body`ye ışınlanmış hâlde duruyor; `@media print` uygulamayı gizleyip yalnızca
- * onu bastırıyor. Yazıcı olmasa da işletim sisteminin yazdırma penceresinden **PDF olarak
- * kaydet** seçilebiliyor — asıl ihtiyaç buydu.
+ * ⚠️ İki adım (aç → Cmd/Ctrl+P) ama çalışması garanti. Uygulama içinde gerçek PDF üretmek
+ * font gömme ve sayfa düzeni demek; yol haritasında bilinçli olarak kapsam dışı.
  */
-function yazdir() {
-  window.print();
+async function pdfAc() {
+  if (!props.quoteId) return;
+  try {
+    const yol = await api.exportQuoteHtml(props.quoteId);
+    await openPath(yol);
+    store.toast("Belge tarayıcıda açıldı — yazdırma penceresinden PDF olarak kaydedin.", "ok");
+  } catch (e) {
+    store.toast(String(e), "error");
+  }
 }
 </script>
 
@@ -97,16 +107,14 @@ function yazdir() {
     <!-- Arka uçtan gelen belge; içerik kaçışı Rust tarafında yapıldı (quote_html::esc). -->
     <div v-else class="onizleme" v-html="html"></div>
 
-    <!-- Yazdırılan kopya: `body` altında duruyor ki `@media print` uygulamayı gizleyip
-         yalnızca bunu bastırabilsin. Ekranda görünmüyor (`.yazdir-kap { display:none }`). -->
-    <Teleport to="body">
-      <div v-if="props.open" class="yazdir-kap" v-html="html"></div>
-    </Teleport>
+    <!-- ⚠️ Işınlanan yazdırma kopyası ve `@media print` kuralları KALDIRILDI. Yazdırma
+         tarayıcıda yapılıyor; kurallar dursaydı uygulamada Cmd+P **bomboş sayfa** basardı
+         (kural `#app`i gizliyor, gösterilecek kopya ise artık yok). -->
 
     <template #footer>
       <button class="ghost" @click="emit('close')">Kapat</button>
-      <button class="ghost" @click="yazdir">
-        <Icon name="external" :size="14" :stroke-width="2" /> Yazdır / PDF
+      <button class="ghost" @click="pdfAc">
+        <Icon name="external" :size="14" :stroke-width="2" /> PDF olarak kaydet
       </button>
       <button class="solid" @click="kopyala">
         <Icon name="copy" :size="14" :stroke-width="2" /> Panoya kopyala

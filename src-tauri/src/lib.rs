@@ -101,6 +101,7 @@ pub fn run() {
             commands::get_quote_defaults,
             commands::set_quote_defaults,
             commands::render_quote,
+            commands::export_quote_html,
             commands::quote_summary,
             commands::quotes_of_contact,
             commands::dismiss_queue_item,
