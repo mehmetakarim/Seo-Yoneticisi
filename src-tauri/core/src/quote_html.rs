@@ -102,16 +102,22 @@ fn tr_qty(v: f64) -> String {
 
 /// Belgeyi üretir.
 ///
-/// ## Neden bu biçim — üç kısıt birden
+/// ## 🔴 Outlook kısıtları — saha geri bildirimiyle öğrenildi (2026-08-11)
 ///
-/// 1. **Stil satır içi.** Mail istemcileri `<style>` bloğunu sıklıkla atıyor.
-/// 2. **Flexbox YOK, düzen tablolarla.** Outlook flex'i yok sayıyor ve başlık üst üste
-///    biner. Saha geri bildirimi (2026-08-11) tabloların mailde **çok geniş** düştüğünü
-///    gösterdi; genişlik 720 → **560 px** ve tablo `width:100%` yerine sabit genişliğin
-///    içinde duruyor.
-/// 3. **Uygulamanın dili.** Ağır kutu çizgileri yerine saç teli ayırıcılar, sayılar
-///    `tabular-nums`, ikincil metin soluk. *"Boşluk da bir özelliktir"* — belge bir fatura
-///    taklidi değil, sakin bir mektup.
+/// Kullanıcı belgeyi mail'e yapıştırdı ve tablo **dağıldı**: satırlar tüm genişliğe yayıldı,
+/// toplamlar sağ kenara uçtu. Sebepleri:
+///
+/// | Denenen | Neden olmadı |
+/// |---|---|
+/// | `<div style="max-width:560px">` | Outlook (Word motoru) **`max-width`'i yok sayıyor** |
+/// | `margin-left:auto` ile sağa yaslama | Word motorunda `margin:auto` çalışmıyor → tablo sağ kenara gitti |
+/// | `display:flex` başlık düzeni | Outlook flex'i yok sayıyor (bu yüzden zaten tabloya çevrilmişti) |
+///
+/// Bu yüzden belge **baştan sona tablolarla** kuruluyor: dış kap `<table width="560">`
+/// (öznitelik + stil birlikte), sağa yaslama boş bir hücreyle yapılıyor. Bunlar 1990'ların
+/// HTML'i gibi görünüyor ve öyle — mail istemcilerinin gerçeği bu.
+///
+/// ⚠️ Stil satır içi kalmaya devam ediyor: `<style>` bloğu istemciler tarafından atılıyor.
 pub fn render(q: &QuoteOut) -> String {
     let mut h = String::with_capacity(4096);
     // Tek yerde tutulan ölçüler; belge boyunca aynı ritim.
@@ -121,13 +127,19 @@ pub fn render(q: &QuoteOut) -> String {
     let tel = "border-bottom:1px solid #f0f0f2;";
     let sag = "text-align:right;";
     let sayi = "font-variant-numeric:tabular-nums;";
+    // Outlook varsayılan hücre boşluklarını sıfırlıyor.
+    let sifir = "cellpadding=\"0\" cellspacing=\"0\" border=\"0\"";
 
+    // Dış kap: GENİŞLİK ÖZNİTELİĞİ + stil birlikte (Outlook özniteliğe bakıyor).
     h.push_str(&format!(
-        "<div style=\"{govde}max-width:560px;margin:0;padding:0;\">"
+        "<table {sifir} width=\"560\" style=\"width:560px;border-collapse:collapse;{govde}\">\
+         <tr><td style=\"padding:0;\">"
     ));
 
-    // --- Başlık: iki hücreli tablo (flex Outlook'ta çalışmıyor) ---
-    h.push_str("<table style=\"width:100%;border-collapse:collapse;\"><tr>");
+    // --- Başlık: iki hücre ---
+    h.push_str(&format!(
+        "<table {sifir} width=\"100%\" style=\"width:100%;border-collapse:collapse;\"><tr>"
+    ));
     h.push_str("<td style=\"vertical-align:top;padding:0;\">");
     if !q.seller.trim().is_empty() {
         h.push_str(&format!(
@@ -159,26 +171,29 @@ pub fn render(q: &QuoteOut) -> String {
 
     // --- Kalemler ---
     h.push_str(&format!(
-        "<table style=\"width:100%;border-collapse:collapse;margin-top:16px;\"><thead><tr>"
+        "<table {sifir} width=\"100%\" style=\"width:100%;border-collapse:collapse;\
+         margin-top:16px;\"><thead><tr>"
     ));
     // ⚠️ Başlıklar küçük ve harf aralıklı: tablo "form" değil "liste" gibi okunsun.
     let bas = format!(
         "padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;\
          letter-spacing:0.04em;text-transform:uppercase;{soluk}"
     );
-    h.push_str(&format!("<th style=\"text-align:left;{bas}\">Kalem</th>"));
+    h.push_str(&format!("<th align=\"left\" style=\"text-align:left;{bas}\">Kalem</th>"));
     for baslik in ["Adet", "Birim", "KDV", "Tutar"] {
-        h.push_str(&format!("<th style=\"{sag}{bas}padding-left:10px;\">{baslik}</th>"));
+        h.push_str(&format!(
+            "<th align=\"right\" style=\"{sag}{bas}padding-left:10px;\">{baslik}</th>"
+        ));
     }
     h.push_str("</tr></thead><tbody>");
     for l in &q.lines {
         h.push_str(&format!(
             "<tr>\
              <td style=\"{tel}padding:8px 0;\">{}</td>\
-             <td style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;{soluk}\">{}</td>\
-             <td style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;{soluk}\">{}</td>\
-             <td style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;{soluk}\">%{}</td>\
-             <td style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;font-weight:600;\">{}</td>\
+             <td align=\"right\" style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;{soluk}\">{}</td>\
+             <td align=\"right\" style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;{soluk}\">{}</td>\
+             <td align=\"right\" style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;{soluk}\">%{}</td>\
+             <td align=\"right\" style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;font-weight:600;\">{}</td>\
              </tr>",
             esc(&l.name),
             tr_qty(l.qty),
@@ -189,15 +204,27 @@ pub fn render(q: &QuoteOut) -> String {
     }
     h.push_str("</tbody></table>");
 
-    // --- Toplamlar: sağa yaslı, yalnızca genel toplamın üstünde çizgi ---
+    // --- Toplamlar ---
+    // 🔴 Sağa yaslama BOŞ HÜCREYLE: `margin-left:auto` Word motorunda çalışmıyor ve toplamlar
+    // mailin sağ kenarına uçuyordu (saha hatası).
+    //
+    // ⚠️ Boş hücre `width="100%"` olmak ZORUNDA. Olmadığında `&nbsp;` kadar daralıyor ve
+    // toplamlar sağa değil ORTAYA düşüyor — ilk denemede tam bu oldu (harness'ta görüldü).
     h.push_str(&format!(
-        "<table style=\"border-collapse:collapse;margin:14px 0 0 auto;font-size:12px;\">"
+        "<table {sifir} width=\"100%\" style=\"width:100%;border-collapse:collapse;\
+         margin-top:14px;\"><tr>\
+         <td width=\"100%\" style=\"width:100%;padding:0;\">&nbsp;</td>\
+         <td style=\"padding:0;vertical-align:top;white-space:nowrap;\">"
+    ));
+    h.push_str(&format!(
+        "<table {sifir} style=\"border-collapse:collapse;font-size:12px;\">"
     ));
     let satir = |ad: String, deger: String, genel: bool| {
         let ust = if genel { "border-top:1px solid #d2d2d7;padding-top:8px;" } else { "" };
         format!(
-            "<tr><td style=\"padding:3px 18px 3px 0;{ust}{}\">{ad}</td>\
-             <td style=\"{sag}{sayi}padding:3px 0;{ust}{}\">{deger}</td></tr>",
+            "<tr><td style=\"padding:3px 18px 3px 0;white-space:nowrap;{ust}{}\">{ad}</td>\
+             <td align=\"right\" style=\"{sag}{sayi}padding:3px 0;white-space:nowrap;{ust}{}\">\
+             {deger}</td></tr>",
             if genel { "" } else { soluk },
             if genel { "font-weight:660;font-size:14px;" } else { "" }
         )
@@ -219,7 +246,7 @@ pub fn render(q: &QuoteOut) -> String {
         format!("{} {}", tr_num(q.grand_total), esc(&q.currency)),
         true,
     ));
-    h.push_str("</table>");
+    h.push_str("</table></td></tr></table>");
 
     if !q.fx_note.trim().is_empty() {
         h.push_str(&format!(
@@ -237,7 +264,7 @@ pub fn render(q: &QuoteOut) -> String {
             ));
         }
     }
-    h.push_str("</div>");
+    h.push_str("</td></tr></table>");
     h
 }
 
@@ -441,9 +468,18 @@ mod tests {
     #[test]
     fn belge_dar_ve_mail_uyumlu() {
         let html = render(&ornek());
-        assert!(html.contains("max-width:560px"), "belge daraltılmalı");
+        // 🔴 `max-width` DEĞİL: Outlook onu yok sayıyor ve belge tüm genişliğe yayılıyordu.
+        assert!(html.contains("width=\"560\""), "genişlik ÖZNİTELİK olarak verilmeli");
+        assert!(html.contains("width:560px"), "stil de dursun (diğer istemciler için)");
+        assert!(!html.contains("max-width"), "max-width Outlook'ta işe yaramıyor");
         assert!(!html.contains("display:flex"), "mail istemcileri flex'i yok sayıyor");
+        // 🔴 `margin:auto` Word motorunda çalışmıyor; sağa yaslama boş hücreyle yapılıyor.
+        assert!(!html.contains("margin-left:auto") && !html.contains("0 auto"));
+        // Hücre boşlukları sıfırlanmalı, yoksa Outlook kendi dolgusunu ekliyor.
+        assert!(html.contains("cellpadding=\"0\""));
         // Sayılar hizalı: tabular figürler olmadan sütunlar kayıyor.
         assert!(html.contains("font-variant-numeric:tabular-nums"));
+        // Hizalama hem öznitelik hem stil ile: Outlook `text-align`i hücrede kaçırabiliyor.
+        assert!(html.contains("align=\"right\""));
     }
 }

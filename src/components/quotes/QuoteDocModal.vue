@@ -87,7 +87,7 @@ function yazdir() {
     label="Teklif belgesi"
     title="Teklif belgesi"
     icon="fileEdit"
-    :width="760"
+    :width="652"
     scroll
     @close="emit('close')"
   >
@@ -123,12 +123,18 @@ function yazdir() {
   font-size: 13px;
 }
 /* Belge kendi (açık) rengini taşıyor: müşteriye gidecek hâli neyse önizleme de o.
-   Koyu temada da beyaz kâğıt görünüyor — kasıtlı. */
+   Koyu temada da beyaz kâğıt görünüyor — kasıtlı.
+
+   ⚠️ Modal genişliği belgeye göre (560 + 2×22 dolgu): sağda boş bir şerit kalıyordu
+   (saha geri bildirimi). Belge ayrıca ortalanıyor — kap belgeden geniş kalırsa bile
+   sola yapışmasın. */
 .onizleme {
   background: #fff;
   border: 1px solid var(--c-border);
   border-radius: 10px;
   padding: 22px;
+  display: flex;
+  justify-content: center;
 }
 .solid,
 .ghost {
