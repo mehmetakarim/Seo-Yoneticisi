@@ -28,6 +28,7 @@ pub mod images;
 pub mod opportunity;
 pub mod queue;
 pub mod quote;
+pub mod quote_html;
 pub mod seo_data;
 pub mod stats;
 pub mod sync;

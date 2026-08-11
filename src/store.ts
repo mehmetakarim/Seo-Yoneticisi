@@ -28,6 +28,7 @@ import type {
   ContactEvent,
   ContactProduct,
   Quote,
+  QuoteSummary,
 } from "./types";
 import type { Page } from "./navigation";
 
@@ -147,6 +148,8 @@ interface State {
   quotesBusy: boolean;
   quoteStatusFilter: string;
   quote: Quote | null;
+  /** Kazanma/kaybetme özeti — kayıp nedenleri raporlanabilsin diye (fazın bitiş şartı). */
+  quoteSummary: QuoteSummary | null;
   /** Ölçüm omurgası (Faz Ö) — sonuç özeti ve satır rozetleri. */
   outcomeSummary: OutcomeSummary | null;
   outcomeBadges: Record<string, OutcomeBadge>;
@@ -227,6 +230,7 @@ export const useStore = defineStore("app", {
     quotesBusy: false,
     quoteStatusFilter: "",
     quote: null,
+    quoteSummary: null,
     focus: null,
     session: null,
     sessionElapsed: 0,
@@ -1225,6 +1229,7 @@ export const useStore = defineStore("app", {
       this.quotesBusy = true;
       try {
         this.quotes = await api.listQuotes(this.quoteStatusFilter);
+        this.quoteSummary = await api.quoteSummary();
       } catch (e) {
         this.toast(String(e), "error");
       } finally {

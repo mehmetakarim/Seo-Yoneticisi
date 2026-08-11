@@ -11,7 +11,7 @@
 import { computed, ref, watch } from "vue";
 import { useStore } from "../../store";
 import { api } from "../../api";
-import type { CatalogMatch } from "../../types";
+import type { CatalogMatch, Quote } from "../../types";
 import Icon from "../Icon.vue";
 
 const store = useStore();
@@ -123,6 +123,8 @@ async function etiketCikar(t: string) {
 // ♻️ Arama EOL halef seçicisiyle aynı uçtan: satıştaki ürünlerde arıyor.
 const urunArama = ref("");
 const urunSonuc = ref<CatalogMatch[]>([]);
+/** Kişinin teklifleri (Faz T2) — ürün bağıyla aynı fikir: tek kaynaktan sorgu. */
+const teklifler = ref<Quote[]>([]);
 let urunZaman: ReturnType<typeof setTimeout> | null = null;
 
 function urunAra(v: string) {
@@ -136,6 +138,23 @@ function urunAra(v: string) {
   urunZaman = setTimeout(async () => {
     urunSonuc.value = await api.searchLiveProducts(v).catch(() => []);
   }, 220);
+}
+
+watch(
+  () => store.contact?.id,
+  async (id) => {
+    teklifler.value = id ? await api.quotesOfContact(id).catch(() => []) : [];
+  },
+  { immediate: true },
+);
+
+const paraB = (v: number, c: string) =>
+  new Intl.NumberFormat("tr-TR", { style: "currency", currency: c, maximumFractionDigits: 0 })
+    .format(v);
+
+function teklifAc(id: number) {
+  store.page = "quotes";
+  void store.openQuote(id);
 }
 
 async function urunBagla(m: CatalogMatch) {
@@ -285,6 +304,16 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
           <input v-model="temas.nextStepNote" class="fx" placeholder="Sonraki adım (isteğe bağlı)" />
         </div>
         <button class="primary" @click="temasEkle">Temas kaydet</button>
+      </div>
+
+      <!-- Teklifler: kişinin ne aldığı/almadığı temas geçmişinin bir parçası. -->
+      <div v-if="teklifler.length" class="gecmis">
+        <b>Teklifler</b>
+        <button v-for="t in teklifler" :key="t.id" class="teklif-sat" @click="teklifAc(t.id)">
+          <span class="ts-no">{{ t.no }}</span>
+          <span class="ts-durum">{{ t.status_label }}</span>
+          <span class="ts-tut">{{ paraB(t.grand_total, t.currency) }}</span>
+        </button>
       </div>
 
       <div class="gecmis">
@@ -527,6 +556,38 @@ textarea {
   line-height: 1.6;
   color: var(--c-faint);
   max-width: 460px;
+}
+.teklif-sat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 0;
+  border: none;
+  border-bottom: 1px solid var(--c-border);
+  background: none;
+  cursor: pointer;
+  font-size: 12.5px;
+  text-align: left;
+}
+.teklif-sat:hover .ts-no {
+  color: var(--accent);
+}
+.ts-no {
+  flex: none;
+  width: 96px;
+  font-weight: 560;
+  color: var(--c-text);
+}
+.ts-durum {
+  flex: 1;
+  color: var(--c-faint);
+}
+.ts-tut {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text);
+  font-weight: 560;
 }
 .olay {
   display: flex;

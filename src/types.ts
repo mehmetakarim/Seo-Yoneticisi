@@ -713,3 +713,18 @@ export interface Quote {
   margin: Margin | null;
   version_count: number;
 }
+
+/** Müşteriye giden belge — iki biçim birden (mail'e yapıştırma için). */
+export interface QuoteDoc {
+  html: string;
+  text: string;
+}
+
+/** Teklif özeti; kayıp nedenleri raporlanabilsin diye (fazın bitiş şartı). */
+export interface QuoteSummary {
+  open_count: number;
+  won_count: number;
+  lost_count: number;
+  won_totals: [string, number][];
+  lost_reasons: [string, number][];
+}

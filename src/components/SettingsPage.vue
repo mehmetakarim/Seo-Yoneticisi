@@ -25,10 +25,13 @@ const kalibrasyon = ref<CalibrationRow[]>([]);
 // alıyor — ölçüldü (2026-08-10): katalogda %20 ve %10 birlikte var, tek ayara indirgenemez.
 const teklifKdv = ref(20);
 const teklifGun = ref(15);
+// ⚠️ Satıcı adı kodda SABİT DEĞİL: uygulama kişiselleştirilmemiş, her mağaza kendi adını yazar.
+const teklifSatici = ref("");
+const teklifDipnot = ref("");
 
 async function teklifAyarKaydet() {
   try {
-    await api.setQuoteDefaults(teklifKdv.value, teklifGun.value);
+    await api.setQuoteDefaults(teklifKdv.value, teklifGun.value, teklifSatici.value, teklifDipnot.value);
     store.toast("Teklif varsayılanları kaydedildi.", "ok");
   } catch (e) {
     store.toast(String(e), "error");
@@ -111,6 +114,8 @@ onMounted(async () => {
   if (td) {
     teklifKdv.value = td.tax_rate;
     teklifGun.value = td.valid_days;
+    teklifSatici.value = td.seller;
+    teklifDipnot.value = td.footer;
   }
   sessizlik.value = await api
     .getSilenceState()
@@ -678,6 +683,21 @@ async function doImport() {
             </div>
             <button class="solid" @click="teklifAyarKaydet()">Kaydet</button>
           </div>
+
+          <div>
+            <label class="lbl">Teklif başlığındaki firma adı</label>
+            <input v-model="teklifSatici" class="inp" placeholder="Örn. Kurumsal BT" />
+          </div>
+          <div>
+            <label class="lbl">Belgenin altındaki sabit not</label>
+            <textarea
+              v-model="teklifDipnot"
+              class="inp"
+              rows="2"
+              placeholder="Ödeme koşulu, teslim süresi, garanti…"
+            ></textarea>
+          </div>
+
           <div class="hint">
             <Icon name="info" :size="13" />
             Kataloğunuzda <b>USD, EUR ve TL</b> fiyatlı ürünler birlikte var. TL teklifte kur

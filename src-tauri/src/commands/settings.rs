@@ -348,6 +348,24 @@ fn export_json(conn: &Connection) -> Result<String, String> {
     let contact_tags = dump(conn, "contact_tags", &["contact_id", "tag"])?;
     let contact_products = dump(conn, "contact_products", &["contact_id", "sku", "at"])?;
 
+    // Teklif (Faz T) — yeniden üretilemez: teklif bir KAYIT, katalogdan türetilemiyor
+    // (fiyat, maliyet ve kur o günkü hâliyle donmuş durumda).
+    let quotes = dump(
+        conn,
+        "quotes",
+        &[
+            "id", "no", "contact_id", "status", "currency", "fx_rate", "fx_date", "valid_until",
+            "note", "created_at", "updated_at", "sent_at", "closed_at", "close_reason",
+        ],
+    )?;
+    let quote_items = dump(
+        conn,
+        "quote_items",
+        &["id", "quote_id", "sku", "name", "qty", "unit_price", "tax_rate", "cost", "sort"],
+    )?;
+    let quote_versions =
+        dump(conn, "quote_versions", &["id", "quote_id", "version", "snapshot_json", "at"])?;
+
     let root = json!({
         "app": "seo-yoneticisi",
         "exported_at": now_str(),
@@ -363,6 +381,9 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         "contact_events": contact_events,
         "contact_tags": contact_tags,
         "contact_products": contact_products,
+        "quotes": quotes,
+        "quote_items": quote_items,
+        "quote_versions": quote_versions,
     });
     serde_json::to_string_pretty(&root).map_err(|e| format!("JSON oluşturulamadı: {e}"))
 }
@@ -407,6 +428,7 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
         "DELETE FROM seo_status; DELETE FROM products; DELETE FROM sync_log; DELETE FROM settings;
          DELETE FROM work_events; DELETE FROM metric_page_rows; DELETE FROM metric_snapshots;
          DELETE FROM contact_products; DELETE FROM contact_tags; DELETE FROM contact_events;
+         DELETE FROM quote_versions; DELETE FROM quote_items; DELETE FROM quotes;
          DELETE FROM contacts;",
     )
     .map_err(|e| format!("Mevcut veriler temizlenemedi: {e}"))?;
@@ -419,6 +441,14 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
     }
     fn f(v: &Value, key: &str) -> f64 {
         v.get(key).and_then(|x| x.as_f64()).unwrap_or(0.0)
+    }
+    /// Boş bırakılabilen sayısal alan.
+    ///
+    /// 🔴 `f()` KULLANILAMAZ: eksik değeri 0.0 yapıyor. Teklif satırında maliyet `NULL` ise
+    /// bu "elle satır, maliyeti bilinmiyor" demek; 0.0'a düşerse geri yüklemede o satır
+    /// **%100 marjlı** görünür ve teklifin kârı olduğundan yüksek okunur.
+    fn fo(v: &Value, key: &str) -> Option<f64> {
+        v.get(key).and_then(|x| x.as_f64())
     }
     let arr = |key: &str| -> Vec<Value> {
         obj.get(key).and_then(|x| x.as_array()).cloned().unwrap_or_default()
@@ -565,6 +595,47 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
             params![i(&cp, "contact_id"), s(&cp, "sku"), s(&cp, "at")],
         );
     }
+    // Teklif. ⚠️ Sıra: satırlar ve sürümler `quotes.id`e bağlı.
+    for q in arr("quotes") {
+        let _ = tx.execute(
+            "INSERT OR REPLACE INTO quotes (id, no, contact_id, status, currency, fx_rate,
+                fx_date, valid_until, note, created_at, updated_at, sent_at, closed_at,
+                close_reason)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+            params![
+                i(&q, "id"), s(&q, "no"), i(&q, "contact_id"),
+                s(&q, "status").unwrap_or_else(|| "draft".into()),
+                s(&q, "currency").unwrap_or_else(|| "USD".into()),
+                fo(&q, "fx_rate"), s(&q, "fx_date"), s(&q, "valid_until"),
+                s(&q, "note").unwrap_or_default(), s(&q, "created_at").unwrap_or_default(),
+                s(&q, "updated_at").unwrap_or_default(), s(&q, "sent_at"), s(&q, "closed_at"),
+                s(&q, "close_reason").unwrap_or_default()
+            ],
+        );
+    }
+    for it in arr("quote_items") {
+        let _ = tx.execute(
+            "INSERT OR REPLACE INTO quote_items (id, quote_id, sku, name, qty, unit_price,
+                tax_rate, cost, sort)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![
+                i(&it, "id"), i(&it, "quote_id"), s(&it, "sku"),
+                s(&it, "name").unwrap_or_default(), fo(&it, "qty").unwrap_or(1.0),
+                f(&it, "unit_price"), f(&it, "tax_rate"),
+                fo(&it, "cost"), i(&it, "sort").unwrap_or(0)
+            ],
+        );
+    }
+    for v in arr("quote_versions") {
+        let _ = tx.execute(
+            "INSERT OR REPLACE INTO quote_versions (id, quote_id, version, snapshot_json, at)
+             VALUES (?1,?2,?3,?4,?5)",
+            params![
+                i(&v, "id"), i(&v, "quote_id"), i(&v, "version"),
+                s(&v, "snapshot_json").unwrap_or_default(), s(&v, "at").unwrap_or_default()
+            ],
+        );
+    }
     for sn in arr("metric_snapshots") {
         let _ = tx.execute(
             "INSERT OR REPLACE INTO metric_snapshots
@@ -596,6 +667,51 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 🔴 **Teklif de yeniden üretilemez** (Faz T): katalogdan türetilemiyor çünkü fiyat,
+    /// maliyet ve kur o günkü hâliyle DONMUŞ. Ayrıca maliyeti olmayan (elle) satırın
+    /// `NULL`u korunmalı — 0.0'a düşerse teklif %100 marjlı görünür.
+    #[test]
+    fn yedek_teklifi_ve_bos_maliyeti_koruyor() {
+        let src = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&src).unwrap();
+        src.execute(
+            "INSERT INTO quotes (id, no, status, currency, fx_rate, created_at, updated_at)
+             VALUES (3,'T-2026-009','sent','TRY',47.5911,'2026-08-10T09:00:00','2026-08-10T09:00:00')",
+            [],
+        )
+        .unwrap();
+        src.execute(
+            "INSERT INTO quote_items (quote_id, sku, name, qty, unit_price, tax_rate, cost, sort)
+             VALUES (3,'A-1','Katalog ürünü',2,949.0,20.0,860.0,1),
+                    (3,NULL,'Kurulum',1,150.0,20.0,NULL,2)",
+            [],
+        )
+        .unwrap();
+
+        let json = export_json(&src).expect("dışa aktarılamadı");
+        let mut dst = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&dst).unwrap();
+        import_json(&mut dst, &json).expect("içe aktarılamadı");
+
+        let (no, kur): (String, Option<f64>) = dst
+            .query_row("SELECT no, fx_rate FROM quotes WHERE id=3", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("teklif geri yüklenmedi");
+        assert_eq!(no, "T-2026-009");
+        assert_eq!(kur, Some(47.5911), "kur teklifin kaydının parçası");
+
+        let maliyetli: Option<f64> = dst
+            .query_row("SELECT cost FROM quote_items WHERE sku='A-1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(maliyetli, Some(860.0));
+
+        let elle: Option<f64> = dst
+            .query_row("SELECT cost FROM quote_items WHERE sku IS NULL", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(elle, None, "elle satırın maliyeti 0'a DÜŞMEMELİ — marj bozulur");
+    }
 
     /// 🔴 **Kişi kayıtları da yeniden üretilemez** (Faz C): feed'den gelmiyor, GSC'den
     /// tazelenmiyor — tamamen kullanıcının emeği. Dört tablo birlikte taşınmalı, yoksa

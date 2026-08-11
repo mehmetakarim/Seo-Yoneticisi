@@ -48,6 +48,7 @@ const acikToplam = computed(() =>
   store.quotes.filter((q) => q.status === "sent").reduce((t, q) => t + q.grand_total, 0),
 );
 const acikSayi = computed(() => store.quotes.filter((q) => q.status === "sent").length);
+const ozet = computed(() => store.quoteSummary);
 </script>
 
 <template>
@@ -78,6 +79,23 @@ const acikSayi = computed(() => store.quotes.filter((q) => q.status === "sent").
       >
         {{ d.label }}
       </button>
+    </div>
+
+    <!-- Kazanma/kaybetme özeti: fazın bitiş şartı "kayıp nedeni raporlanabiliyor".
+         Hiç kapanmış teklif yokken çizilmiyor — boş rapor gürültüdür. -->
+    <div v-if="ozet && (ozet.won_count || ozet.lost_count)" class="ozet">
+      <div class="o-sat">
+        <span class="o-kaz">{{ ozet.won_count }} kazanıldı</span>
+        <span v-for="[c, v] in ozet.won_totals" :key="c" class="o-tut">{{ para(v, c) }}</span>
+      </div>
+      <div class="o-sat">
+        <span class="o-kay">{{ ozet.lost_count }} kaybedildi</span>
+      </div>
+      <div v-if="ozet.lost_reasons.length" class="o-neden">
+        <span v-for="[neden, n] in ozet.lost_reasons.slice(0, 4)" :key="neden" class="o-n">
+          {{ neden }} <b>{{ n }}</b>
+        </span>
+      </div>
     </div>
 
     <div class="rows om-scroll">
@@ -158,6 +176,44 @@ const acikSayi = computed(() => store.quotes.filter((q) => q.status === "sent").
 }
 .eylem:hover {
   opacity: 0.9;
+}
+.ozet {
+  padding: 10px 16px 12px;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-list);
+}
+.o-sat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--c-faint);
+}
+.o-kaz {
+  color: var(--badge-tamamlandi-c);
+  font-weight: 560;
+}
+.o-kay {
+  color: var(--badge-eksik-c);
+  font-weight: 560;
+}
+.o-tut {
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text);
+}
+/* Kayıp nedenleri: hangi sebebin kaç kez tekrarladığı tek bakışta görünsün. */
+.o-neden {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+.o-n {
+  font-size: 11px;
+  color: var(--c-mid);
+  background: var(--c-chip);
+  border-radius: 20px;
+  padding: 1px 8px;
 }
 .rows {
   flex: 1;

@@ -14,6 +14,7 @@ import { api } from "../../api";
 import { useStore } from "../../store";
 import type { CatalogMatch, QuoteItem } from "../../types";
 import Icon from "../Icon.vue";
+import QuoteDocModal from "./QuoteDocModal.vue";
 
 const store = useStore();
 const q = computed(() => store.quote);
@@ -105,9 +106,47 @@ function satirKaydet(it: QuoteItem, alan: Partial<QuoteItem>) {
 const bicim = (v: number) =>
   new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 
+const belgeAcik = ref(false);
 const kapatmaNedeni = ref("");
+
+/**
+ * Gönderim akışı: önce durum yazılıyor, sonra **takip tarihi öneriliyor** (Faz C bağı).
+ *
+ * ⚠️ Tarih sessizce atanmıyor — kişinin mevcut randevusu ezilebilirdi. Kullanıcı onaylarsa
+ * kişinin sonraki adımı yazılıyor ve madde Bugün kuyruğunun **Müşteri** kovasında çıkıyor.
+ * Böylece ikinci bir hatırlatma sistemi kurulmuyor; tek yer Faz C'nin kendisi.
+ */
+async function gonderildi() {
+  const v = q.value;
+  if (!v) return;
+  await store.setQuoteStatus("sent");
+  if (!v.contact_id) return;
+
+  const gun = 7;
+  const t = new Date();
+  t.setDate(t.getDate() + gun);
+  const tarih = t.toISOString().slice(0, 10);
+  const kisi = store.contacts.find((c) => c.id === v.contact_id);
+  if (kisi?.next_step_at) {
+    // Zaten bir sözü var: üstüne yazmıyoruz, yalnızca hatırlatıyoruz.
+    store.toast(`Gönderildi. ${kisi.name} için zaten ${kisi.next_step_at.slice(0, 10)} tarihli bir adım var.`, "ok");
+    return;
+  }
+  takipOnerisi.value = { contactId: v.contact_id, tarih, ad: kisi?.name ?? "" };
+}
+
+const takipOnerisi = ref<{ contactId: number; tarih: string; ad: string } | null>(null);
+
+async function takipKur() {
+  const t = takipOnerisi.value;
+  const v = q.value;
+  if (!t || !v) return;
+  await store.addContactEvent(t.contactId, "note", `${v.no} takibi`, t.tarih, `${v.no} teklifini hatırlat`);
+  takipOnerisi.value = null;
+}
 const DURUM_EYLEM: Record<string, { to: string; label: string; neden?: boolean }[]> = {
-  draft: [{ to: "sent", label: "Gönderildi olarak işaretle" }],
+  // ⚠️ "draft → sent" özel bir akış (takip önerisi) — aşağıdaki genel düğmede değil.
+  draft: [],
   sent: [
     { to: "won", label: "Kazanıldı" },
     { to: "lost", label: "Kaybedildi", neden: true },
@@ -130,6 +169,12 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
         </div>
       </div>
       <div class="head-btns">
+        <button class="ghost" @click="belgeAcik = true">
+          <Icon name="eye" :size="14" :stroke-width="2" /> Belge
+        </button>
+        <button v-if="q.status === 'draft'" class="ghost" @click="gonderildi">
+          Gönderildi olarak işaretle
+        </button>
         <button
           v-for="e in eylemler"
           :key="e.to"
@@ -140,6 +185,17 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
         </button>
         <button class="primary" @click="kaydet">Kaydet</button>
       </div>
+    </div>
+
+    <!-- Takip önerisi: kabul edilirse kişinin sonraki adımı yazılıyor, madde Bugün'e düşüyor. -->
+    <div v-if="takipOnerisi" class="takip">
+      <Icon name="calendarClock" :size="14" :stroke-width="2" />
+      <span>
+        <b>{{ takipOnerisi.ad }}</b> için {{ takipOnerisi.tarih }} tarihine takip koyulsun mu?
+        O gün Bugün listenizde çıkar.
+      </span>
+      <button class="t-evet" @click="takipKur">Koy</button>
+      <button class="t-hayir" @click="takipOnerisi = null">Gerek yok</button>
     </div>
 
     <!-- Kaybetme nedeni: raporlanabilmesi fazın bitiş şartı, o yüzden kapatmadan önce isteniyor. -->
@@ -307,6 +363,8 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
     <div class="alt">
       <button class="ghost sil-teklif" @click="store.deleteQuote(q.id)">Teklifi sil</button>
     </div>
+
+    <QuoteDocModal :open="belgeAcik" :quote-id="q.id" @close="belgeAcik = false" />
   </section>
 
   <section v-else class="bos-sec">
@@ -364,6 +422,39 @@ h2 {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+.takip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent-tint);
+  font-size: 12.5px;
+  color: var(--c-text);
+}
+.takip span {
+  flex: 1;
+}
+.t-evet,
+.t-hayir {
+  flex: none;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 560;
+  cursor: pointer;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.t-hayir {
+  background: transparent;
+  border-color: var(--c-border);
+  color: var(--c-mid);
 }
 .neden {
   width: 100%;

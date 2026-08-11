@@ -36,6 +36,8 @@ import type {
   ImportSummary,
   SilenceState,
   Quote,
+  QuoteDoc,
+  QuoteSummary,
 } from "./types";
 
 export const api = {
@@ -295,8 +297,15 @@ export const api = {
   setQuoteStatus: (id: number, status: string, reason: string) =>
     invoke<void>("set_quote_status", { id, status, reason }),
   snapshotQuote: (id: number) => invoke<number>("snapshot_quote", { id }),
+  /** 🔴 Maliyet İÇERMEZ: arka uçtaki dönüşüm kayıplı (bkz. quotes.rs `to_out`). */
+  renderQuote: (id: number) => invoke<QuoteDoc>("render_quote", { id }),
+  quoteSummary: () => invoke<QuoteSummary>("quote_summary"),
+  quotesOfContact: (contactId: number) =>
+    invoke<Quote[]>("quotes_of_contact", { contactId }),
   getQuoteDefaults: () =>
-    invoke<{ tax_rate: number; valid_days: number }>("get_quote_defaults"),
-  setQuoteDefaults: (taxRate: number, validDays: number) =>
-    invoke<void>("set_quote_defaults", { taxRate, validDays }),
+    invoke<{ tax_rate: number; valid_days: number; seller: string; footer: string }>(
+      "get_quote_defaults",
+    ),
+  setQuoteDefaults: (taxRate: number, validDays: number, seller: string, footer: string) =>
+    invoke<void>("set_quote_defaults", { taxRate, validDays, seller, footer }),
 };

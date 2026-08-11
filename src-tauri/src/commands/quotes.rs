@@ -17,6 +17,7 @@
 
 use super::*;
 use seo_core::quote::{self, Currency, Line, Margin, TaxRow, Totals};
+use seo_core::quote_html::{self, OutLine, QuoteOut};
 
 #[derive(Serialize, Clone)]
 pub struct QuoteItem {
@@ -487,6 +488,152 @@ pub fn snapshot_quote(state: State<'_, AppState>, id: i64) -> Result<i64, String
     Ok(sirada)
 }
 
+/// Belge çıktısı: mail'e yapıştırmak için iki biçim birden.
+#[derive(Serialize)]
+pub struct QuoteDoc {
+    pub html: String,
+    pub text: String,
+}
+
+/// Tarihi `YYYY-AA-GG` → `GG.AA.YYYY` çevirir; boşsa boş döner.
+fn gun_ay_yil(s: &str) -> String {
+    let p: Vec<&str> = s.get(..10).unwrap_or("").split('-').collect();
+    if p.len() == 3 {
+        format!("{}.{}.{}", p[2], p[1], p[0])
+    } else {
+        String::new()
+    }
+}
+
+/// 🔴 **Kayıplı dönüşüm — fazın en kritik yeri.**
+///
+/// `Quote` maliyeti ve marjı taşıyor (ekran gösteriyor); `QuoteOut` **taşımıyor**. Belge
+/// üreten kod yalnızca `QuoteOut` alıyor, yani maliyeti görmesi mümkün değil. Sızıntı bir
+/// dikkat meselesi değil, tip meselesi — bir gün maliyet belgeye girecekse önce bu yapının
+/// değişmesi gerekir ve karar görünür olur.
+fn to_out(q: &Quote, seller: String, footer: String) -> QuoteOut {
+    QuoteOut {
+        no: q.no.clone(),
+        date: gun_ay_yil(&q.created_at),
+        valid_until: q.valid_until.as_deref().map(gun_ay_yil).unwrap_or_default(),
+        currency: q.currency.clone(),
+        seller,
+        buyer: q.contact_name.clone(),
+        // Kur teklifin üstünde yazılı: müşteri neye göre hesaplandığını görüyor, siz de
+        // altı ay sonra baktığınızda hatırlıyorsunuz.
+        fx_note: match (q.fx_rate, q.fx_date.as_deref()) {
+            (Some(k), Some(t)) => {
+                format!("1 USD = {} TL · {}", quote_html::tr_num(k), gun_ay_yil(t))
+            }
+            (Some(k), None) => format!("1 USD = {} TL", quote_html::tr_num(k)),
+            _ => String::new(),
+        },
+        lines: q
+            .items
+            .iter()
+            .map(|i| OutLine {
+                name: i.name.clone(),
+                qty: i.qty,
+                unit_price: i.unit_price,
+                tax_rate: i.tax_rate,
+                net: i.net,
+            })
+            .collect(),
+        subtotal: q.subtotal,
+        taxes: q.taxes.iter().map(|t| (t.rate, t.base, t.amount)).collect(),
+        grand_total: q.grand_total,
+        note: q.note.clone(),
+        footer,
+    }
+}
+
+/// Müşteriye giden belgeyi üretir (HTML + düz metin).
+#[tauri::command]
+pub fn render_quote(state: State<'_, AppState>, id: i64) -> Result<QuoteDoc, String> {
+    let conn = state.conn.lock().unwrap();
+    let q = read_quote(&conn, id)?;
+    let seller = db::get_setting(&conn, "quote_seller")?.unwrap_or_default();
+    let footer = db::get_setting(&conn, "quote_footer")?.unwrap_or_default();
+    let out = to_out(&q, seller, footer);
+    Ok(QuoteDoc { html: quote_html::render(&out), text: quote_html::render_text(&out) })
+}
+
+/// Teklif özeti — Teklifler ekranının üst şeridi ve kayıp nedenleri raporu.
+///
+/// Yol haritasının bitiş şartı: *"kayıp nedeni raporlanabiliyor"*.
+#[derive(Serialize)]
+pub struct QuoteSummary {
+    pub open_count: i64,
+    pub won_count: i64,
+    pub lost_count: i64,
+    /// Kazanılan tekliflerin toplamı, para birimi başına.
+    pub won_totals: Vec<(String, f64)>,
+    /// (neden, adet) — en çok görülen önce. Boş neden "belirtilmedi" olarak geliyor.
+    pub lost_reasons: Vec<(String, i64)>,
+}
+
+#[tauri::command]
+pub fn quote_summary(state: State<'_, AppState>) -> Result<QuoteSummary, String> {
+    let conn = state.conn.lock().unwrap();
+    let say = |durum: &str| -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM quotes WHERE status=?1", params![durum], |r| r.get(0))
+            .unwrap_or(0)
+    };
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT q.currency, SUM(i.qty * i.unit_price * (1 + i.tax_rate/100.0))
+             FROM quotes q JOIN quote_items i ON i.quote_id = q.id
+             WHERE q.status='won' GROUP BY q.currency",
+        )
+        .map_err(|e| format!("Özet okunamadı: {e}"))?;
+    let won_totals: Vec<(String, f64)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get::<_, f64>(1)?)))
+        .map_err(|e| format!("Özet okunamadı: {e}"))?
+        .filter_map(Result::ok)
+        .map(|(c, v)| (c, quote::round2(v)))
+        .collect();
+    drop(stmt);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT CASE WHEN TRIM(close_reason)='' THEN 'belirtilmedi' ELSE TRIM(close_reason) END,
+                    COUNT(*)
+             FROM quotes WHERE status='lost' GROUP BY 1 ORDER BY 2 DESC, 1",
+        )
+        .map_err(|e| format!("Özet okunamadı: {e}"))?;
+    let lost_reasons: Vec<(String, i64)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| format!("Özet okunamadı: {e}"))?
+        .filter_map(Result::ok)
+        .collect();
+    drop(stmt);
+
+    Ok(QuoteSummary {
+        open_count: say("sent"),
+        won_count: say("won"),
+        lost_count: say("lost"),
+        won_totals,
+        lost_reasons,
+    })
+}
+
+/// Bir kişinin teklifleri — kişi kartında listeleniyor.
+#[tauri::command]
+pub fn quotes_of_contact(state: State<'_, AppState>, contact_id: i64) -> Result<Vec<Quote>, String> {
+    let conn = state.conn.lock().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT id FROM quotes WHERE contact_id = ?1 ORDER BY created_at DESC")
+        .map_err(|e| format!("Teklifler okunamadı: {e}"))?;
+    let ids: Vec<i64> = stmt
+        .query_map(params![contact_id], |r| r.get(0))
+        .map_err(|e| format!("Teklifler okunamadı: {e}"))?
+        .filter_map(Result::ok)
+        .collect();
+    drop(stmt);
+    Ok(ids.into_iter().filter_map(|id| read_quote(&conn, id).ok()).collect())
+}
+
 /// Teklif varsayılanları — ekranda okunup yazılıyor.
 #[derive(Serialize)]
 pub struct QuoteDefaults {
@@ -495,6 +642,10 @@ pub struct QuoteDefaults {
     pub tax_rate: i64,
     /// Yeni teklifin kaç gün geçerli sayılacağı.
     pub valid_days: i64,
+    /// Belgenin başındaki satıcı adı. ⚠️ Kodda sabit DEĞİL: uygulama kişiselleştirilmemiş.
+    pub seller: String,
+    /// Belgenin altındaki sabit not (ödeme koşulu, teslim süresi…).
+    pub footer: String,
 }
 
 #[tauri::command]
@@ -503,6 +654,8 @@ pub fn get_quote_defaults(state: State<'_, AppState>) -> Result<QuoteDefaults, S
     Ok(QuoteDefaults {
         tax_rate: super::setting_i64(&conn, "quote_tax_rate", 20),
         valid_days: super::setting_i64(&conn, "quote_valid_days", 15),
+        seller: db::get_setting(&conn, "quote_seller")?.unwrap_or_default(),
+        footer: db::get_setting(&conn, "quote_footer")?.unwrap_or_default(),
     })
 }
 
@@ -511,10 +664,14 @@ pub fn set_quote_defaults(
     state: State<'_, AppState>,
     tax_rate: i64,
     valid_days: i64,
+    seller: String,
+    footer: String,
 ) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
     db::set_setting(&conn, "quote_tax_rate", &tax_rate.clamp(0, 100).to_string())?;
     db::set_setting(&conn, "quote_valid_days", &valid_days.clamp(1, 365).to_string())?;
+    db::set_setting(&conn, "quote_seller", seller.trim())?;
+    db::set_setting(&conn, "quote_footer", footer.trim())?;
     Ok(())
 }
 

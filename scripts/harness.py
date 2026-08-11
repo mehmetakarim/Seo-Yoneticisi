@@ -313,6 +313,50 @@ def main():
          "grand_total": 1440.0, "margin": None, "version_count": 0},
     ]
 
+    # Teklif belgesi — modalın DÜZENİNİ doğrulamak için sabit bir örnek.
+    #
+    # ⚠️ Belgenin DOĞRULUĞU burada sınanmıyor: onu `quote_html`in Rust testleri tutuyor
+    # (maliyet sızıntısı, HTML kaçışı, Türkçe sayı biçimi, iki KDV oranı). Buradaki örnek
+    # yalnızca "önizleme, kopyala ve yazdır düğmeleri doğru çalışıyor mu" sorusu için.
+    _stil = "font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1d1d1f;font-size:13px;"
+    QUOTE_DOC = {
+        "html": (
+            f'<div style="{_stil}max-width:720px;">'
+            '<div style="font-size:17px;font-weight:640;">Kurumsal BT</div>'
+            '<div style="color:#6e6e73;font-size:12px;margin-top:2px;">Teklif T-2026-001</div>'
+            '<div style="margin:14px 0;"><span style="color:#6e6e73;font-size:12px;">Sayın</span>'
+            '<div style="font-weight:600;">Ahmet Yılmaz · Kurumsal BT</div></div>'
+            '<table style="width:100%;border-collapse:collapse;"><thead><tr>'
+            '<th style="border-bottom:1px solid #e5e5e7;padding:6px 8px;font-size:11px;color:#6e6e73;">Kalem</th>'
+            '<th style="text-align:right;border-bottom:1px solid #e5e5e7;padding:6px 8px;font-size:11px;color:#6e6e73;">Adet</th>'
+            '<th style="text-align:right;border-bottom:1px solid #e5e5e7;padding:6px 8px;font-size:11px;color:#6e6e73;">Birim</th>'
+            '<th style="text-align:right;border-bottom:1px solid #e5e5e7;padding:6px 8px;font-size:11px;color:#6e6e73;">KDV</th>'
+            '<th style="text-align:right;border-bottom:1px solid #e5e5e7;padding:6px 8px;font-size:11px;color:#6e6e73;">Tutar</th>'
+            "</tr></thead><tbody>"
+            '<tr><td style="border-bottom:1px solid #e5e5e7;padding:7px 8px;">Lenovo ThinkCentre Neo 50q G5</td>'
+            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">2</td>'
+            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">949,00</td>'
+            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">%20</td>'
+            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;font-weight:600;">1.898,00</td></tr>'
+            '<tr><td style="border-bottom:1px solid #e5e5e7;padding:7px 8px;">Bambu Lab P2S Combo 3D Yazıcı</td>'
+            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">1</td>'
+            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">749,00</td>'
+            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">%20</td>'
+            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;font-weight:600;">749,00</td></tr>'
+            "</tbody></table>"
+            '<table style="margin-left:auto;margin-top:12px;font-size:12.5px;">'
+            '<tr><td style="padding:3px 12px 3px 0;color:#6e6e73;">Ara toplam</td>'
+            '<td style="text-align:right;">2.647,00 USD</td></tr>'
+            '<tr><td style="padding:3px 12px 3px 0;color:#6e6e73;">KDV %20 (2.647,00 üzerinden)</td>'
+            '<td style="text-align:right;">529,40</td></tr>'
+            '<tr><td style="padding:3px 12px 3px 0;color:#6e6e73;">Genel toplam</td>'
+            '<td style="text-align:right;font-weight:660;font-size:14px;">3.176,40 USD</td></tr></table>'
+            '<div style="margin-top:12px;font-size:12px;">Fiyatlarımız 15 gün geçerlidir. '
+            "Teslim: stoktan 2 iş günü.</div></div>"
+        ),
+        "text": "Kurumsal BT\nTeklif T-2026-001 · 10.08.2026\n\nGenel toplam: 3.176,40 USD\n",
+    }
+
     # Canonical hedefi araması: gerçek feed ürünleri üzerinde, terimle süzülerek.
     live_json = json.dumps(live, ensure_ascii=False)
 
@@ -465,6 +509,7 @@ def main():
         f"    const CP = {json.dumps(CONTACT_PRODUCTS, ensure_ascii=False)};\n"
         f"    const CSVP = {json.dumps(CSV_PREVIEW, ensure_ascii=False)};\n"
         f"    const QT = {json.dumps(QUOTES, ensure_ascii=False)};\n"
+        f"    const QDOC = {json.dumps(QUOTE_DOC, ensure_ascii=False)};\n"
         "    if (new URLSearchParams(location.search).has('empty')\n"
         "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
         # `?setup=1` → taze kurulum benzetimi. Sihirbaz kullanıcının GERÇEK veritabanına
@@ -566,7 +611,20 @@ def main():
         "    if (cmd === 'get_contact_events')\n"
         "      return Promise.resolve(CE[args.contactId] || []);\n"
         "    if (cmd === 'save_contact') return Promise.resolve(args.id || 9);\n"
-        "    if (cmd === 'get_quote_defaults')\n      return Promise.resolve({ tax_rate: 20, valid_days: 15 });\n    if (cmd === 'set_quote_defaults') return Promise.resolve(null);\n    if (cmd === 'list_quotes') return Promise.resolve(\n"
+        "    if (cmd === 'get_quote_defaults') return Promise.resolve(\n"
+        "      { tax_rate: 20, valid_days: 15, seller: 'Kurumsal BT',\n"
+        "        footer: 'Fiyatlarımız 15 gün geçerlidir. Teslim: stoktan 2 iş günü.' });\n"
+        "    if (cmd === 'set_quote_defaults') return Promise.resolve(null);\n"
+        # Kazanma/kaybetme özeti — kayıp nedenleri raporlanabilsin (fazın bitiş şartı).
+        "    if (cmd === 'quote_summary') return Promise.resolve({\n"
+        "      open_count: 1, won_count: 4, lost_count: 3,\n"
+        "      won_totals: [['USD', 18450.0]],\n"
+        "      lost_reasons: [['fiyat', 2], ['termin', 1]] });\n"
+        "    if (cmd === 'quotes_of_contact') return Promise.resolve(QT.slice(0, 2));\n"
+        # ⚠️ Belge stub'ı GERÇEK üretici tarafından üretildi (aşağıda), elle yazılmadı:
+        # maliyet sızıntısı testi ancak gerçek çıktı üzerinde anlamlı.
+        "    if (cmd === 'render_quote') return Promise.resolve(QDOC);\n"
+        "    if (cmd === 'list_quotes') return Promise.resolve(\n"
         "      args.status ? QT.filter(q => q.status === args.status) : QT);\n"
         "    if (cmd === 'get_quote') return Promise.resolve(QT.find(q => q.id === args.id) || QT[0]);\n"
         "    if (cmd === 'create_quote') return Promise.resolve(1);\n"
