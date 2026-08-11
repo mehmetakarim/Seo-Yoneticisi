@@ -313,49 +313,14 @@ def main():
          "grand_total": 1440.0, "margin": None, "version_count": 0},
     ]
 
-    # Teklif belgesi — modalın DÜZENİNİ doğrulamak için sabit bir örnek.
+    # Teklif belgesi.
     #
-    # ⚠️ Belgenin DOĞRULUĞU burada sınanmıyor: onu `quote_html`in Rust testleri tutuyor
-    # (maliyet sızıntısı, HTML kaçışı, Türkçe sayı biçimi, iki KDV oranı). Buradaki örnek
-    # yalnızca "önizleme, kopyala ve yazdır düğmeleri doğru çalışıyor mu" sorusu için.
-    _stil = "font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1d1d1f;font-size:13px;"
-    QUOTE_DOC = {
-        "html": (
-            f'<div style="{_stil}max-width:720px;">'
-            '<div style="font-size:17px;font-weight:640;">Kurumsal BT</div>'
-            '<div style="color:#6e6e73;font-size:12px;margin-top:2px;">Teklif T-2026-001</div>'
-            '<div style="margin:14px 0;"><span style="color:#6e6e73;font-size:12px;">Sayın</span>'
-            '<div style="font-weight:600;">Ahmet Yılmaz · Kurumsal BT</div></div>'
-            '<table style="width:100%;border-collapse:collapse;"><thead><tr>'
-            '<th style="border-bottom:1px solid #e5e5e7;padding:6px 8px;font-size:11px;color:#6e6e73;">Kalem</th>'
-            '<th style="text-align:right;border-bottom:1px solid #e5e5e7;padding:6px 8px;font-size:11px;color:#6e6e73;">Adet</th>'
-            '<th style="text-align:right;border-bottom:1px solid #e5e5e7;padding:6px 8px;font-size:11px;color:#6e6e73;">Birim</th>'
-            '<th style="text-align:right;border-bottom:1px solid #e5e5e7;padding:6px 8px;font-size:11px;color:#6e6e73;">KDV</th>'
-            '<th style="text-align:right;border-bottom:1px solid #e5e5e7;padding:6px 8px;font-size:11px;color:#6e6e73;">Tutar</th>'
-            "</tr></thead><tbody>"
-            '<tr><td style="border-bottom:1px solid #e5e5e7;padding:7px 8px;">Lenovo ThinkCentre Neo 50q G5</td>'
-            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">2</td>'
-            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">949,00</td>'
-            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">%20</td>'
-            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;font-weight:600;">1.898,00</td></tr>'
-            '<tr><td style="border-bottom:1px solid #e5e5e7;padding:7px 8px;">Bambu Lab P2S Combo 3D Yazıcı</td>'
-            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">1</td>'
-            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">749,00</td>'
-            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;">%20</td>'
-            '<td style="text-align:right;border-bottom:1px solid #e5e5e7;padding:7px 8px;font-weight:600;">749,00</td></tr>'
-            "</tbody></table>"
-            '<table style="margin-left:auto;margin-top:12px;font-size:12.5px;">'
-            '<tr><td style="padding:3px 12px 3px 0;color:#6e6e73;">Ara toplam</td>'
-            '<td style="text-align:right;">2.647,00 USD</td></tr>'
-            '<tr><td style="padding:3px 12px 3px 0;color:#6e6e73;">KDV %20 (2.647,00 üzerinden)</td>'
-            '<td style="text-align:right;">529,40</td></tr>'
-            '<tr><td style="padding:3px 12px 3px 0;color:#6e6e73;">Genel toplam</td>'
-            '<td style="text-align:right;font-weight:660;font-size:14px;">3.176,40 USD</td></tr></table>'
-            '<div style="margin-top:12px;font-size:12px;">Fiyatlarımız 15 gün geçerlidir. '
-            "Teslim: stoktan 2 iş günü.</div></div>"
-        ),
-        "text": "Kurumsal BT\nTeklif T-2026-001 · 10.08.2026\n\nGenel toplam: 3.176,40 USD\n",
-    }
+    # 🔧 **Elle yazılmadı**: gerçek üreticiden alındı —
+    # `cargo test -p seo-core belge_ornegi_yaz -- --ignored --nocapture`
+    # Elle yazılmış bir örnek zamanla gerçek çıktıdan sapardı (bu projede üç kez ölçüldü).
+    # Belgenin DOĞRULUĞUNU `quote_html`in Rust testleri tutuyor; buradaki kopya yalnızca
+    # modalın düzeni, kopyalama ve yazdırma düğmeleri için.
+    QUOTE_DOC = {"html": "<div style=\"font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1d1d1f;font-size:12.5px;line-height:1.55;max-width:560px;margin:0;padding:0;\"><table style=\"width:100%;border-collapse:collapse;\"><tr><td style=\"vertical-align:top;padding:0;\"><div style=\"font-size:15px;font-weight:650;letter-spacing:-0.01em;\">Kurumsal BT</div><div style=\"color:#86868b;font-size:11.5px;margin-top:1px;\">Teklif T-2026-001</div></td><td style=\"vertical-align:top;padding:0;text-align:right;color:#86868b;font-size:11.5px;\"><div>10.08.2026</div><div>Geçerlilik 25.08.2026</div></td></tr></table><div style=\"margin-top:18px;\"><span style=\"color:#86868b;font-size:11.5px;\">Sayın</span><div style=\"font-weight:600;\">Ahmet Yılmaz · Anadolu Yapı</div></div><table style=\"width:100%;border-collapse:collapse;margin-top:16px;\"><thead><tr><th style=\"text-align:left;padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#86868b;\">Kalem</th><th style=\"text-align:right;padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#86868b;padding-left:10px;\">Adet</th><th style=\"text-align:right;padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#86868b;padding-left:10px;\">Birim</th><th style=\"text-align:right;padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#86868b;padding-left:10px;\">KDV</th><th style=\"text-align:right;padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#86868b;padding-left:10px;\">Tutar</th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #f0f0f2;padding:8px 0;\">Bambu Lab P2S Combo</td><td style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">1</td><td style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">749,00</td><td style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">%20</td><td style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;font-weight:600;\">749,00</td></tr><tr><td style=\"border-bottom:1px solid #f0f0f2;padding:8px 0;\">Lenovo ThinkCentre Neo 50q G5</td><td style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">2</td><td style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">949,00</td><td style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">%20</td><td style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;font-weight:600;\">1.898,00</td></tr></tbody></table><table style=\"border-collapse:collapse;margin:14px 0 0 auto;font-size:12px;\"><tr><td style=\"padding:3px 18px 3px 0;color:#86868b;\">Ara toplam</td><td style=\"text-align:right;font-variant-numeric:tabular-nums;padding:3px 0;\">2.647,00 USD</td></tr><tr><td style=\"padding:3px 18px 3px 0;color:#86868b;\">KDV %20 · 2.647,00</td><td style=\"text-align:right;font-variant-numeric:tabular-nums;padding:3px 0;\">529,40</td></tr><tr><td style=\"padding:3px 18px 3px 0;border-top:1px solid #d2d2d7;padding-top:8px;\">Genel toplam</td><td style=\"text-align:right;font-variant-numeric:tabular-nums;padding:3px 0;border-top:1px solid #d2d2d7;padding-top:8px;font-weight:660;font-size:14px;\">3.176,40 USD</td></tr></table><div style=\"margin-top:10px;white-space:pre-wrap;font-size:11.5px;color:#86868b;\">Fiyatlarımız 15 gün geçerlidir. Teslim: stoktan 2 iş günü.</div></div>", "text": "Kurumsal BT\nTeklif T-2026-001 · 10.08.2026\nGeçerlilik: 25.08.2026\nSayın Ahmet Yılmaz · Anadolu Yapı\n\nBambu Lab P2S Combo — 1 x 749,00 (KDV %20) = 749,00 USD\nLenovo ThinkCentre Neo 50q G5 — 2 x 949,00 (KDV %20) = 1.898,00 USD\n\nAra toplam: 2.647,00 USD\nKDV %20 (2.647,00 üzerinden): 529,40\nGenel toplam: 3.176,40 USD\n\nFiyatlarımız 15 gün geçerlidir. Teslim: stoktan 2 iş günü.\n"}
 
     # Canonical hedefi araması: gerçek feed ürünleri üzerinde, terimle süzülerek.
     live_json = json.dumps(live, ensure_ascii=False)

@@ -100,63 +100,85 @@ fn tr_qty(v: f64) -> String {
     }
 }
 
-/// Belgeyi üretir. Stil **satır içi**: mail istemcileri `<style>` bloğunu sıklıkla atıyor.
+/// Belgeyi üretir.
+///
+/// ## Neden bu biçim — üç kısıt birden
+///
+/// 1. **Stil satır içi.** Mail istemcileri `<style>` bloğunu sıklıkla atıyor.
+/// 2. **Flexbox YOK, düzen tablolarla.** Outlook flex'i yok sayıyor ve başlık üst üste
+///    biner. Saha geri bildirimi (2026-08-11) tabloların mailde **çok geniş** düştüğünü
+///    gösterdi; genişlik 720 → **560 px** ve tablo `width:100%` yerine sabit genişliğin
+///    içinde duruyor.
+/// 3. **Uygulamanın dili.** Ağır kutu çizgileri yerine saç teli ayırıcılar, sayılar
+///    `tabular-nums`, ikincil metin soluk. *"Boşluk da bir özelliktir"* — belge bir fatura
+///    taklidi değil, sakin bir mektup.
 pub fn render(q: &QuoteOut) -> String {
     let mut h = String::with_capacity(4096);
-    let cizgi = "border-bottom:1px solid #e5e5e7;";
+    // Tek yerde tutulan ölçüler; belge boyunca aynı ritim.
+    let govde = "font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,\
+                 sans-serif;color:#1d1d1f;font-size:12.5px;line-height:1.55;";
+    let soluk = "color:#86868b;";
+    let tel = "border-bottom:1px solid #f0f0f2;";
     let sag = "text-align:right;";
+    let sayi = "font-variant-numeric:tabular-nums;";
 
-    h.push_str(
-        "<div style=\"font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;\
-         color:#1d1d1f;font-size:13px;line-height:1.5;max-width:720px;\">",
-    );
+    h.push_str(&format!(
+        "<div style=\"{govde}max-width:560px;margin:0;padding:0;\">"
+    ));
 
-    // Başlık
-    h.push_str("<div style=\"display:flex;justify-content:space-between;align-items:flex-start;\
-                margin-bottom:18px;\"><div>");
+    // --- Başlık: iki hücreli tablo (flex Outlook'ta çalışmıyor) ---
+    h.push_str("<table style=\"width:100%;border-collapse:collapse;\"><tr>");
+    h.push_str("<td style=\"vertical-align:top;padding:0;\">");
     if !q.seller.trim().is_empty() {
         h.push_str(&format!(
-            "<div style=\"font-size:17px;font-weight:640;\">{}</div>",
+            "<div style=\"font-size:15px;font-weight:650;letter-spacing:-0.01em;\">{}</div>",
             esc(&q.seller)
         ));
     }
     h.push_str(&format!(
-        "<div style=\"color:#6e6e73;font-size:12px;margin-top:2px;\">Teklif {}</div>",
+        "<div style=\"{soluk}font-size:11.5px;margin-top:1px;\">Teklif {}</div>",
         esc(&q.no)
     ));
-    h.push_str("</div><div style=\"text-align:right;color:#6e6e73;font-size:12px;\">");
-    h.push_str(&format!("<div>Tarih: {}</div>", esc(&q.date)));
+    h.push_str("</td>");
+    h.push_str(&format!(
+        "<td style=\"vertical-align:top;padding:0;{sag}{soluk}font-size:11.5px;\">"
+    ));
+    h.push_str(&format!("<div>{}</div>", esc(&q.date)));
     if !q.valid_until.trim().is_empty() {
-        h.push_str(&format!("<div>Geçerlilik: {}</div>", esc(&q.valid_until)));
+        h.push_str(&format!("<div>Geçerlilik {}</div>", esc(&q.valid_until)));
     }
-    h.push_str("</div></div>");
+    h.push_str("</td></tr></table>");
 
     if !q.buyer.trim().is_empty() {
         h.push_str(&format!(
-            "<div style=\"margin-bottom:14px;\"><span style=\"color:#6e6e73;font-size:12px;\">\
-             Sayın</span><div style=\"font-weight:600;\">{}</div></div>",
+            "<div style=\"margin-top:18px;\"><span style=\"{soluk}font-size:11.5px;\">Sayın</span>\
+             <div style=\"font-weight:600;\">{}</div></div>",
             esc(&q.buyer)
         ));
     }
 
-    // Satırlar
-    h.push_str("<table style=\"width:100%;border-collapse:collapse;\"><thead><tr>");
-    for (baslik, hiza) in [("Kalem", ""), ("Adet", sag), ("Birim", sag), ("KDV", sag), ("Tutar", sag)]
-    {
-        h.push_str(&format!(
-            "<th style=\"{hiza}{cizgi}padding:6px 8px;font-size:11px;color:#6e6e73;\
-             font-weight:600;\">{baslik}</th>"
-        ));
+    // --- Kalemler ---
+    h.push_str(&format!(
+        "<table style=\"width:100%;border-collapse:collapse;margin-top:16px;\"><thead><tr>"
+    ));
+    // ⚠️ Başlıklar küçük ve harf aralıklı: tablo "form" değil "liste" gibi okunsun.
+    let bas = format!(
+        "padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;\
+         letter-spacing:0.04em;text-transform:uppercase;{soluk}"
+    );
+    h.push_str(&format!("<th style=\"text-align:left;{bas}\">Kalem</th>"));
+    for baslik in ["Adet", "Birim", "KDV", "Tutar"] {
+        h.push_str(&format!("<th style=\"{sag}{bas}padding-left:10px;\">{baslik}</th>"));
     }
     h.push_str("</tr></thead><tbody>");
     for l in &q.lines {
         h.push_str(&format!(
             "<tr>\
-             <td style=\"{cizgi}padding:7px 8px;\">{}</td>\
-             <td style=\"{sag}{cizgi}padding:7px 8px;\">{}</td>\
-             <td style=\"{sag}{cizgi}padding:7px 8px;\">{}</td>\
-             <td style=\"{sag}{cizgi}padding:7px 8px;\">%{}</td>\
-             <td style=\"{sag}{cizgi}padding:7px 8px;font-weight:600;\">{}</td>\
+             <td style=\"{tel}padding:8px 0;\">{}</td>\
+             <td style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;{soluk}\">{}</td>\
+             <td style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;{soluk}\">{}</td>\
+             <td style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;{soluk}\">%{}</td>\
+             <td style=\"{sag}{tel}{sayi}padding:8px 0 8px 10px;font-weight:600;\">{}</td>\
              </tr>",
             esc(&l.name),
             tr_qty(l.qty),
@@ -167,28 +189,33 @@ pub fn render(q: &QuoteOut) -> String {
     }
     h.push_str("</tbody></table>");
 
-    // Toplamlar
-    h.push_str(
-        "<table style=\"margin-left:auto;margin-top:12px;border-collapse:collapse;\
-         font-size:12.5px;\">",
-    );
-    let satir = |ad: &str, deger: String, kalin: bool| {
+    // --- Toplamlar: sağa yaslı, yalnızca genel toplamın üstünde çizgi ---
+    h.push_str(&format!(
+        "<table style=\"border-collapse:collapse;margin:14px 0 0 auto;font-size:12px;\">"
+    ));
+    let satir = |ad: String, deger: String, genel: bool| {
+        let ust = if genel { "border-top:1px solid #d2d2d7;padding-top:8px;" } else { "" };
         format!(
-            "<tr><td style=\"padding:3px 12px 3px 0;color:#6e6e73;\">{ad}</td>\
-             <td style=\"{sag}padding:3px 0;{}\">{deger}</td></tr>",
-            if kalin { "font-weight:660;font-size:14px;color:#1d1d1f;" } else { "" }
+            "<tr><td style=\"padding:3px 18px 3px 0;{ust}{}\">{ad}</td>\
+             <td style=\"{sag}{sayi}padding:3px 0;{ust}{}\">{deger}</td></tr>",
+            if genel { "" } else { soluk },
+            if genel { "font-weight:660;font-size:14px;" } else { "" }
         )
     };
-    h.push_str(&satir("Ara toplam", format!("{} {}", tr_num(q.subtotal), esc(&q.currency)), false));
+    h.push_str(&satir(
+        "Ara toplam".into(),
+        format!("{} {}", tr_num(q.subtotal), esc(&q.currency)),
+        false,
+    ));
     for (oran, matrah, tutar) in &q.taxes {
         h.push_str(&satir(
-            &format!("KDV %{} ({} üzerinden)", tr_qty(*oran), tr_num(*matrah)),
+            format!("KDV %{} · {}", tr_qty(*oran), tr_num(*matrah)),
             tr_num(*tutar),
             false,
         ));
     }
     h.push_str(&satir(
-        "Genel toplam",
+        "Genel toplam".into(),
         format!("{} {}", tr_num(q.grand_total), esc(&q.currency)),
         true,
     ));
@@ -196,14 +223,16 @@ pub fn render(q: &QuoteOut) -> String {
 
     if !q.fx_note.trim().is_empty() {
         h.push_str(&format!(
-            "<div style=\"margin-top:10px;color:#6e6e73;font-size:11.5px;\">{}</div>",
+            "<div style=\"{sag}{soluk}font-size:11px;margin-top:6px;\">{}</div>",
             esc(&q.fx_note)
         ));
     }
-    for metin in [&q.note, &q.footer] {
+    for (i, metin) in [&q.note, &q.footer].iter().enumerate() {
         if !metin.trim().is_empty() {
+            let ust = if i == 0 { "margin-top:20px;" } else { "margin-top:10px;" };
             h.push_str(&format!(
-                "<div style=\"margin-top:12px;white-space:pre-wrap;font-size:12px;\">{}</div>",
+                "<div style=\"{ust}white-space:pre-wrap;font-size:11.5px;{}\">{}</div>",
+                if i == 1 { soluk } else { "" },
                 esc(metin.trim())
             ));
         }
@@ -377,12 +406,44 @@ mod tests {
     }
 
     /// İki KDV oranı belgede ayrı satırlarda — katalogda %20 ve %10 birlikte var.
+    ///
+    /// ⚠️ Belgedeki yazım kısa (`KDV %10 · 50,00`), düz metindeki uzun
+    /// (`KDV %10 (50,00 üzerinden)`): belge 560 px'e sığmak zorunda, düz metinde yer var.
     #[test]
     fn iki_kdv_orani_ayri_satirda() {
         let mut q = ornek();
         q.taxes = vec![(10.0, 50.0, 5.0), (20.0, 2597.0, 519.4)];
-        let html = render(&q);
-        assert!(html.contains("KDV %10 (50,00 üzerinden)"));
-        assert!(html.contains("KDV %20 (2.597,00 üzerinden)"));
+        let gorunen = gorunur_metin(&render(&q));
+        assert!(gorunen.contains("KDV %10 · 50,00"), "{gorunen}");
+        assert!(gorunen.contains("KDV %20 · 2.597,00"));
+
+        let metin = render_text(&q);
+        assert!(metin.contains("KDV %10 (50,00 üzerinden)"));
+    }
+
+    /// 🔧 Harness örneğini üretir — elle yazılmış bir örnek gerçek çıktıdan sapardı.
+    ///
+    /// `cargo test -p seo-core belge_ornegi_yaz -- --ignored --nocapture > /tmp/belge.json`
+    #[test]
+    #[ignore]
+    fn belge_ornegi_yaz() {
+        let mut q = ornek();
+        q.lines[1].name = "Lenovo ThinkCentre Neo 50q G5".into();
+        q.footer = "Fiyatlarımız 15 gün geçerlidir. Teslim: stoktan 2 iş günü.".into();
+        let cikti = serde_json::json!({ "html": render(&q), "text": render_text(&q) });
+        println!("{}", serde_json::to_string(&cikti).unwrap());
+    }
+
+    /// 🔴 Saha geri bildirimi (2026-08-11): *"mail'e yapıştırdığım tablo biraz fazla geniş."*
+    ///
+    /// Belge 560 px'e sabit ve düzen **tablolarla** kuruluyor — Outlook flexbox'ı yok sayıyor,
+    /// başlık üst üste binerdi.
+    #[test]
+    fn belge_dar_ve_mail_uyumlu() {
+        let html = render(&ornek());
+        assert!(html.contains("max-width:560px"), "belge daraltılmalı");
+        assert!(!html.contains("display:flex"), "mail istemcileri flex'i yok sayıyor");
+        // Sayılar hizalı: tabular figürler olmadan sütunlar kayıyor.
+        assert!(html.contains("font-variant-numeric:tabular-nums"));
     }
 }

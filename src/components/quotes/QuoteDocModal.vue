@@ -66,24 +66,18 @@ async function kopyala() {
 }
 
 /**
- * Yazdırma: belge ayrı bir pencerede açılıp yazdırılıyor → kullanıcı "PDF olarak kaydet"i
- * seçiyor. Uygulamanın kendi arayüzü yazdırılmıyor.
+ * Yazdırma / PDF.
+ *
+ * 🔴 **Ayrı pencere KULLANILMIYOR.** İlk sürüm `window.open` ile yeni pencere açıyordu;
+ * Tauri penceresinde açılır pencere desteği kapalı olduğu için `null` dönüyor ve kullanıcı
+ * *"Yazdırma penceresi açılamadı"* uyarısını alıyordu (saha hatası, 2026-08-11).
+ *
+ * Şimdi belge `body`ye ışınlanmış hâlde duruyor; `@media print` uygulamayı gizleyip yalnızca
+ * onu bastırıyor. Yazıcı olmasa da işletim sisteminin yazdırma penceresinden **PDF olarak
+ * kaydet** seçilebiliyor — asıl ihtiyaç buydu.
  */
 function yazdir() {
-  const w = window.open("", "_blank", "width=800,height=900");
-  if (!w) {
-    store.toast("Yazdırma penceresi açılamadı.", "error");
-    return;
-  }
-  w.document.write(
-    `<!doctype html><html lang="tr"><head><meta charset="utf-8">` +
-      `<title>Teklif</title><style>@page{margin:18mm}body{margin:0}</style></head>` +
-      `<body>${html.value}</body></html>`,
-  );
-  w.document.close();
-  w.focus();
-  // Belge yerleşsin diye bir tur bekleniyor; yoksa boş sayfa yazdırılabiliyor.
-  setTimeout(() => w.print(), 250);
+  window.print();
 }
 </script>
 
@@ -102,6 +96,12 @@ function yazdir() {
     <div v-if="yukleniyor" class="bekle">Hazırlanıyor…</div>
     <!-- Arka uçtan gelen belge; içerik kaçışı Rust tarafında yapıldı (quote_html::esc). -->
     <div v-else class="onizleme" v-html="html"></div>
+
+    <!-- Yazdırılan kopya: `body` altında duruyor ki `@media print` uygulamayı gizleyip
+         yalnızca bunu bastırabilsin. Ekranda görünmüyor (`.yazdir-kap { display:none }`). -->
+    <Teleport to="body">
+      <div v-if="props.open" class="yazdir-kap" v-html="html"></div>
+    </Teleport>
 
     <template #footer>
       <button class="ghost" @click="emit('close')">Kapat</button>
