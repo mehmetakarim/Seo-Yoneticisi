@@ -74,8 +74,10 @@ def load_live_products(conn):
     for sku, name, url in rows:
         slug = url.rstrip("/").rsplit("/", 1)[-1].lower()
         if slug:
-            out.append({"slug": slug, "id": 0, "name": name, "status": 1,
-                        "stock": 0.0, "canonical": sku})
+            # ⚠️ SKU kendi alanında. Eskiden `canonical` alanına konuyordu ve taklit,
+            # arka uçtaki aynı yanlışı taşıdığı için hatayı GİZLİYORDU (2026-08-12).
+            out.append({"slug": slug, "id": 0, "name": name, "sku": sku, "status": 1,
+                        "stock": 0.0, "canonical": ""})
     return out
 
 
@@ -473,8 +475,15 @@ def main():
         f"    const CE = {json.dumps(CONTACT_EVENTS, ensure_ascii=False)};\n"
         f"    const CP = {json.dumps(CONTACT_PRODUCTS, ensure_ascii=False)};\n"
         f"    const CSVP = {json.dumps(CSV_PREVIEW, ensure_ascii=False)};\n"
-        f"    const QT = {json.dumps(QUOTES, ensure_ascii=False)};\n"
+        # ⚠️ `window`e asılı: bu sabitler invoke gövdesinin İÇİNDE tanımlı, yani her
+        # çağrıda sıfırdan kuruluyor. Kalem ekleme gibi durumu değiştiren komutlar
+        # yazdıklarını bir sonraki çağrıda bulamıyordu (sohbet stub'ı da aynı sebeple
+        # `window.__CHATS__` kullanıyor).
+        f"    const QT = (window.__QT__ = window.__QT__ || {json.dumps(QUOTES, ensure_ascii=False)});\n"
         f"    const QDOC = {json.dumps(QUOTE_DOC, ensure_ascii=False)};\n"
+        # ⚠️ Üst kapsamda: hem `search_live_products` hem `add_quote_item_from_catalog`
+        # aynı listeyi okumalı, yoksa taklit SKU'yu doğrulayamaz.
+        f"    const LIVE = {live_json};\n"
         "    if (new URLSearchParams(location.search).has('empty')\n"
         "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
         # `?setup=1` → taze kurulum benzetimi. Sihirbaz kullanıcının GERÇEK veritabanına
@@ -597,9 +606,25 @@ def main():
         "        || cmd === 'delete_quote_item' || cmd === 'add_quote_item_manual'\n"
         "        || cmd === 'set_quote_status') return Promise.resolve(null);\n"
         # ⚠️ USD teklifte EUR ürün kur olmadan eklenemiyor — hata metni ekranda görünmeli.
-        "    if (cmd === 'add_quote_item_from_catalog') return Promise.reject(\n"
-        "      'TP-Link Switch için USD cinsinden fiyat hesaplanamadı. Ürünün para birimi EUR — "
+        # 🔴 Arka uç `SELECT … WHERE sku = ?1` yapıyor: SKU tutmazsa gürültülü hata.
+        # Taklit önceden KOŞULSUZ kur hatası döndürüyordu; slug/SKU karışıklığını
+        # doğrulayamamasının sebebi buydu (saha hatası, 2026-08-12).
+        "    if (cmd === 'add_quote_item_from_catalog') {\n"
+        "      const bilinen = LIVE.some(p => p.sku === args.sku);\n"
+        "      if (!bilinen) return Promise.reject('Ürün bulunamadı: Query returned no rows');\n"
+        "      if (args.sku === LIVE[1]?.sku) return Promise.reject(\n"
+        "        'TP-Link Switch için USD cinsinden fiyat hesaplanamadı. Ürünün para birimi EUR — "
         "USD teklifte kur girmeniz gerekiyor.');\n"
+        "      const tk = QT.find(x => x.id === args.quoteId) || QT[0];\n"
+        "      const net = 249;\n"
+        "      tk.items.push({ id: 90 + tk.items.length, sku: args.sku,\n"
+        "        name: LIVE.find(p => p.sku === args.sku).name, qty: 1, unit_price: net,\n"
+        "        tax_rate: 20, cost: 180, net,\n"
+        "        margin: { amount: 69, pct: 27.7, state: 'ok' } });\n"
+        "      tk.subtotal = Math.round((tk.subtotal + net) * 100) / 100;\n"
+        "      tk.grand_total = Math.round((tk.grand_total + net * 1.2) * 100) / 100;\n"
+        "      return Promise.resolve(90 + tk.items.length);\n"
+        "    }\n"
         "    if (cmd === 'snapshot_quote') return Promise.resolve(2);\n"
         "    if (cmd === 'list_contact_tags')\n"
         "      return Promise.resolve([...new Set(CT.flatMap(c => c.tags))]);\n"
@@ -608,7 +633,16 @@ def main():
         "    if (cmd === 'contacts_of_product')\n"
         "      return Promise.resolve([{ sku: args.sku, name: 'Ahmet Yılmaz · Kurumsal BT',\n"
         "        contact_id: 1, at: '' }]);\n"
-        "    if (cmd === 'set_contact_tags' || cmd === 'link_contact_product'\n"
+        # 🔴 Arka uç kişi-ürün bağını SESSİZCE yazıyor: yabancı anahtar yok, SKU tutmasa
+        # da satır oluşuyor ve hata çıkmıyor. Slug/SKU karışıklığı aylarca fark edilmeden
+        # durabilirdi (2026-08-12). Taklit üretimi taklit etmeye devam ediyor — ama
+        # doğrulama için konsola bağırıyor; iki adımlı kontrol bunu yakalar.
+        "    if (cmd === 'link_contact_product') {\n"
+        "      if (!LIVE.some(p => p.sku === args.sku))\n"
+        "        console.error('HARNESS: katalogda olmayan SKU ile ürün bağlandı → ' + args.sku);\n"
+        "      return Promise.resolve(null);\n"
+        "    }\n"
+        "    if (cmd === 'set_contact_tags'\n"
         "        || cmd === 'unlink_contact_product' || cmd === 'set_silence_days')\n"
         "      return Promise.resolve(null);\n"
         # Sessizlik eşiği: `?sessizlik=1` → yeterli veri birikmiş, öneri gösteriliyor.
@@ -738,11 +772,10 @@ def main():
         "    }\n"
         "    if (cmd === 'apply_canonical') return Promise.resolve(null);\n"
         "    if (cmd === 'search_live_products') {\n"
-        f"      const LIVE = {live_json};\n"
         "      const q = (args.term || '').trim().toLowerCase();\n"
         "      if (q.length < 3) return Promise.resolve([]);\n"
         "      return Promise.resolve(LIVE.filter(p =>\n"
-        "        p.name.toLowerCase().includes(q) || p.canonical.toLowerCase().includes(q)\n"
+        "        p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)\n"
         "      ).slice(0, 25));\n"
         "    }\n"
         "    if (cmd.endsWith('chat_session') || cmd.endsWith('chat_sessions')) {\n"

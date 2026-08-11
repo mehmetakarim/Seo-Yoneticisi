@@ -318,6 +318,28 @@ pub fn init(conn: &Connection) -> Result<(), String> {
 fn migrate(conn: &Connection) -> Result<(), String> {
     // Faz K sonrası: "Yapıldı" işareti hangi analize karşı verildi. ⚠️ CREATE TABLE ile
     // eklenemez — tablo v0.11.0 sonrası kurulumlarda zaten var, `IF NOT EXISTS` sütun eklemez.
+    // 🔴 Onarım (2026-08-12): `contact_products.sku` sütununa SKU yerine **slug** yazılmış
+    // satırlar. Sebep: yerel ürün araması SKU'yu `canonical` alanında saklıyordu, ekran ise
+    // `slug`ı SKU sanıyordu. Hata sessizdi — satır ekleniyor ama `products` ile eşleşmiyor,
+    // ürün detayındaki "bu ürünle ilgilenenler" hiç dolmuyordu.
+    //
+    // Slug, ürünün adresinin son parçası; eşleşen ürün varsa satır düzeltiliyor. Eşleşme
+    // yoksa DOKUNULMUYOR: veriyi silmektense bozuk bırakmak yeğdir, kullanıcı görüp karar
+    // verebilir. Idempotent — zaten doğru olan satırlara değmiyor.
+    let _ = conn.execute(
+        "UPDATE contact_products SET sku = (
+             SELECT p.sku FROM products p
+             WHERE lower(p.url) LIKE '%/' || lower(contact_products.sku)
+                OR lower(p.url) LIKE '%/' || lower(contact_products.sku) || '/'
+             LIMIT 1)
+         WHERE sku NOT IN (SELECT sku FROM products)
+           AND EXISTS (
+             SELECT 1 FROM products p
+             WHERE lower(p.url) LIKE '%/' || lower(contact_products.sku)
+                OR lower(p.url) LIKE '%/' || lower(contact_products.sku) || '/')",
+        [],
+    );
+
     // Faz T: katalog fiyatları. ⚠️ `feed_fp` parmak izine GİRMİYOR — fiyat üretimi
     // beslemiyor ve dolar günlük oynuyor (fingerprint.rs'in `quantity` gerekçesinin aynısı).
     add_column_if_missing(conn, "products", "buying_price", "REAL")?;
@@ -530,6 +552,51 @@ mod tests {
         let conn = fresh();
         set_setting(&conn, "feed_url", "   ").unwrap();
         assert!(needs_setup(&conn).unwrap());
+    }
+
+    /// Slug yazılmış kişi-ürün bağları onarılıyor mu?
+    ///
+    /// ⚠️ Bu testin varlık sebebi: hatanın kendisi **sessizdi** — satır yazılıyor, hiçbir
+    /// uyarı çıkmıyor, yalnızca ürün detayındaki liste hiç dolmuyordu. Onarım da sessiz;
+    /// sınanmazsa çalışıp çalışmadığını kimse fark etmez.
+    #[test]
+    fn slug_yazilmis_urun_baglari_onariliyor() {
+        let conn = fresh();
+        conn.execute(
+            "INSERT INTO products (sku, name, url) VALUES
+               ('ABC.123', 'Yazıcı', 'https://magaza.com/urun/hizli-yazici'),
+               ('DEF.456', 'Tarayıcı', 'https://magaza.com/urun/tarayici')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO contacts (name, created_at, updated_at)
+             VALUES ('Ali', '2026-08-12', '2026-08-12')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO contact_products (contact_id, sku, at) VALUES
+               (1, 'hizli-yazici', '2026-08-12'),
+               (1, 'DEF.456', '2026-08-12'),
+               (1, 'artik-satmadigimiz-urun', '2026-08-12')",
+            [],
+        )
+        .unwrap();
+
+        init(&conn).unwrap(); // açılışta göç yeniden koşuyor
+
+        let mut st = conn.prepare("SELECT sku FROM contact_products ORDER BY sku").unwrap();
+        let skus: Vec<String> =
+            st.query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(
+            skus,
+            vec![
+                "ABC.123".to_string(),               // slug → SKU'ya çevrildi
+                "DEF.456".to_string(),               // zaten doğruydu, dokunulmadı
+                "artik-satmadigimiz-urun".to_string(), // eşleşme yok: SİLİNMEDİ, duruyor
+            ]
+        );
     }
 }
 

@@ -312,12 +312,22 @@ pub async fn sync_ideasoft_catalog(
     })
 }
 
-/// EOL sayfanın IdeaSoft'taki karşılığı (katalog senkronu yapılmışsa).
+/// EOL sayfanın IdeaSoft'taki karşılığı (katalog senkronu yapılmışsa) **veya** yerel
+/// katalogda bulunan bir ürün (`search_live_products`).
 #[derive(Serialize)]
 pub struct CatalogMatch {
     pub slug: String,
     pub id: i64,
     pub name: String,
+    /// Ürünün SKU'su. 🔴 Yerel aramada dolu; katalog senkronu eşleşmelerinde boş.
+    ///
+    /// ⚠️ Bu alan sonradan eklendi. Yerel arama SKU'yu **`canonical` alanına** saklıyordu ve
+    /// oradan kimse okumuyordu; sonraki iki okuyucu `slug`ı SKU sanıp kullandı. Teklifte
+    /// *"Ürün bulunamadı"* hatası çıktı, CRM'de ise **sessizce yanlış kayıt** oluştu —
+    /// `contact_products.sku` sütununa slug yazıldı (saha hatası, 2026-08-12).
+    ///
+    /// **Ders: bir alanı başka amaç için ödünç almak, sonraki okuyucuya kurulmuş tuzaktır.**
+    pub sku: String,
     pub status: i64,
     pub stock: f64,
     pub canonical: String,
@@ -342,6 +352,8 @@ pub fn lookup_catalog(
                     slug: r.get(0)?,
                     id: r.get(1)?,
                     name: r.get(2)?,
+                    // Katalog senkronu SKU tutmuyor; bu yol yalnızca slug eşleştiriyor.
+                    sku: String::new(),
                     status: r.get(3)?,
                     stock: r.get(4)?,
                     canonical: r.get(5)?,
@@ -465,10 +477,13 @@ pub fn search_live_products(
                 // Feed'de IdeaSoft ürün kimliği yok; hedef için gerekmiyor (yalnızca slug yazılıyor).
                 id: 0,
                 name: r.get(1)?,
+                // 🔴 SKU artık kendi alanında. Önce `canonical`a saklanıyordu ve okuyanlar
+                // `slug`ı SKU sanıyordu (bkz. `CatalogItem::sku`).
+                sku: r.get::<_, String>(0)?,
                 // Feed'de olan ürün satıştadır; ayrıca durum sorgulamaya gerek yok.
                 status: 1,
                 stock: 0.0,
-                canonical: r.get::<_, String>(0)?,
+                canonical: String::new(),
             })
         })
         .map_err(|e| format!("Ürünler okunamadı: {e}"))?

@@ -352,6 +352,9 @@ export interface CatalogMatch {
   slug: string;
   id: number;
   name: string;
+  /** 🔴 Yerel aramada dolu, katalog senkronu eşleşmesinde boş. Ürün bağlarken **bunu**
+   *  kullanın; `slug` adresin son parçası, SKU değil (bkz. ideasoft_cmd.rs açıklaması). */
+  sku: string;
   status: number;
   stock: number;
   canonical: string;

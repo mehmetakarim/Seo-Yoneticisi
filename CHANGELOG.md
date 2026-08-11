@@ -13,6 +13,11 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.17.2
+- Düzeltme: teklifte **katalogdan ürün eklenemiyordu** — *"Ürün bulunamadı"* hatası veriyordu. Artık ekleniyor
+- Düzeltme: kişi kartında bir ürünü "ilgilendiği ürünler"e bağladığınızda bağ **yanlış kaydediliyordu**. Hata görünmüyordu ama ürün ekranındaki "bu ürünle ilgilenenler" listesi hiç dolmuyordu
+- Daha önce bu şekilde kaydedilmiş ürün bağlarınız güncellemede **kendiliğinden onarılıyor**
+
 ## v0.17.1
 - Düzeltme: **PDF olarak kaydet** çalışmıyordu — *"Not allowed to open path…"* hatası veriyordu. Belge artık düzgün açılıyor
 - Düzeltme: teklif tablosundaki sütun kayması. Pencere büyüdükçe sayılar başlıklarından uzaklaşıyordu; sütun genişlikleri sabitlendi

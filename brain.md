@@ -3,7 +3,7 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-08-10
+**Son güncelleme:** 2026-08-12
 **Aktif faz:** **v0.17.0 yayında — yol haritasının SEKİZ fazı da bitti.** Sıra:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
@@ -12,7 +12,8 @@ v0.14.1 = kuyruk uçuş süzgeci (0b1) ·
 v0.15.0 = Faz C: CRM ince dilim + kuyruk saha düzeltmeleri (0b2, 0b3) ·
 v0.16.0 = Faz T1: teklif çekirdeği (katalog fiyatları + teklif ekranı) ·
 v0.17.0 = Faz T2: teklif belgesi, takip önerisi, kazanma/kaybetme raporu ·
-**v0.17.1 = PDF açma, sütun hizası, satır geri alma**
+v0.17.1 = PDF açma, sütun hizası, satır geri alma ·
+**v0.17.2 = ödünç alınmış alan: slug/SKU karışıklığı (0b5)**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -42,7 +43,7 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **197 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+bağımlı DEĞİL, **198 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
 **39 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
@@ -1238,6 +1239,41 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    kullanıcı bunu günler sonra görüp limitler yenilendiğinde yeniden üretebilir.
    `ModelTag.vue` eylem satırında satır içi rozet (altına koymak hizayı bozuyordu);
    Gemma'da amber uyarı rengine dönüyor.
+
+0b5. ✅ **ÖDÜNÇ ALINMIŞ ALAN: SLUG/SKU KARIŞIKLIĞI (v0.17.2).** Saha hatası: teklifte
+   katalogdan ürün seçince *"Ürün bulunamadı: Query returned no rows"*.
+
+   🔴 **Kök sebep tek bir satırdı ve iki yıl önceki bir kolaylıktı.** `search_live_products`
+   canonical hedefi araması için yazılmıştı; `CatalogMatch`in **`canonical` alanına SKU'yu**
+   koyuyordu (o akışta hedef zaten SKU'ydu, ayrı alan açmaya gerek görülmemişti). Faz T ve
+   Faz C aynı aramayı yeniden kullanınca `slug`ı SKU sandı — çünkü SKU adında bir alan yoktu.
+
+   **Ders:** *bir alanı başka amaç için ödünç almak, sonraki okuyucuya kurulmuş tuzaktır.*
+   Kısa vadede bir `struct` alanı kazandırır, uzun vadede tipin anlamını yalanlar. Artık
+   `CatalogMatch.sku` kendi alanı; `canonical` boş bırakılıyor.
+
+   ⚠️ **İki çağıranın biri gürültülü, biri SESSİZ hata veriyordu** — ve tehlikeli olan ikincisi:
+   - Teklif: arka uç `WHERE sku = ?1` ile satır bulamayınca **bağırıyor**, kullanıcı 1 günde bildirdi.
+   - Kişi-ürün bağı: `contact_products`ta yabancı anahtar YOK; slug sessizce yazılıyor, hata
+     çıkmıyor, yalnızca ürün ekranındaki "bu ürünle ilgilenenler" listesi **hiç dolmuyor**.
+     Kullanıcının veritabanında böyle 1 satır bulundu (ölçüldü, tahmin edilmedi).
+
+   **Onarım göç olarak yazıldı** (`db::init`, her açılışta idempotent): slug, ürün adresinin son
+   parçasıyla eşleştirilip SKU'ya çevriliyor. Eşleşme yoksa **silinmiyor** — veriyi silmektense
+   bozuk bırakmak yeğdir, kullanıcı görüp karar verir. Kullanıcının gerçek veritabanının
+   kopyasında koşuldu: bozuk satır doğru ürüne bağlandı.
+
+   🔴 **Harness hatayı GİZLİYORDU, çünkü taklit arka ucun yanlışını taşıyordu.** Üç ayrı kusur:
+   1. Fixture SKU'yu `canonical`a koyuyordu — üretimdeki aynı ödünç alma.
+   2. `add_quote_item_from_catalog` **koşulsuz** kur hatası döndürüyordu; hangi SKU geldiğini
+      hiç bakmıyordu. Artık gerçek arka uç gibi doğruluyor.
+   3. `link_contact_product` her şeye `null` dönüyordu. Üretim sessiz olduğu için taklit de
+      sessiz kalmalı — ama doğrulanabilir olmalı: bilinmeyen SKU'da **konsola hata** yazıyor,
+      iki adımlı kontrol bunu yakalıyor. (Bekçi, hatayı bilerek yeniden vererek sınandı.)
+
+   ⚠️ Bonus kusur: harness'ta `QT` (teklif fixture'ı) `invoke` gövdesinin **içinde** tanımlıydı,
+   yani her çağrıda sıfırlanıyordu — durum değiştiren komutlar yazdıklarını bulamıyordu.
+   `window.__QT__`e asıldı (sohbet stub'ı aynı sebeple `window.__CHATS__` kullanıyor).
 
 0c. ✅ **FIRSAT ANALİZİ + SÜRÜM NOTLARI (v0.5.6).**
 

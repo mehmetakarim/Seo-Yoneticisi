@@ -118,7 +118,9 @@ function urunAra(v: string) {
 }
 
 async function katalogdanEkle(m: CatalogMatch) {
-  await store.addQuoteLine(m.slug, m.name);
+  // ⚠️ `slug` DEĞİL `sku`: slug adresin son parçası. Karıştırılınca arka uç ürünü bulamıyor
+  // ("Ürün bulunamadı: Query returned no rows" — saha hatası, 2026-08-12).
+  await store.addQuoteLine(m.sku, m.name);
   urunArama.value = "";
   urunSonuc.value = [];
 }

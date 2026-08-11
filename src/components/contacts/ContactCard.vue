@@ -160,7 +160,10 @@ function teklifAc(id: number) {
 async function urunBagla(m: CatalogMatch) {
   const c = store.contact;
   if (!c) return;
-  await store.linkContactProduct(c.id, m.slug);
+  // 🔴 `slug` DEĞİL `sku`. Önce slug yazılıyordu ve hata VERMİYORDU: satır ekleniyor ama
+  // `products` ile eşleşmiyor, ürün detayındaki "bu ürünle ilgilenenler" hiç dolmuyordu.
+  // Sessiz hata, gürültülü hatadan tehlikeli (saha hatası, 2026-08-12).
+  await store.linkContactProduct(c.id, m.sku);
   urunArama.value = "";
   urunSonuc.value = [];
 }
