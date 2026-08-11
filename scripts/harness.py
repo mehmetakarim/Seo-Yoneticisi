@@ -785,6 +785,52 @@ def main():
     out.write_text(html.replace("</body>", nav_stub + "</body>", 1))
     counts = {k: len(v) for k, v in report.items() if isinstance(v, list)}
     print(f"{out} hazır · {counts}")
+    tdz_uyar()
+
+
+def tdz_uyar():
+    """🔴 Aynı hata ÜÇ KEZ yapıldı: `watch(..., { immediate: true })` kurulum sırasında hemen
+    çalışıp, kendisinden SONRA tanımlanmış bir `ref`e yazıyor → geçici ölüm bölgesi (TDZ).
+    Üçünde de **ekran doğru çiziliyordu**, hatayı yalnızca konsol gösterdi:
+
+      · `ContactCard`  → Müşteriler ekranı bomboş açıldı (kullanıcı bildirdi)
+      · `QuoteEditor`  → arama alanı sıfırlanmıyordu
+      · `QuoteEditor`  → geri alma yedeği
+
+    ⚠️ Bu kontrolün İLK İKİ sürümü hatayı yakalayamadı ve bunu ancak **hatayı bilerek geri
+    koyup deneyince** gördüm: (1) `ref<Jenerik>()` biçimini kaçırıyordu, (2) `immediate: true`
+    ifadesini kendi doküman YORUMUNDA buluyordu. Sınanmamış bir koruma, koruma değil.
+
+    Uyarı üretir, derlemeyi durdurmaz: sezgisel bir kontrol, yanlış alarm verebilir.
+    """
+    import re
+
+    def yorumsuz(m: str) -> str:
+        """Blok ve satır yorumlarını boşlukla değiştirir — konumlar korunur."""
+        m = re.sub(r"/\*.*?\*/", lambda x: " " * len(x.group()), m, flags=re.S)
+        return re.sub(r"//[^\n]*", lambda x: " " * len(x.group()), m)
+
+    bulgular = []
+    for f in sorted(pathlib.Path("src").rglob("*.vue")):
+        metin = yorumsuz(f.read_text(encoding="utf-8"))
+        for im in re.finditer(r"immediate:\s*true", metin):
+            # İzleyicinin gövdesi: kendisinden önceki en yakın `watch(` ile `immediate` arası.
+            w = metin.rfind("watch(", 0, im.start())
+            if w < 0:
+                continue
+            govde = metin[w : im.start()]
+            for yazilan in set(re.findall(r"\b(\w+)\.value\s*=", govde)):
+                # Bu değişken izleyiciden SONRA mı tanımlanmış?
+                if re.search(
+                    rf"^const {re.escape(yazilan)} = (?:ref|reactive)[^(]*\(", metin[w:], re.M
+                ):
+                    bulgular.append(f"{f}: `{yazilan}`")
+
+    if bulgular:
+        print("\n⚠️  TDZ riski — `immediate` izleyici, kendisinden SONRA tanımlanan ref'e yazıyor:")
+        for b in sorted(set(bulgular)):
+            print(f"   · {b}")
+        print("   → ref tanımlarını `watch`tan ÖNCEYE alın (brain.md 0b4).")
 
 
 if __name__ == "__main__":

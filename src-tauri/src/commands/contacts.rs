@@ -730,6 +730,19 @@ mod tests {
         (chrono::Local::now().date_naive() + chrono::Duration::days(n)).to_string()
     }
 
+    /// N gün önceki zaman damgası — **uygulamanın yazdığı biçimde** (eksiz yerel saat).
+    ///
+    /// 🔴 Önce `to_rfc3339()` kullanılıyordu ve test gece yarısından sonra çalıştırılınca
+    /// patladı: RFC3339 saat dilimi eki taşıyor, SQLite'ın `date()`i onu UTC'ye çevirip günü
+    /// bir geri alıyor → "90 gündür" yerine "91 gündür". Uygulama `now_str()` ile eksiz yerel
+    /// zaman yazdığı için ÜRÜNDE sorun yok; hatalı olan testin kendisiydi. (Aynı ders
+    /// harness'ta da yaşanmıştı: `toISOString()` 158 dakikalık sapma üretmişti.)
+    fn gun_once(n: i64) -> String {
+        (chrono::Local::now() - chrono::Duration::days(n))
+            .format("%Y-%m-%dT%H:%M:%S")
+            .to_string()
+    }
+
     /// ⚠️ "3 hafta sonra ara" bugünün listesini kirletmemeli; geciken kişi ise gecikmesiyle
     /// birlikte gelmeli.
     #[test]
@@ -785,7 +798,7 @@ mod tests {
         let id = ekle(&conn, "Soğumuş", None);
         conn.execute(
             "UPDATE contacts SET last_contact_at = ?2 WHERE id = ?1",
-            params![id, (chrono::Local::now() - chrono::Duration::days(90)).to_rfc3339()],
+            params![id, gun_once(90)],
         )
         .unwrap();
 
@@ -805,7 +818,7 @@ mod tests {
         let id = ekle(&conn, "Sözü var", Some(&gun(20)));
         conn.execute(
             "UPDATE contacts SET last_contact_at = ?2 WHERE id = ?1",
-            params![id, (chrono::Local::now() - chrono::Duration::days(90)).to_rfc3339()],
+            params![id, gun_once(90)],
         )
         .unwrap();
 

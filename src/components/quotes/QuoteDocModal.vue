@@ -18,7 +18,6 @@
  */
 import { ref, watch } from "vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { api } from "../../api";
 import { useStore } from "../../store";
 import Icon from "../Icon.vue";
@@ -76,14 +75,16 @@ async function kopyala() {
  * 3. ✅ Belge geçici dosyaya yazılıp tarayıcıda açılıyor. Yazdırma penceresi her platformda
  *    **PDF olarak kaydet** seçeneğini veriyor — kullanıcının istediği buydu.
  *
+ * ⚠️ Dosyayı **Rust açıyor**, buradan `openPath` çağrılmıyor: opener eklentisinin JS kapsamı
+ * geçici klasördeki yolu reddediyordu (*"Not allowed to open path /var/folders/…"*).
+ *
  * ⚠️ İki adım (aç → Cmd/Ctrl+P) ama çalışması garanti. Uygulama içinde gerçek PDF üretmek
  * font gömme ve sayfa düzeni demek; yol haritasında bilinçli olarak kapsam dışı.
  */
 async function pdfAc() {
   if (!props.quoteId) return;
   try {
-    const yol = await api.exportQuoteHtml(props.quoteId);
-    await openPath(yol);
+    await api.exportQuoteHtml(props.quoteId);
     store.toast("Belge tarayıcıda açıldı — yazdırma penceresinden PDF olarak kaydedin.", "ok");
   } catch (e) {
     store.toast(String(e), "error");

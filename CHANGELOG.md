@@ -13,6 +13,11 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.17.1
+- Düzeltme: **PDF olarak kaydet** çalışmıyordu — *"Not allowed to open path…"* hatası veriyordu. Belge artık düzgün açılıyor
+- Düzeltme: teklif tablosundaki sütun kayması. Pencere büyüdükçe sayılar başlıklarından uzaklaşıyordu; sütun genişlikleri sabitlendi
+- Yeni: satırda yaptığınız son değişikliği **geri alma** düğmesi (satır sonunda beliriyor)
+
 ## v0.17.0
 - Yeni: **Teklif belgesi.** Teklif ekranındaki "Belge" düğmesi müşteriye gidecek hâli gösteriyor — maliyet ve marj bu belgede yer almaz
 - **Panoya kopyala** biçimli kopyalıyor: mail'e tablo olarak yapışıyor, kaynak kod olarak değil

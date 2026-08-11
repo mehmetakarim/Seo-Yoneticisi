@@ -56,6 +56,20 @@ watch(
 );
 
 /**
+ * Geri alma yedekleri **yalnızca başka teklife geçilince** siliniyor.
+ *
+ * 🔴 Önce yukarıdaki izleyicinin içindeydi ve hiç çalışmıyordu: her satır kaydından sonra
+ * teklif yeniden okunuyor, `store.quote` yeni bir nesne oluyor, izleyici tetikleniyor ve
+ * yedeği **daha görünmeden** siliyordu. Kimliğe bağlı ayrı bir izleyici gerekiyor.
+ */
+watch(
+  () => store.quote?.id,
+  () => {
+    geriAlYedegi.value = {};
+  },
+);
+
+/**
  * Kaydedilmemiş başlık değişikliği var mı?
  *
  * ⚠️ Yalnızca **başlık** alanlarını kapsıyor (müşteri, para birimi, kur, geçerlilik, not).
@@ -115,15 +129,48 @@ async function elleEkle() {
   elleAd.value = "";
 }
 
+/**
+ * Satır düzenlemesinin **geri alma** yedeği.
+ *
+ * ⚠️ Satırlar anında kaydediliyor (hücreden çıkınca) — hız için doğru, ama yanlış yazılan
+ * bir fiyatın eski hâli kaybolurdu. Değişiklikten ÖNCEKİ değerler burada duruyor ve satırın
+ * sonundaki mini düğme onları geri yazıyor.
+ *
+ * Yalnızca **son** değişiklik tutuluyor: derin bir geçmiş yığını teklif düzenleyicide
+ * abartı olurdu; ihtiyaç "yanlış tuşa bastım" anını kurtarmak.
+ */
+const geriAlYedegi = ref<Record<number, Pick<QuoteItem, "name" | "qty" | "unit_price" | "tax_rate">>>({});
+
 /** Satır alanı düzenlendiğinde kaydet — her tuşta değil, odak çıkışında. */
 function satirKaydet(it: QuoteItem, alan: Partial<QuoteItem>) {
-  void store.updateQuoteLine(
-    it.id,
-    (alan.name ?? it.name) as string,
-    Number(alan.qty ?? it.qty),
-    Number(alan.unit_price ?? it.unit_price),
-    Number(alan.tax_rate ?? it.tax_rate),
-  );
+  const yeni = {
+    name: (alan.name ?? it.name) as string,
+    qty: Number(alan.qty ?? it.qty),
+    unit_price: Number(alan.unit_price ?? it.unit_price),
+    tax_rate: Number(alan.tax_rate ?? it.tax_rate),
+  };
+  // Değer gerçekten değiştiyse yedekle; aynıysa eski yedeği ezme.
+  const degisti =
+    yeni.name !== it.name ||
+    yeni.qty !== it.qty ||
+    yeni.unit_price !== it.unit_price ||
+    yeni.tax_rate !== it.tax_rate;
+  if (degisti) {
+    geriAlYedegi.value = {
+      ...geriAlYedegi.value,
+      [it.id]: { name: it.name, qty: it.qty, unit_price: it.unit_price, tax_rate: it.tax_rate },
+    };
+  }
+  void store.updateQuoteLine(it.id, yeni.name, yeni.qty, yeni.unit_price, yeni.tax_rate);
+}
+
+async function satirGeriAl(it: QuoteItem) {
+  const y = geriAlYedegi.value[it.id];
+  if (!y) return;
+  await store.updateQuoteLine(it.id, y.name, y.qty, y.unit_price, y.tax_rate);
+  const kalan = { ...geriAlYedegi.value };
+  delete kalan[it.id];
+  geriAlYedegi.value = kalan;
 }
 
 const bicim = (v: number) =>
@@ -272,6 +319,16 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
     <!-- Satırlar -->
     <div class="tablo om-scroll-x">
       <table>
+        <!-- Genişlikler tek yerde: başlık ve hücreler ayrı ayrı ayarlanmıyor. -->
+        <colgroup>
+          <col />
+          <col style="width: 78px" />
+          <col style="width: 104px" />
+          <col style="width: 72px" />
+          <col style="width: 108px" />
+          <col style="width: 72px" />
+          <col style="width: 58px" />
+        </colgroup>
         <thead>
           <tr>
             <th class="w-ad">Kalem</th>
@@ -315,7 +372,7 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
             </td>
             <td class="sag">
               <input
-                class="hucre num kisa"
+                class="hucre num"
                 type="number"
                 min="0"
                 step="1"
@@ -331,7 +388,18 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
               </span>
               <span v-else class="marj yok">—</span>
             </td>
-            <td>
+            <td class="eylem-h">
+              <!-- Geri alma yalnızca o satırda değişiklik yapıldıysa görünüyor; yer
+                   ayrılmış durumda ki düğme belirince satırlar kaymasın. -->
+              <button
+                v-if="geriAlYedegi[it.id]"
+                class="sil geri"
+                title="Bu satırdaki son değişikliği geri al"
+                @click="satirGeriAl(it)"
+              >
+                <Icon name="undo" :size="12" :stroke-width="2.2" />
+              </button>
+              <span v-else class="yer"></span>
               <button class="sil" title="Satırı sil" @click="store.deleteQuoteLine(it.id)">
                 <Icon name="x" :size="12" :stroke-width="2.4" />
               </button>
@@ -543,8 +611,15 @@ textarea {
   border-radius: 10px;
   margin-top: 14px;
 }
+/* 🔴 `table-layout: fixed` ZORUNLU (saha hatası, 2026-08-11).
+   Otomatik yerleşimde pencere genişledikçe fazla alan sayısal sütunlara da dağılıyor;
+   giriş kutusu sabit genişlikte olduğu için hücrenin SOLUNA yapışıyor, başlık ise sağda
+   kalıyordu. Dar pencerede hücre zaten giriş kadar olduğu için sorun görünmüyordu — bu
+   yüzden ilk düzeltme yetersiz kaldı ve yalnızca tam ekranda ortaya çıktı.
+   Sabit yerleşimde genişlikleri aşağıdaki `col`lar belirliyor; fazlalık ilk sütuna gidiyor. */
 table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
 }
@@ -594,6 +669,10 @@ td.sag.metin {
 .w-ad {
   min-width: 200px;
 }
+/* Sabit yerleşimde hücre uzayamıyor; uzun ürün adı üç noktayla kesiliyor. */
+td:first-child .hucre {
+  text-overflow: ellipsis;
+}
 tbody tr:last-child td {
   border-bottom: none;
 }
@@ -610,13 +689,12 @@ tbody tr:last-child td {
   border-color: var(--c-border);
   background: var(--c-input);
 }
+/* ⚠️ Sabit piksel genişlik YOK: giriş hücreyi dolduruyor ve metni sağa yaslı. Sabit
+   kalsaydı geniş hücrede sola yapışır, hiza yine bozulurdu. */
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
-  width: 84px;
-}
-.kisa {
-  width: 60px;
+  width: 100%;
 }
 .tut {
   font-variant-numeric: tabular-nums;
@@ -644,6 +722,10 @@ tbody tr:last-child td {
 .marj.yok {
   color: var(--c-faint);
 }
+.eylem-h {
+  white-space: nowrap;
+  text-align: right;
+}
 .sil {
   border: none;
   background: none;
@@ -653,6 +735,14 @@ tbody tr:last-child td {
 }
 .sil:hover {
   color: var(--badge-eksik-c);
+}
+.geri:hover {
+  color: var(--accent);
+}
+/* Düğme belirdiğinde satır kaymasın diye yer önceden ayrılıyor. */
+.yer {
+  display: inline-block;
+  width: 16px;
 }
 .bos {
   text-align: center;

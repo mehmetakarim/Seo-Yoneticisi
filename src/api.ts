@@ -299,7 +299,8 @@ export const api = {
   snapshotQuote: (id: number) => invoke<number>("snapshot_quote", { id }),
   /** 🔴 Maliyet İÇERMEZ: arka uçtaki dönüşüm kayıplı (bkz. quotes.rs `to_out`). */
   renderQuote: (id: number) => invoke<QuoteDoc>("render_quote", { id }),
-  /** Belgeyi geçici dosyaya yazar, yolunu döner — tarayıcıda açılıp PDF'e kaydediliyor. */
+  /** Belgeyi geçici dosyaya yazar **ve tarayıcıda açar** (açma işi Rust'ta: JS'in yol
+   *  açma kapsamı geçici klasörü reddediyor). Dönen değer bilgi amaçlı dosya yolu. */
   exportQuoteHtml: (id: number) => invoke<string>("export_quote_html", { id }),
   quoteSummary: () => invoke<QuoteSummary>("quote_summary"),
   quotesOfContact: (contactId: number) =>

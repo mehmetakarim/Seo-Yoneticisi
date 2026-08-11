@@ -11,7 +11,8 @@ v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13
 v0.14.1 = kuyruk uçuş süzgeci (0b1) ·
 v0.15.0 = Faz C: CRM ince dilim + kuyruk saha düzeltmeleri (0b2, 0b3) ·
 v0.16.0 = Faz T1: teklif çekirdeği (katalog fiyatları + teklif ekranı) ·
-**v0.17.0 = Faz T2: teklif belgesi, takip önerisi, kazanma/kaybetme raporu**
+v0.17.0 = Faz T2: teklif belgesi, takip önerisi, kazanma/kaybetme raporu ·
+**v0.17.1 = PDF açma, sütun hizası, satır geri alma**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -378,9 +379,22 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    kenardan ~18px yiyordu ve girişli hücrede iç boşluk varken düz metin hücresinde yoktu.
    Oklar gizlendi, boşluklar eşitlendi; beş sütunun sapması ölçüldü → **hepsi 0px**.
 
-   🔴 **AYNI TDZ HATASI İKİ KEZ YAPILDI** (`ContactCard`, sonra `QuoteEditor`): `immediate`
-   izleyici, ref'ler altta. **İkisini de yalnızca konsol yakaladı** — ekran her iki durumda da
-   doğru çiziliyordu. 0b3'te eklenen konsol adımı ikinci kez işe yaradı.
+   🔴 **AYNI TDZ HATASI ÜÇ KEZ YAPILDI** (`ContactCard`, sonra `QuoteEditor` iki kez):
+   `immediate` izleyici, ref'ler altta. **Üçünü de yalnızca konsol yakaladı** — ekran her
+   seferinde doğru çiziliyordu.
+
+   → Üçüncüsünden sonra not yetmedi, **koruma** eklendi: `scripts/harness.py::tdz_uyar`
+   her üretimde `<script setup>` dosyalarını tarayıp `immediate` izleyicinin kendisinden
+   sonra tanımlanan bir ref'e yazdığı yerleri uyarıyor.
+   ⚠️ Korumanın **ilk iki sürümü hatayı yakalayamadı** ve bunu ancak hatayı bilerek geri
+   koyup deneyince gördüm: (1) `ref<Jenerik>()` biçimini kaçırıyordu, (2) `immediate: true`
+   ifadesini kendi doküman yorumunda buluyordu. **Ders: sınanmamış bir koruma, koruma
+   değil — yalnızca güven yanılsaması.**
+
+   ⚠️ **Saat gece yarısını geçince bir test patladı** (2026-08-12): `to_rfc3339()` saat dilimi
+   eki taşıyor, SQLite'ın `date()`i onu UTC'ye çevirip günü geri alıyor → "90 gündür" yerine
+   "91 gündür". Uygulama `now_str()` ile **eksiz yerel** zaman yazdığı için üründe sorun yok;
+   hatalı olan testti. Harness'taki `toISOString()` sapmasının (158 dk) aynı ailesi.
 
 0b3. 🔴 **İKİ SAHA HATASI VE BİR DOĞRULAMA AÇIĞI (2026-08-10).** Kullanıcı `npm run tauri dev`
    ile test etti: *"Müşteriler ekranının tasarımını göremiyorum"* ve *"Bugün sayfasında hâlâ

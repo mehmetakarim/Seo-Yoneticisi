@@ -558,8 +558,7 @@ pub fn render_quote(state: State<'_, AppState>, id: i64) -> Result<QuoteDoc, Str
     Ok(QuoteDoc { html: quote_html::render(&out), text: quote_html::render_text(&out) })
 }
 
-/// Belgeyi geçici bir HTML dosyasına yazar ve **yolunu** döner; ekran onu varsayılan
-/// tarayıcıda açıyor.
+/// Belgeyi geçici bir HTML dosyasına yazar **ve varsayılan tarayıcıda açar**.
 ///
 /// 🔴 **Neden uygulama içinden yazdırmıyoruz:** macOS'ta WKWebView `window.print()`'i
 /// uygulamıyor — düğme sessizce hiçbir şey yapardı. Kullanıcının ihtiyacı *"PDF
@@ -567,9 +566,19 @@ pub fn render_quote(state: State<'_, AppState>, id: i64) -> Result<QuoteDoc, Str
 /// kaydet** seçeneğini veriyor. İlk denemede `window.open` kullanılmıştı, o da Tauri'de
 /// `null` dönüyordu (saha hatası, 2026-08-11) — bu üçüncü ve çalışan yol.
 ///
+/// 🔴 **Dosyayı JS DEĞİL, Rust açıyor.** İlk sürüm yolu ön yüze döndürüyor ve orada
+/// `openPath` çağırıyordu; opener eklentisinin JS kapsamı rastgele yolları reddetti:
+/// *"Not allowed to open path /var/folders/…"* (saha hatası, 2026-08-11). Rust tarafı bu
+/// kapsama tabi değil — üstelik doğrusu da bu: dosyayı yazan taraf açıyor, ön yüze bir
+/// dosya sistemi yolu hiç sızmıyor.
+///
 /// ⚠️ Dosya adı teklif numarasından: kullanıcı indirdiği PDF'i tanısın.
 #[tauri::command]
-pub fn export_quote_html(state: State<'_, AppState>, id: i64) -> Result<String, String> {
+pub fn export_quote_html(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<String, String> {
     let conn = state.conn.lock().unwrap();
     let q = read_quote(&conn, id)?;
     let seller = db::get_setting(&conn, "quote_seller")?.unwrap_or_default();
@@ -588,6 +597,11 @@ pub fn export_quote_html(state: State<'_, AppState>, id: i64) -> Result<String, 
     let ad = format!("teklif-{}.html", q.no.replace(['/', '\\', ' '], "-"));
     let yol = std::env::temp_dir().join(ad);
     std::fs::write(&yol, tam).map_err(|e| format!("Belge dosyası yazılamadı: {e}"))?;
+
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(yol.to_string_lossy(), None::<&str>)
+        .map_err(|e| format!("Belge tarayıcıda açılamadı: {e}"))?;
     Ok(yol.to_string_lossy().to_string())
 }
 
