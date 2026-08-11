@@ -4,13 +4,14 @@
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
 **Son güncelleme:** 2026-08-10
-**Aktif faz:** **Faz T kodda BİTTİ (T1 v0.16.0'da yayında, T2 yayın bekliyor).** İlk yedi faz bitti:
+**Aktif faz:** **v0.17.0 yayında — yol haritasının SEKİZ fazı da bitti.** Sıra:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
 **D** (EOL karar deposu + 301 CSV + sağlık skoru, v0.14.0) · **C** (CRM ince dilim, v0.15.0).
 v0.14.1 = kuyruk uçuş süzgeci (0b1) ·
 v0.15.0 = Faz C: CRM ince dilim + kuyruk saha düzeltmeleri (0b2, 0b3) ·
-**v0.16.0 = Faz T1: teklif çekirdeği (katalog fiyatları + teklif ekranı)**
+v0.16.0 = Faz T1: teklif çekirdeği (katalog fiyatları + teklif ekranı) ·
+**v0.17.0 = Faz T2: teklif belgesi, takip önerisi, kazanma/kaybetme raporu**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -40,7 +41,7 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **196 test** + 31 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+bağımlı DEĞİL, **197 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
 **39 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
@@ -354,6 +355,28 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    marjlı** görünür ve teklifin kârı olduğundan yüksek okunurdu. Nullable için `fo()` eklendi,
    testle sabitlendi. **Ders: "eksikse sıfır" varsayılanı, eksikliğin kendisi bilgi taşıyan
    alanlarda sessiz bir yalan üretiyor.**
+
+   🔴 **BELGE ÜÇ KEZ YAZILDI — HER SEFERİNDE SAHA DÜZELTTİ (2026-08-11).**
+   | Deneme | Neden olmadı |
+   |---|---|
+   | `window.open` + yazdır | Tauri'de açılır pencere yok, `null` döndü |
+   | Uygulama içinden `window.print()` | macOS'ta **WKWebView bu çağrıyı uygulamıyor** — düğme sessizce hiçbir şey yapardı |
+   | ✅ Geçici dosya + varsayılan tarayıcı | Yazdırma penceresi her platformda "PDF olarak kaydet" veriyor |
+
+   ⚠️ İkinci denemeden kalan `@media print` kuralları bir süre kodda kaldı; gösterecekleri
+   kopya kaldırılmıştı, yani uygulamada Cmd+P **bomboş sayfa** basacaktı. Kalıntı temizlendi.
+   **Ders: bir mekanizmayı değiştirirken ondan geriye kalan CSS de mekanizmanın parçası.**
+
+   🔴 **MAİL İSTEMCİLERİ MODERN CSS'İ YOK SAYIYOR.** Kullanıcı belgeyi Outlook'a yapıştırdı ve
+   tablo dağıldı. Ölçülen üç kısıt: `max-width` (div'de) yok sayılıyor · `margin:auto`
+   çalışmıyor (toplamlar sağ kenara uçtu) · `display:flex` yok sayılıyor. Belge baştan sona
+   tablolarla kuruldu (`width="560"` **özniteliği**, sağa yaslama boş hücreyle,
+   `cellpadding=0`). Ara adımda toplamlar sağa değil **ortaya** düştü: ayırıcı hücre `&nbsp;`
+   kadar daralıyordu, `width="100%"` ile açgözlü yapıldı.
+
+   ⚠️ **Sütun hizası kayması** (teklif düzenleyici): sayı girişlerinin artırma okları sağ
+   kenardan ~18px yiyordu ve girişli hücrede iç boşluk varken düz metin hücresinde yoktu.
+   Oklar gizlendi, boşluklar eşitlendi; beş sütunun sapması ölçüldü → **hepsi 0px**.
 
    🔴 **AYNI TDZ HATASI İKİ KEZ YAPILDI** (`ContactCard`, sonra `QuoteEditor`): `immediate`
    izleyici, ref'ler altta. **İkisini de yalnızca konsol yakaladı** — ekran her iki durumda da
@@ -1857,7 +1880,7 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 duruyordu (repo 2026-07-26'dan beri public).
 
 - **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 19) ·
-  `cargo test -p seo-core` (196) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+  `cargo test -p seo-core` (197) · canlı testler `-- --ignored` ile ve env değişkenleriyle
   (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
 - **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`

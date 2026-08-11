@@ -13,6 +13,19 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.17.0
+- Yeni: **Teklif belgesi.** Teklif ekranındaki "Belge" düğmesi müşteriye gidecek hâli gösteriyor — maliyet ve marj bu belgede yer almaz
+- **Panoya kopyala** biçimli kopyalıyor: mail'e tablo olarak yapışıyor, kaynak kod olarak değil
+- **PDF olarak kaydet**: belge varsayılan tarayıcınızda açılıyor, oradan yazdırma penceresiyle PDF'e kaydediyorsunuz. Yazıcı gerekmiyor
+- Belge Outlook ve Gmail'de düzgün görünecek biçimde kuruldu (sabit genişlik, tablo düzeni) — daha önce mailde dağılıyordu
+- Yeni: teklifi **gönderildi** işaretlediğinizde, müşteriye ne zaman döneceğiniz soruluyor. Kabul ederseniz o gün Bugün listenizde çıkıyor. ⚠️ Kişinin zaten bir randevusu varsa üzerine yazılmıyor
+- Yeni: Teklifler ekranında **kazanma/kaybetme özeti** ve kayıp nedenleri ("fiyat 2 · termin 1")
+- Kişi kartında o kişiye verilen **teklifler** listeleniyor
+- Düzeltme: teklif tablosunda sayı sütunları başlıklarıyla hizalanmıyordu
+- Yeni: **Vazgeç** düğmesi — teklif başlığında kaydedilmemiş değişiklikleri geri alır (satır değişiklikleri anında kaydedilir)
+- Ayarlar'da teklif belgesinin **firma adı** ve **alt notu** (ödeme koşulu, teslim süresi)
+- Yedekleme teklifleri de taşıyor
+
 ## v0.16.0
 - Yeni: **Teklifler ekranı.** Satırları kataloğunuzdan seçiyorsunuz; fiyat, KDV ve maliyet ürünün kendi verisinden geliyor. Katalogda olmayan kalemler (montaj, nakliye) elle yazılıyor
 - ⚠️ Bu özellik feed'inizde **fiyat alanları** ister: `buyingPrice`, `price1`, `tax`, `currencyAbbr`, `priceTaxWithCur`. Alanlar yoksa teklif satırları boş fiyatla gelir
