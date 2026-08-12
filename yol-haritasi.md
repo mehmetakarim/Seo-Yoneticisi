@@ -19,7 +19,8 @@ Yol haritası bir yerde eksikti ve eksikliği ölçüm gösterdi; kayıt `brain.
 
 Kalan başlıklar: **içerik pilotu** (hangi sayfalarla başlanacağı kullanıcı kararı) ·
 **P** koşullu bekliyor (ikinci mağaza gelene kadar) · **kod imzalama** maliyet kararı ·
-ve takvimdeki iş: **Eylül sonu, sonuç eşiği kalibrasyonu** (kullanıcı kararı 2026-08-12).
+ve takvimdeki iş: **Ekim başı, sonuç eşiği kalibrasyonu** (kullanıcı kararı 2026-08-13 —
+Eylül sonundan alındı; ilk içerik gönderiminin sonucu ~4 Ekim'den önce okunamıyor).
 Ayrıntı bölüm 4'te; hangi sürümde ne çıktığı `brain.md`'de.
 
 ---

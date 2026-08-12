@@ -65,8 +65,10 @@ Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v
 
 **Sıradaki iş — içerik pilotu (karar bekliyor).** Faz İ'nin makinesi hazır ve v0.19.1 ile
 sonucu **ölçülebilir** hâle geldi (0c1: v0.19.0'da ölçülemiyordu). Kullanıcı zaten bir
-kategori sayfası göndermiş (Access Point, 2026-08-13) — pilot fiilen başladı; hangi
-sayfalarla devam edileceği kullanıcı kararı. Ölçülen adaylar: TO'nun kaldıraç olduğu **dört kategori**
+kategori sayfası göndermiş (**Access Point, 2026-08-13**) — pilot fiilen başladı; hangi
+sayfalarla devam edileceği kullanıcı kararı. Önerilen devam: TO'nun kaldıraç olduğu üç
+sayfa daha (Güvenlik Duvarı · Stand ve Dock · Video Konferans), poz 40'takilere girmeden.
+📅 İlk sonucun okunabileceği gün **~2026-10-04** (hesap aşağıda, 3. maddede). Ölçülen adaylar: TO'nun kaldıraç olduğu **dört kategori**
 (Güvenlik Duvarı 4.831 gösterim/poz 9,1 · Access Point 1.274/15,7 · Stand ve Dock 1.084/13,8 ·
 Video Konferans 849/10,8) ya da 26 kategorinin tamamı (poz 40'takiler dahil — orada metin
 TO'yu değil sıralamayı hedefler, iki mekanizma ölçüme karışır).
@@ -86,16 +88,28 @@ TeamViewer, o da navigasyonel. Kalan 24 sayfa 1.600 gösterim taşıyor.
    ❌ i18n elendi: gerekçesi çürüdü (kullanıcı düzeltmesi — "global dağıtım" = IdeaSoft
    kullanan herhangi bir işletme, farklı dilde bir pazar değil).
 
-3. 📅 **EYLÜL SONU — sonuç eşiği kalibrasyonu.**
-   ⚠️ Faz İ ile birlikte ölçülecek şey arttı: kategori/marka/blog sayfalarına yapılan
-   düzeltmeler de `work_events`'e `store_page_push` (`reaches_store = 1`) olarak yazılıyor.
-   Kalibrasyonda bu olaylar da dağılıma girecek.
-   **Kullanıcı kararı (2026-08-12): planlama ve geliştirme Eylül SONUNDA yapılacak.**
-   ⚠️ Veri ile takvimi karıştırma: ölçülebilir pencere Eylül **ortasında** oluşuyor
-   (72 gönderim 26 Temmuz–7 Ağustos, takip penceresi gönderimden 21 gün sonra başlıyor —
-   0au'da yazılı), ama işe Eylül **sonunda** oturulacak. Bu bir takvim tercihi; kullanıcı
-   gerekçe belirtmedi, uydurmaya da gerek yok. (Yan faydası şu: pencere yeni açılmışken
-   dağılım birkaç günlük veriden ibaret olur, ay sonunda daha kalın bir dağılım bulunur.)
+3. 📅 **EKİM BAŞI — sonuç eşiği kalibrasyonu.**
+   **Kullanıcı kararı (2026-08-13): Eylül sonundan EKİM BAŞINA alındı.** Gerekçe ölçüldü:
+   ilk içerik gönderiminin sonucu **~4 Ekim'den önce okunamıyor** ve kalibrasyonda o
+   sonucun da masada olması isteniyor.
+
+   🔴 **Bu tarih hesaplandı, tahmin edilmedi** — ve önceki tahminim ("~10 Eylül") yanlıştı.
+   Access Point gönderimi 2026-08-13. `MIN_WAIT_DAYS = 21` → takip penceresi en erken
+   2026-09-03'te BAŞLAYABİLİR. Pencereler 28 günlük döşeniyor (`next_window`) ve mevcut son
+   pencere 2026-08-04'te bitiyor, yani sıradaki döşemeler: 08-05→09-02 (takip sayılmaz,
+   21 günü doldurmuyor) · **09-03→10-01 (ilk geçerli takip)**. `GSC_LAG_DAYS = 3` yüzünden
+   o pencere ancak **2026-10-04'te** yakalanabiliyor.
+   *Ders: "21 gün sonra ölçülür" cümlesi yanlış — pencere DÖŞEMESİ ve GSC gecikmesi
+   araya giriyor. Tarih söylemeden önce hesaplanmalı.*
+
+   ⚠️ Ürün gönderimleri için veri daha erken hazır (72 gönderim 26 Temmuz–7 Ağustos, pencere
+   Eylül ortasında oluşuyor — 0au). Yani Ekim başını bekleten şey ürün tarafı değil, içerik
+   tarafı. İstenirse ürün eşikleri Eylül ortasında ayrı kalibre edilebilir; kullanıcı ikisini
+   birlikte yapmayı seçti.
+
+   ⚠️ Faz İ ile birlikte ölçülecek şey arttı: kategori/marka/blog düzeltmeleri de
+   `work_events`'e `store_page_push` (`reaches_store = 1`) olarak yazılıyor ve v0.19.1'den
+   itibaren gerçekten okunuyor (0c1). Kalibrasyonda bu olaylar da dağılıma girecek.
 
    Yapılacak: iyileşti/geriledi eşikleri bugün **gerekçeli varsayımla** duruyor; gerçek delta
    dağılımına bakılıp yeniden belirlenecek. Bugünkü kural, iki koşul birden (≥%20 VE
