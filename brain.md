@@ -49,16 +49,31 @@ bağımlı DEĞİL, **198 test** + 32 canlı `--ignored`) + `src-tauri/src/` (in
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
 
-### 🧭 Durum (2026-08-07 akşamı)
+### 🧭 Durum (2026-08-12)
 
-**v0.13.0 yayında.** Yol haritasının **B · Ö · A · K · S** fazları bitti; sıradaki **D (katalog derinliği)**.
+**v0.17.2 yayında. Yol haritasındaki SEKİZ fazın hepsi bitti:**
+**B** (v0.9.0) · **Ö** (v0.10.0) · **A** (v0.11.0) · **K** (v0.12.0) · **S** (v0.13.0) ·
+**D** (v0.14.0) · **C** (v0.15.0) · **T** (v0.16.0 + v0.17.0).
+Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v0.17.2 slug-SKU.
 
-⚠️ **Eylül ortasında yapılacak, unutulmamalı:** sonuç eşiklerinin (iyileşti/geriledi)
-kalibrasyonu. Şu an gerekçeli varsayılanla duruyor çünkü 72 gönderimin hepsi 26 Temmuz–7 Ağustos
-arasında yapıldı ve takip penceresi gönderimden 21 gün SONRA başlamak zorunda. Gerekçe 0au'da.
+**Geriye üç şey kaldı, üçü de "sıradaki faz" değil:**
+
+1. **Faz P (çoklu mağaza)** — ⏸️ **başlama koşulu henüz oluşmadı.** İkinci mağaza gerçekten
+   gelmeden ya da genel dağıtımdan önce başlanmıyor; tek `db_path` varsayımı kodun birçok
+   yerinde ve erken refactor bedava değil. Karar yol haritasında, burada çoğaltılmıyor.
+
+2. **Faz G kalemleri** — birbirinden bağımsız, tek tek alınabilir (tablo `yol-haritasi.md`'de):
+   `MODEL_CHAIN` → ayarlar · Gemini kota sayacı · ölçek modellemesi (10k sentetik feed) ·
+   i18n · kod imzalama (maliyet kararı, kod işi değil).
+
+3. ⚠️ **Eylül ortası — sonuç eşiği kalibrasyonu.** İyileşti/geriledi eşikleri hâlâ gerekçeli
+   varsayımla duruyor; gerçek delta dağılımına bakılacak. 72 gönderim 26 Temmuz–7 Ağustos
+   arasında yapıldı ve takip penceresi gönderimden **21 gün sonra** başlıyor. Gerekçe 0au'da.
+   Sonuç kontrolü kovası o güne kadar boş kalacak — bu bir kusur değil.
 
 Fazların **ne olduğu** aşağıdaki numaralı girdilerde (B → 0at, Ö → 0au, A → 0av, halef
-düzeltmeleri → 0aw, K → 0ax, pencere teması → 0ay, S → 0az); **nereye gittiğimiz** `yol-haritasi.md`'de.
+düzeltmeleri → 0aw, K → 0ax, pencere teması → 0ay, S → 0az, D → 0b0, C → 0b2, T → 0b4);
+**nereye gittiğimiz** `yol-haritasi.md`'de.
 
 ### 📋 Eski kuyruk — kullanıcı önceliğiyle (2026-07-31), tamamı bitti
 

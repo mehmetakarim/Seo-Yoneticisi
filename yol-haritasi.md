@@ -8,7 +8,10 @@
 **Kaynak:** kullanıcının iki not belgesi (vizyon + kod değerlendirmesi) ve bu belgedeki
 iddiaların kodda tek tek doğrulanması.
 
-**Faz B ✅ v0.9.0 · Faz Ö ✅ v0.10.0.** Sıradaki faz: **A (Asistan bağlam seçimi).**
+**Sekiz fazın hepsi bitti** (B v0.9.0 · Ö v0.10.0 · A v0.11.0 · K v0.12.0 · S v0.13.0 ·
+D v0.14.0 · C v0.15.0 · T v0.16.0+v0.17.0). **Sıradaki faz yok** — kalan iki başlık:
+**P** koşullu bekliyor (ikinci mağaza gelene kadar), **G** ise tek tek alınabilen serbest
+kalemler. Ayrıntı bölüm 4'te; hangi sürümde ne çıktığı `brain.md`'de.
 
 ---
 
