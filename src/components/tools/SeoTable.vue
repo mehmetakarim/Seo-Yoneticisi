@@ -19,7 +19,14 @@ import Icon from "../Icon.vue";
 
 export type ColType = "text" | "num" | "pct" | "badge" | "change" | "actions";
 /** İşlem sütununa girebilecek eylemler. Yenisi `ACTIONS`'a eklenir, ekranlar değişmez. */
-export type ActionKey = "open" | "successor" | "canonical" | "review" | "queue" | "redirect";
+export type ActionKey =
+  | "open"
+  | "successor"
+  | "canonical"
+  | "review"
+  | "queue"
+  | "redirect"
+  | "edit";
 
 export interface TableCol {
   key: string;
@@ -134,12 +141,17 @@ const emit = defineEmits<{
  * eylemler. Çağıran ekran onay diyaloğunu bu bayrağa bakarak açar.
  */
 const ACTIONS: Record<ActionKey, { tip: string; icon: string; danger?: boolean }> = {
-  open: { tip: "Ürünü aç", icon: "external" },
+  // ⚠️ İpucu "Ürünü aç" DEĞİL: Faz İ ile bu tablo kategori/marka/blog satırları da
+  // taşıyor ve o satırlarda ürün yok.
+  open: { tip: "Sayfayı aç", icon: "external" },
   successor: { tip: "Halef öner", icon: "gitBranch" },
   canonical: { tip: "Canonical ayarla", icon: "link", danger: true },
   review: { tip: "Sonucu incele", icon: "chartLine" },
   queue: { tip: "Kuyruğa ekle", icon: "listPlus" },
   redirect: { tip: "301 listesine ekle", icon: "cornerUpRight", danger: true },
+  // Faz İ: mağaza sayfasının meta ve tanıtım metnini iyileştir. `danger` DEĞİL — panel
+  // açıyor, mağazaya dokunmuyor; yazma işi panelin içinde ayrı bir onayla yapılıyor.
+  edit: { tip: "Sayfayı iyileştir", icon: "fileEdit" },
 };
 
 /** 5 yuva sığıyor; 6. eylemden itibaren son yuva "diğer eylemler" menüsüne dönüşür. */

@@ -13,12 +13,14 @@
  * arayan teamviewer.com'a gidiyordu. Bu yüzden navigasyonel sorgular ayrı bölümde,
  * gerekçesiyle duruyor — gizlenmiyor ama kuyruğa da girmiyor.
  */
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { api } from "../../api";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../../store";
 import ToolShell from "./ToolShell.vue";
 import SeoTable, { type TableCol, type TableRow } from "./SeoTable.vue";
-import type { ContentGap, GapKind } from "../../types";
+import StorePageModal from "./StorePageModal.vue";
+import type { ContentGap, GapKind, StorePageDetail } from "../../types";
 
 const store = useStore();
 const veri = computed<ContentGap[]>(() => store.opportunity?.content_gaps ?? []);
@@ -90,9 +92,58 @@ const rows = computed<TableRow[]>(() =>
       pos: g.position.toFixed(1),
       miss: n(g.missed_clicks),
     },
-    actions: [{ key: "open" }],
+    // ⚠️ İyileştirme eylemi YALNIZCA envanterde karşılığı olan satırlarda. Anasayfa ya da
+    // envanterde bulunmayan bir adres için panel açmak boş ekran demekti.
+    actions: kayitOf(g) ? [{ key: "edit" }, { key: "open" }] : [{ key: "open" }],
   })),
 );
+
+// ===== Sayfa iyileştirme paneli =====
+// Envanterden slug → (tip, id) eşlemesi: satırdaki adresin hangi mağaza kaydı olduğunu
+// bilmeden panel açılamaz. ⚠️ Envanter çekilmemişse eşleme boş kalır ve satırda yalnızca
+// "aç" eylemi görünür — panel açıp boş ekran göstermektense eylemi hiç sunmamak doğru.
+const envanter = ref<Map<string, StorePageDetail>>(new Map());
+const panelAcik = ref(false);
+const panelTip = ref("");
+const panelId = ref<number | null>(null);
+
+async function envanteriYukle() {
+  const m = new Map<string, StorePageDetail>();
+  for (const tip of ["category", "brand", "blog"]) {
+    try {
+      for (const p of await api.listStorePages(tip)) m.set(p.slug.toLowerCase(), p);
+    } catch {
+      // IdeaSoft kapalı ya da envanter yok — eylem sunulmaz, ekran çalışmaya devam eder.
+    }
+  }
+  envanter.value = m;
+}
+onMounted(envanteriYukle);
+
+/** Adresin son parçası — arka uçtaki `page_kind::last_segment` ile aynı kural. */
+function sonParca(u: string): string {
+  const yol = u.replace(/^https?:\/\/[^/]+/, "").split(/[?#]/)[0].replace(/\/+$/, "");
+  return (yol.split("/").pop() || "").toLowerCase();
+}
+
+function kayitOf(g: ContentGap): StorePageDetail | undefined {
+  return envanter.value.get(sonParca(g.page));
+}
+
+function iyilestir(id: string) {
+  const g = veri.value.find((x) => x.query + x.page === id);
+  const k = g && kayitOf(g);
+  if (!k) return;
+  panelTip.value = k.kind;
+  panelId.value = k.remote_id;
+  panelAcik.value = true;
+}
+
+async function panelKapandi() {
+  panelAcik.value = false;
+  // Gönderim yapıldıysa envanterdeki meta değişti; listeyi tazele ki rozet doğru olsun.
+  await envanteriYukle();
+}
 
 const toplamKacan = computed(() =>
   Math.round(veri.value.reduce((t, g) => t + g.missed_clicks, 0)),
@@ -142,7 +193,18 @@ async function ac(id: string) {
     </div>
     <p v-if="suzgec !== 'hepsi'" class="kova-not">{{ KOVA[suzgec].aciklama }}</p>
 
-    <SeoTable :cols="cols" :rows="rows" @action="(p) => ac(p.id)" />
+    <SeoTable
+      :cols="cols"
+      :rows="rows"
+      @action="(p) => (p.key === 'edit' ? iyilestir(p.id) : ac(p.id))"
+    />
+
+    <StorePageModal
+      :open="panelAcik"
+      :kind="panelTip"
+      :page-id="panelId"
+      @close="panelKapandi"
+    />
 
     <button v-if="suzulmus.length > limit" class="more" @click="limit += 30">
       {{ suzulmus.length - limit }} tane daha

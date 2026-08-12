@@ -41,6 +41,7 @@ import type {
   ModelChains,
   GeminiKullanim,
   StorePageSyncResult,
+  StorePageDetail,
 } from "./types";
 
 export const api = {
@@ -165,6 +166,23 @@ export const api = {
   setTheme: (theme: string) => invoke<void>("set_theme", { theme }),
   testFeedUrl: (url: string) => invoke<number>("test_feed_url", { url }),
   testGeminiKey: (key: string) => invoke<string>("test_gemini_key", { key }),
+  getStorePage: (kind: string, id: number) =>
+    invoke<StorePageDetail>("get_store_page", { kind, id }),
+  listStorePages: (kind: string) =>
+    invoke<StorePageDetail[]>("list_store_pages", { kind }),
+  /** Meta + tanıtım metni üretir; yalnızca taslağa yazar, mağazaya dokunmaz. */
+  generateStorePage: (kind: string, id: number) =>
+    invoke<StorePageDetail>("generate_store_page", { kind, id }),
+  saveStorePageDraft: (
+    kind: string, id: number, pageTitle: string, metaDescription: string,
+    targetKeyword: string, showcase: string,
+  ) =>
+    invoke<StorePageDetail>("save_store_page_draft", {
+      kind, id, pageTitle, metaDescription, targetKeyword, showcase,
+    }),
+  /** ⚠️ Mağazayı DEĞİŞTİRİR. Yalnızca operatör onayıyla çağrılmalı. */
+  pushStorePage: (kind: string, id: number) =>
+    invoke<StorePageDetail>("push_store_page", { kind, id }),
   /** Kategori · marka · blog envanterini IdeaSoft'tan çeker (~7 istek). */
   syncStorePages: () => invoke<StorePageSyncResult>("sync_store_pages"),
   getModelChains: () => invoke<ModelChains>("get_model_chains"),

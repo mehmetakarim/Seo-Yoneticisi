@@ -204,6 +204,36 @@ def main():
         ],
     }
 
+    # Mağaza sayfası fikstürü (Faz İ4). Slug'lar ve sayılar gerçek: access-point
+    # 1.274 gösterim, guvenlik-duvari-firewall 4.831 (2026-08-12 ölçümü).
+    # ⚠️ İkisinde de `showcase_content` boş — ölçülen gerçek eksik bu.
+    STORE_PAGES = [
+        {"kind": "category", "remote_id": 2301, "slug": "guvenlik-duvari-firewall",
+         "name": "Güvenlik Duvarı (Firewall)",
+         "page_title": "Güvenlik Duvarı Firewall Fiyatları",
+         "meta_description": "Firewall modelleri ve fiyatları.",
+         "target_keyword": "firewall", "showcase_content": None,
+         "draft_page_title": "", "draft_meta_description": "", "draft_target_keyword": "",
+         "draft_showcase": "", "draft_model": "", "draft_at": "", "pushed_at": "",
+         "queries": ["firewall cihazı", "firewall markaları", "firewall fiyat"],
+         "impressions": 4831.0, "clicks": 50.0},
+        {"kind": "category", "remote_id": 2302, "slug": "access-point",
+         "name": "Access Point", "page_title": "Access Point Modelleri",
+         "meta_description": "", "target_keyword": "access point",
+         "showcase_content": None,
+         "draft_page_title": "", "draft_meta_description": "", "draft_target_keyword": "",
+         "draft_showcase": "", "draft_model": "", "draft_at": "", "pushed_at": "",
+         "queries": ["access point", "acces point", "wifi access point"],
+         "impressions": 1274.0, "clicks": 13.0},
+        # ⚠️ Ölçüm verisi OLMAYAN sayfa: panelin "bağlam yok" uyarısı denenebilsin.
+        {"kind": "brand", "remote_id": 4101, "slug": "qport", "name": "QPORT",
+         "page_title": "", "meta_description": "", "target_keyword": "",
+         "showcase_content": None,
+         "draft_page_title": "", "draft_meta_description": "", "draft_target_keyword": "",
+         "draft_showcase": "", "draft_model": "", "draft_at": "", "pushed_at": "",
+         "queries": [], "impressions": 327.0, "clicks": 0.0},
+    ]
+
     # ===== İçerik açığı (Faz İ) =====
     # ⚠️ Satırlar UYDURULMADI: `content_gap::gercek_veri` ölçüm testinin gerçek çıktısından
     # alındı (2026-08-12, 90 gün, kullanıcının verisi). Taklidin üretimden ayrışması bu
@@ -574,6 +604,10 @@ def main():
         # `window.__CHATS__` kullanıyor).
         f"    const QT = (window.__QT__ = window.__QT__ || {json.dumps(QUOTES, ensure_ascii=False)});\n"
         f"    const QDOC = {json.dumps(QUOTE_DOC, ensure_ascii=False)};\n"
+        # ⚠️ `window`e asılı: invoke gövdesinin içinde tanımlanan sabitler her çağrıda
+        # sıfırlanıyor ve taslak kaydı bir sonraki çağrıda kayboluyordu (teklif fikstüründe
+        # aynı hata yaşandı, bkz. __QT__).
+        f"    window.__SP__ = window.__SP__ || {json.dumps(STORE_PAGES, ensure_ascii=False)};\n"
         # ⚠️ Üst kapsamda: hem `search_live_products` hem `add_quote_item_from_catalog`
         # aynı listeyi okumalı, yoksa taklit SKU'yu doğrulayamaz.
         f"    const LIVE = {live_json};\n"
@@ -610,6 +644,48 @@ def main():
         "      return Promise.resolve(new URLSearchParams(location.search).has('kullanimyok')\n"
         f"        ? {json.dumps(KULLANIM_BOS, ensure_ascii=False)}\n"
         f"        : {json.dumps(KULLANIM, ensure_ascii=False)});\n"
+        # Mağaza sayfası paneli (Faz İ4). Alanlar gerçek IdeaSoft kaydının şeklinde
+        # (2026-08-12 canlı okuma): pageTitle · metaDescription · targetKeyword ·
+        # showcaseContent. Kategori örneği bilerek "üst metin YOK" hâlinde — ölçülen
+        # gerçek durum bu (görünen 47 kategorinin 26'sında boş).
+        "    if (cmd === 'list_store_pages')\n"
+        "      return Promise.resolve((window.__SP__ || []).filter(p => p.kind === args.kind));\n"
+        "    if (cmd === 'get_store_page')\n"
+        "      return Promise.resolve((window.__SP__ || []).find(\n"
+        "        p => p.kind === args.kind && p.remote_id === args.id));\n"
+        "    if (cmd === 'generate_store_page') {\n"
+        "      const p = (window.__SP__ || []).find(\n"
+        "        x => x.kind === args.kind && x.remote_id === args.id);\n"
+        "      p.draft_page_title = 'Güvenlik Duvarı (Firewall) Cihazları ve Modelleri';\n"
+        "      p.draft_meta_description = 'Kurumsal ağınız için güvenlik duvarı cihazlarını "
+        "inceleyin: hangi model hangi ölçekteki işletmeye uygun, nasıl seçilir.';\n"
+        "      p.draft_target_keyword = 'güvenlik duvarı';\n"
+        "      p.draft_showcase = 'Güvenlik duvarı, kurumsal ağı dış tehditlere karşı koruyan "
+        "cihazdır. Ağ trafiğini kural setlerine göre denetler ve yetkisiz erişimi engeller.\\n\\n"
+        "Model seçerken kullanıcı sayısı, ihtiyaç duyulan bağlantı hızı ve lisans süresi "
+        "belirleyici olur. Katalogda yer alan FortiGate modelleri farklı ölçeklere göre "
+        "ayrılmıştır.';\n"
+        "      p.draft_model = 'gemini-3.6-flash';\n"
+        "      p.draft_at = '2026-08-12T20:00';\n"
+        "      return Promise.resolve(p);\n"
+        "    }\n"
+        "    if (cmd === 'save_store_page_draft') {\n"
+        "      const p = (window.__SP__ || []).find(\n"
+        "        x => x.kind === args.kind && x.remote_id === args.id);\n"
+        "      Object.assign(p, { draft_page_title: args.pageTitle,\n"
+        "        draft_meta_description: args.metaDescription,\n"
+        "        draft_target_keyword: args.targetKeyword, draft_showcase: args.showcase });\n"
+        "      return Promise.resolve(p);\n"
+        "    }\n"
+        "    if (cmd === 'push_store_page') {\n"
+        "      const p = (window.__SP__ || []).find(\n"
+        "        x => x.kind === args.kind && x.remote_id === args.id);\n"
+        "      Object.assign(p, { page_title: p.draft_page_title,\n"
+        "        meta_description: p.draft_meta_description,\n"
+        "        target_keyword: p.draft_target_keyword,\n"
+        "        showcase_content: p.draft_showcase, pushed_at: '2026-08-12T20:05' });\n"
+        "      return Promise.resolve(p);\n"
+        "    }\n"
         # Sayfa envanteri (Faz İ). ⚠️ Sayılar UYDURULMADI — 2026-08-12 canlı ölçümü:
         # kategori 56 kayıt / 47 görünen · marka 265 / 75 · blog 250 / 158.
         # `?envhata=1` → IdeaSoft kapalı/token geçersiz hâli.

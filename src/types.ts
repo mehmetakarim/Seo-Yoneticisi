@@ -815,3 +815,30 @@ export interface StorePageSyncResult {
   by_kind: [string, number, number, number][];
   synced_at: string;
 }
+
+/**
+ * Mağaza sayfası (kategori · marka · blog) — mağazadaki hâli + üretilmiş taslak + ölçüm.
+ *
+ * `queries` üretimin dayanağı: ekranda gösteriliyor ki operatör "bu metin nereden çıktı?"
+ * sorusunu sorabilsin. Boşsa üretim zayıf bağlamla çalışmış demektir.
+ */
+export interface StorePageDetail {
+  kind: string;
+  remote_id: number;
+  slug: string;
+  name: string;
+  page_title: string;
+  meta_description: string;
+  target_keyword: string;
+  showcase_content: string | null;
+  draft_page_title: string;
+  draft_meta_description: string;
+  draft_target_keyword: string;
+  draft_showcase: string;
+  draft_model: string;
+  draft_at: string;
+  pushed_at: string;
+  queries: string[];
+  impressions: number;
+  clicks: number;
+}
