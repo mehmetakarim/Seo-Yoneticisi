@@ -44,7 +44,10 @@ pub const PER_BUCKET: usize = 3;
 /// aşıldı**: ölçüldü (2026-08-09) ki 10 slotun tamamı doluydu (Bakım 3 · Kaçak 3 · Acil 3 ·
 /// Kaldıraç 1), yani müşteri işleri ancak SEO işlerini düşürerek girebilirdi. Kullanıcı
 /// kararı: *"günlük iş sayısını artırabiliriz."* Böylece CRM eklendi, SEO 10'da kaldı.
-pub const TOTAL: usize = 13;
+/// ⚠️ Faz İ'de 13 → 14. İçerik kovası eklendi ve mevcut kovalardan slot ÇALMAMASI için
+/// toplam bir arttırıldı — aynı gerekçe Faz C'de de geçerliydi (CRM eklenince SEO 10'da
+/// kalsın diye 10 → 13).
+pub const TOTAL: usize = 14;
 
 /// Bir olayın sonucunun kontrol edilebilmesi için gereken gün.
 ///
@@ -75,6 +78,8 @@ pub enum Bucket {
     Upkeep,
     /// Sonraki adım tarihi gelmiş müşteri (Faz C) — kuyruğun tek insan işi.
     Contact,
+    /// Sıralanıyoruz ama sayfanın tipi sorgunun niyetini karşılamıyor (Faz İ).
+    Content,
 }
 
 impl Bucket {
@@ -86,6 +91,7 @@ impl Bucket {
             Bucket::Review => "Sonuç kontrolü",
             Bucket::Upkeep => "Bakım",
             Bucket::Contact => "Müşteri",
+            Bucket::Content => "İçerik",
         }
     }
 
@@ -109,6 +115,12 @@ impl Bucket {
             Bucket::Review => 1.0,
             // Müşteride de ağırlık değil taban kullanılıyor (bkz. CONTACT_BASE).
             Bucket::Contact => 1.0,
+            // ⚠️ `Leak` ile AYNI (0,6) ve sebebi aynı sınıftan: kaçırılan tıklama gerçek
+            // ama uygulamanın çözümü kısmi. Kategori/marka/blog sayfasının metnini üretip
+            // gönderebiliyoruz — bu `Leak`'ten iyi, orada 301'i hiç yapamıyoruz. Ama sorgu
+            // "sayfa yok" kovasındaysa yazılacak sayfa uygulamanın dışında; ortalaması
+            // Leak ile aynı yere düşüyor. Eylem tamamen içeri alınırsa yükseltilmeli.
+            Bucket::Content => 0.6,
         }
     }
 
@@ -120,6 +132,7 @@ impl Bucket {
             Bucket::Urgent => "tıklaması düşük olsa da canlıda yanlış içerik duruyor",
             Bucket::Review => "kayıp değil, zamanı gelmiş bir kontrol",
             Bucket::Contact => "bekleyen insan bozulabilir bir iştir — sayfa bir gün beklemekle kaybetmez",
+            Bucket::Content => "kaçırılan tıklama gerçek; metni uygulama üretip gönderebiliyor ama yeni sayfa açmak dışarıda",
         }
     }
 
@@ -129,7 +142,10 @@ impl Bucket {
     /// bilinir. Kaldıraç · kaçak · bakım ise 90 günlük GSC penceresine bakıyor; dün yapılan
     /// bir düzeltme o ortalamayı kıpırdatamaz. Bkz. [`drop_in_flight`].
     pub fn evidence_lags(&self) -> bool {
-        matches!(self, Bucket::Leverage | Bucket::Leak | Bucket::Upkeep)
+        // ⚠️ İçerik de GSC kaynaklı: bugün gönderilen metin 90 günlük ortalamayı yarın
+        // kıpırdatmaz. Uçuş süzgeci (bkz. `drop_in_flight`) bu kovada da geçerli olmalı,
+        // yoksa "yapıldı" denen madde bir sonraki analizde geri gelir.
+        matches!(self, Bucket::Leverage | Bucket::Leak | Bucket::Upkeep | Bucket::Content)
     }
 }
 
@@ -170,12 +186,19 @@ pub enum ItemRef {
     Product(String),
     Page(String),
     Contact(String),
+    /// İçerik açığı maddesi **sorguyu** taşıyor, sayfayı değil.
+    ///
+    /// 🔴 Sebebi ölçüldü: aynı sayfa birden çok sorguda açık veriyor (*firewall cihazı* hem
+    /// ürün hem kategori sayfasıyla sıralanıyor) ve aynı sorgu birden çok sayfayla çıkıyor.
+    /// Kimliği sayfaya bağlasaydık farklı işler tek maddeye çökerdi; sorguya bağlayınca
+    /// "hangi aramada sorun var" sorusu kuyrukta da cevaplı kalıyor.
+    Query(String),
 }
 
 impl ItemRef {
     pub fn key(&self) -> &str {
         match self {
-            ItemRef::Product(s) | ItemRef::Page(s) | ItemRef::Contact(s) => s,
+            ItemRef::Product(s) | ItemRef::Page(s) | ItemRef::Contact(s) | ItemRef::Query(s) => s,
         }
     }
 }
@@ -580,5 +603,79 @@ mod tests {
         let iki: Vec<_> = pick(yap()).iter().map(|q| q.title.clone()).collect();
         assert_eq!(bir, iki);
         assert_eq!(bir, vec!["A", "B", "C"]);
+    }
+
+    // ===================== İçerik kovası (Faz İ) =====================
+
+    /// 🔴 İçerik kanıtı da GSC'den geliyor: bugün gönderilen metin 90 günlük ortalamayı
+    /// yarın kıpırdatmaz. Uçuş süzgeci bu kovada da geçerli olmalı, yoksa "yapıldı" denen
+    /// madde bir sonraki analizde geri gelir — 0b1'de düzeltilen hatanın aynısı.
+    #[test]
+    fn icerik_kovasi_ucus_suzgecine_tabi() {
+        assert!(Bucket::Content.evidence_lags());
+        let mut ucusta = std::collections::HashSet::new();
+        ucusta.insert(ItemRef::Query("access point".into()));
+
+        let adaylar = vec![
+            Candidate {
+                reference: ItemRef::Query("access point".into()),
+                bucket: Bucket::Content,
+                title: "access point".into(),
+                reason: "x".into(),
+                clicks: 171.0,
+                page: "contentgap".into(),
+                focus_id: "a".into(),
+                minutes: 12,
+                minutes_measured: false,
+            },
+            Candidate {
+                reference: ItemRef::Query("firewall cihazı".into()),
+                bucket: Bucket::Content,
+                title: "firewall cihazı".into(),
+                reason: "x".into(),
+                clicks: 25.0,
+                page: "contentgap".into(),
+                focus_id: "b".into(),
+                minutes: 12,
+                minutes_measured: false,
+            },
+        ];
+        let kalan = drop_in_flight(adaylar, &ucusta);
+        assert_eq!(kalan.len(), 1, "ölçümü uçuşta olan madde düşmeli");
+        assert_eq!(kalan[0].reference.key(), "firewall cihazı");
+    }
+
+    /// Sorgu kimliği sayfadan AYRI bir uzayda: aynı metin hem ürün sku'su hem sorgu olabilir
+    /// ve tekilleştirme bunları karıştırmamalı.
+    #[test]
+    fn sorgu_kimligi_ayri_uzayda() {
+        let a = ItemRef::Query("x".into());
+        let b = ItemRef::Product("x".into());
+        assert_ne!(a, b, "aynı metin farklı türde aynı madde değildir");
+        assert_eq!(a.key(), "x");
+        let mut set = std::collections::HashSet::new();
+        set.insert(a);
+        assert!(!set.contains(&b));
+    }
+
+    /// Kova sayısı arttıkça toplam da artmalı: yeni kova mevcutlardan slot ÇALMAMALI.
+    /// (Faz C'de aynı karar verildi: CRM eklenince SEO 10'da kalsın diye 10 → 13.)
+    #[test]
+    fn yeni_kova_mevcut_slotlari_calmiyor() {
+        let kovalar = [
+            Bucket::Urgent, Bucket::Leverage, Bucket::Leak,
+            Bucket::Review, Bucket::Upkeep, Bucket::Contact, Bucket::Content,
+        ];
+        assert!(
+            TOTAL >= kovalar.len() * 2,
+            "her kova en az iki slot bulabilmeli: TOTAL={TOTAL}, kova={}",
+            kovalar.len()
+        );
+        // Etiketler benzersiz olmalı — ekranda iki kova aynı adla görünemez.
+        let mut adlar: Vec<&str> = kovalar.iter().map(|b| b.label()).collect();
+        adlar.sort_unstable();
+        let n = adlar.len();
+        adlar.dedup();
+        assert_eq!(adlar.len(), n, "kova etiketleri benzersiz olmalı");
     }
 }

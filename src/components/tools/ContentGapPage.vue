@@ -13,7 +13,8 @@
  * arayan teamviewer.com'a gidiyordu. Bu yüzden navigasyonel sorgular ayrı bölümde,
  * gerekçesiyle duruyor — gizlenmiyor ama kuyruğa da girmiyor.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
+import { useRowFocus } from "../../useRowFocus";
 import { api } from "../../api";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../../store";
@@ -56,6 +57,23 @@ const suzulmus = computed(() =>
   suzgec.value === "hepsi" ? veri.value : veri.value.filter((g) => g.kind === suzgec.value),
 );
 
+// Kuyruktan gelen odak (Faz K mekanizması, ortak `useRowFocus`).
+// ⚠️ Kimlik `sorgu + sayfa` — arka uçtaki `focus_id` ile birebir aynı olmak zorunda,
+// ayrışırsa odaklama sessizce çalışmaz (0b3'te yaşanan kaydırma hatasının sınıfı).
+const focusId = useRowFocus(
+  "contentgap",
+  () => suzulmus.value.map((g) => g.query + g.page),
+  limit,
+);
+
+// 🔴 Süzgeç tuzağı: odaklanan madde açık olmayan bir kovadaysa satır listede HİÇ olmaz ve
+// odak sessizce başarısız olur. Kuyruktan gelindiğinde süzgeç sıfırlanıyor.
+watch(focusId, (id) => {
+  if (!id) return;
+  const g = veri.value.find((x) => x.query + x.page === id);
+  if (g && suzgec.value !== "hepsi" && suzgec.value !== g.kind) suzgec.value = "hepsi";
+});
+
 const cols: TableCol[] = [
   { key: "name", label: "Sorgu / Sıralanan sayfa", type: "text" },
   { key: "kind", label: "Durum", type: "text" },
@@ -82,6 +100,7 @@ const kisaUrl = (u: string) => u.replace(/^https?:\/\/[^/]+/, "") || "/";
 const rows = computed<TableRow[]>(() =>
   suzulmus.value.slice(0, limit.value).map((g) => ({
     id: g.query + g.page,
+    selected: g.query + g.page === focusId.value,
     name: g.query,
     // ⚠️ Alt satırda kova adı TEKRARLANMIYOR: "Durum" sütununda zaten var ve iki kez
     // yazmak satırı gürültüye boğuyordu. Burada yalnızca sıralanan sayfa — asıl bağlam o.
@@ -196,6 +215,7 @@ async function ac(id: string) {
     <SeoTable
       :cols="cols"
       :rows="rows"
+      :focus-id="focusId"
       @action="(p) => (p.key === 'edit' ? iyilestir(p.id) : ac(p.id))"
     />
 

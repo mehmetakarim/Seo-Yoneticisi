@@ -476,6 +476,8 @@ def main():
             {"bucket": "review", "label": "Sonuç kontrolü", "candidates": 0},
             {"bucket": "upkeep", "label": "Bakım", "candidates": 52},
             {"bucket": "contact", "label": "Müşteri", "candidates": 2},
+            # Faz İ: gerçek ölçümden — 97 açığın envanterde karşılığı olan kısmı.
+            {"bucket": "content", "label": "İçerik", "candidates": 4},
         ],
         "items": [
             # ⚠️ Kaçak maddesi GERÇEK rapordan ve bilerek **40. satırdan** alınıyor: EOL ekranı
@@ -493,6 +495,15 @@ def main():
              "reason": "bugün dönülecek — numune sonucu sorulacak",
              "clicks": 0, "score": 40, "page": "contacts", "focus_id": "2",
              "minutes": 5, "minutes_measured": False, "also": [], "done": False},
+            # Faz İ — içerik maddesi. ⚠️ `focus_id` ekrandaki satır kimliğiyle (sorgu+sayfa)
+            # AYNI olmalı; ayrışırsa odaklama sessizce çalışmaz.
+            {"reference": {"kind": "query", "ref": "access point"},
+             "bucket": "content", "title": "access point",
+             "reason": "ilk sayfada ama tıklanmıyor: sıralanan sayfa vitrin, sorgu bilgi "
+                       "arıyor · kategori sayfası sıralanıyor, 4528 gösterimde konum 7.2",
+             "clicks": 171.0, "score": round(171.0 * 0.6, 1), "page": "contentgap",
+             "focus_id": "access pointhttps://www.kurumsalit.com/kategori/access-point",
+             "minutes": 12, "minutes_measured": False, "also": [], "done": False},
             {"reference": {"kind": "page", "ref": _eol_ornek["slug"]},
              "bucket": "leak", "title": _eol_ornek["slug"],
              "reason": f"{round(_eol_ornek['clicks'])} tıklama satın alınamayan bir sayfaya "

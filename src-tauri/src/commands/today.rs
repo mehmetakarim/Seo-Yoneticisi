@@ -159,6 +159,7 @@ pub(crate) fn ref_key(r: &ItemRef) -> (&'static str, String) {
         ItemRef::Product(s) => ("product", s.clone()),
         ItemRef::Page(s) => ("page", s.clone()),
         ItemRef::Contact(s) => ("contact", s.clone()),
+        ItemRef::Query(s) => ("query", s.clone()),
     }
 }
 
@@ -170,6 +171,7 @@ fn ref_from(kind: &str, r: String) -> ItemRef {
     match kind {
         "page" => ItemRef::Page(r),
         "contact" => ItemRef::Contact(r),
+        "query" => ItemRef::Query(r),
         _ => ItemRef::Product(r),
     }
 }
@@ -434,6 +436,46 @@ fn candidates(
         });
     }
 
+    // ===== İçerik açığı (Faz İ) =====
+    // ⚠️ Yalnızca **eylemi olan** maddeler kuyruğa giriyor: sıralanan sayfanın envanterde
+    // karşılığı olmalı ki panel açılabilsin. "Sayfa yok" kovasındaki maddeler bu yüzden
+    // kuyruğa GİRMİYOR — uygulama yeni sayfa açamıyor ve eylemsiz madde, kullanıcıyı
+    // "Yapıldı" demekten başka bir şey yapamayacağı bir işe yönlendirir (`Leak`'te bu
+    // bedel yaşandı, ağırlığı o yüzden 0,6).
+    let envanter_slug: std::collections::HashSet<String> = conn
+        .prepare("SELECT lower(slug) FROM store_pages WHERE status = 1")
+        .and_then(|mut st| {
+            st.query_map([], |r| r.get::<_, String>(0))
+                .map(|it| it.filter_map(|x| x.ok()).collect())
+        })
+        .unwrap_or_default();
+
+    for g in &report.content_gaps {
+        let slug = seo_core::page_kind::last_segment(&g.page).unwrap_or_default();
+        if slug.is_empty() || !envanter_slug.contains(&slug) {
+            continue;
+        }
+        out.push(Candidate {
+            reference: ItemRef::Query(g.query.clone()),
+            bucket: Bucket::Content,
+            title: g.query.clone(),
+            reason: format!(
+                "{} · {} sayfası sıralanıyor, {:.0} gösterimde konum {:.1}",
+                g.kind.reason(),
+                g.page_kind.label().to_lowercase(),
+                g.impressions,
+                g.position
+            ),
+            clicks: g.missed_clicks,
+            page: "contentgap".into(),
+            // ⚠️ Ekrandaki satır kimliği `query + page` — `ContentGapPage` böyle üretiyor.
+            // Ayrışırsa odaklama sessizce çalışmaz (0b3'te yaşanan kaydırma hatasının sınıfı).
+            focus_id: format!("{}{}", g.query, g.page),
+            minutes: sure(Bucket::Content, 12).0,
+            minutes_measured: sure(Bucket::Content, 12).1,
+        });
+    }
+
     // ⚠️ Süzgeç EN SONDA ve `pick`ten ÖNCE: kova sayaçları da süzülmüş listeyi saymalı.
     // "Kaçak trafikte 2.100 aday var" derken ölçümü uçuşta olanları sayarsak kova kendi
     // gerçeğini abartır — sayaç boş kovanın neden boş olduğunu açıklamak için var.
@@ -469,6 +511,7 @@ pub fn build_today_queue(conn: &Connection) -> Result<TodayQueue, String> {
         Bucket::Review,
         Bucket::Upkeep,
         Bucket::Contact,
+        Bucket::Content,
     ] {
         bucket_counts.push(BucketCount {
             bucket: b,

@@ -459,13 +459,23 @@ export interface SeedResult {
 // ---------------------------------------------------------------------------
 
 /** İş türü kovası. Rust `seo_core::queue::Bucket` ile birebir. */
-export type Bucket = "urgent" | "leverage" | "leak" | "review" | "upkeep" | "contact";
+export type Bucket =
+  | "urgent"
+  | "leverage"
+  | "leak"
+  | "review"
+  | "upkeep"
+  | "contact"
+  | "content";
 
 /** Madde kimliği: ürün maddeleri sku, satışta olmayan sayfalar slug, müşteriler kişi
  *  kimliği taşır.
  *  ⚠️ EOL satırlarında sku YOK — bu yüzden ayrı kimlik uzayları var. */
 export interface ItemRef {
-  kind: "product" | "page" | "contact";
+  /** ⚠️ `query` (Faz İ): içerik maddesi sayfayı değil SORGUYU taşıyor — aynı sayfa birden
+   *  çok sorguda açık verebiliyor, kimliği sayfaya bağlamak farklı işleri tek maddeye
+   *  çökertirdi. */
+  kind: "product" | "page" | "contact" | "query";
   ref: string;
 }
 

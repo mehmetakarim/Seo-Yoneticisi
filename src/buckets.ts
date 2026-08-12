@@ -20,6 +20,9 @@ export const BUCKET_TONE: Record<Bucket, string> = {
   upkeep: "hatali",
   // Müşteri işi bir SEO sorunu değil; nötr ton onu listede ayırt ediyor.
   contact: "notr",
+  // İçerik işi de bir sayfa hatası değil, eksik: "bekliyor" tonu Kaçak trafikle aynı
+  // sınıfta olduğunu söylüyor (ikisinde de çözüm kısmen uygulamanın dışında).
+  content: "bekliyor",
 };
 
 export const BUCKET_LABEL: Record<Bucket, string> = {
@@ -29,4 +32,5 @@ export const BUCKET_LABEL: Record<Bucket, string> = {
   review: "Sonuç kontrolü",
   upkeep: "Bakım",
   contact: "Müşteri",
+  content: "İçerik",
 };
