@@ -332,6 +332,32 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           http_code INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_gemini_calls_at ON gemini_calls(at);
+
+        -- ===== Sorgu × sayfa satırları (Faz İ) =====
+        -- 🔴 Bu tablonun varlık sebebi iki kat: (1) sorgu düzeyi veri bugüne kadar HİÇ
+        -- saklanmıyordu — her analizde GSC'den çekilip rapora girmeyen kısmı çöpe gidiyordu;
+        -- (2) "hangi sorguya hangi sayfa sıralanıyor" bilgisi içerik açığı analizinin tek
+        -- dayanağı ve rapor JSON'una konamaz (0b6: ölçek sınırı zaten o blob).
+        --
+        -- ⚠️ Eşik UYDURULMADI, ölçüldü (2026-08-12, 90 gün, filtresiz): 30.190 satırın
+        -- `metrics::kept` ile 5.226'sı tutuluyor (%17,3) ve bu **tıklamaların %100'ünü**,
+        -- gösterimlerin %79,9'unu kapsıyor. Sayfa satırlarıyla AYNI kural — iki ayrı eşik
+        -- olsaydı hangi veriye hangi kuralın uygulandığı zamanla karışırdı.
+        --
+        -- Bölüm kırılımı (aynı ölçüm), yani kapatılan kör nokta: ürün 23.914 satır /
+        -- 169.944 gösterim · blog 2.467 / 54.519 · kategori 2.211 / 29.682 · marka 1.187 /
+        -- 10.338 · anasayfa+diğer 411 / 6.579. Ürün dışı toplam **5.700 sorgu, 101.118
+        -- gösterim** — uygulamanın bugüne kadar hiç görmediği kısım.
+        CREATE TABLE IF NOT EXISTS query_rows (
+          snapshot_id INTEGER NOT NULL REFERENCES metric_snapshots(id) ON DELETE CASCADE,
+          page TEXT NOT NULL,
+          query TEXT NOT NULL,
+          clicks REAL NOT NULL DEFAULT 0,
+          impressions REAL NOT NULL DEFAULT 0,
+          position REAL NOT NULL DEFAULT 0,
+          PRIMARY KEY (snapshot_id, page, query)
+        );
+        CREATE INDEX IF NOT EXISTS idx_query_rows_query ON query_rows(query);
         "#,
     )
     .map_err(|e| format!("Şema oluşturulamadı: {e}"))?;

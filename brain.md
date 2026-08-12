@@ -1389,6 +1389,101 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    tutuldu (bilerek — asistan üretimin 20/gün kotasını yiyemez). Kullanım kaydı **yedeğe
    dahil**: taşınmasaydı sayaç her makine değişiminde sıfırlanır ve asıl soru cevaplanamazdı.
 
+0b8. 🔬 **FAZ İ ÖN ÖLÇÜMÜ — kör nokta ve IdeaSoft blog ucu (2026-08-12).**
+   Kullanıcı GSC son 12 ayı dışa aktarıp üç belge üretti; biri *"Google seni sıralıyor ama
+   içerik yok"* tezine dayanan 50 maddelik içerik backlog'u. Belgeler `İndirilenler/` altında,
+   repoda değil.
+
+   🔴 **YAPISAL BULGU: uygulama sorgu→sayfa eşlemesini çekiyor ve kendi eliyle atıyor.**
+   `seo_data/gsc.rs` `["page","query"]` boyutunu istiyor — yani "hangi sorguya hangi sayfa
+   sıralanıyor" verisi bizde var. İki yerde çöpe gidiyor:
+   1. **Çekerken:** `path_prefix` (= `/urun/`) GSC'ye `dimensionFilterGroups` olarak
+      gönderiliyor → blog/kategori/marka sorgu satırları **hiç indirilmiyor.**
+   2. **İşlerken:** `striking_distance` / `cannibalization` katalogda olmayan sayfayı
+      `by_page.get(page)?` ile düşürüyor.
+
+   **Kör noktanın büyüklüğü ölçüldü** (son anlık görüntü): 300 ürün-dışı sayfa — marka 77,
+   blog 168, kategori 55 — **133.654 gösterim, 1.010 tık (%0,76)**, ve bunlar **hiçbir ekranda
+   görünmüyor**; altı aracın hepsi ürün-merkezli. Yol haritasının "uygulamada yapılacak tek
+   anlamlı kod işi JSON-LD gönderimi" değerlendirmesi bu yüzden eksikti.
+
+   Yan ölçüm: GSC'de 3.324 ürün URL'si var, **%97,1'i katalogla eşleşmiyor** — EOL teşhisini
+   bağımsız doğruluyor.
+
+   ✅ **IdeaSoft BLOG UCU VAR — canlı doğrulandı.** `GET /admin-api/blogs` → 200.
+   Kayıt yapısı ürünlerle aynı alan ailesinde, yani `ideasoft.rs` desenleri taşınır:
+   `id · title · slug · excerpt · content (HTML) · pageTitle · metaDescription · metaKeywords ·
+   targetKeyword · canonicalUrl · categories[] · tags[] · status · seoTotalRuleCount`.
+   Sayfalama `?limit=100&page=N`. **Mağazada 252 yazı var, 250'si yayında.**
+   ⚠️ Yalnızca GET denendi; POST/PUT **denenmedi** (canlı mağazaya yazmak kullanıcı onayı
+   gerektirir). Yazma yolu doğrulanmadan İ5 kesinleşmiş sayılmaz.
+
+   Ucun asıl değeri gönderim değil **ölçüm**: "bu konuda içerik var mı?" sorusu artık çıkarım
+   değil, sorgu.
+
+   🔴 **KENDİ ÖLÇÜMÜMDE HATA YAPTIM, DERSİ BURADA DURUYOR.** Backlog'u blog envanterine karşı
+   sınarken ilk eşleştiricim `len > 2` filtresiyle **kısa model kodlarını atıyordu** (`k2`,
+   `hi`, `a1`) — "creality k2 combo" bu yüzden *Hi Combo* yazısına eşleşti. Tam da backlog'u
+   eleştirdiğim gevşek token eşleştirmesinin aynısı. *Bir yöntemi eleştirmek, aynı yöntemi
+   yanlışlıkla kullanmaktan korumuyor.* Düzeltilmiş sonuç: 48 maddenin **8'inin** içeriği var,
+   **40'ının yok** (275.181 gösterim) → backlog'un "yazı yok" tespiti büyük ölçüde DOĞRU.
+
+   **Ama "yazı yok" ≠ "yazı yaz".** İki farklı soru var: *bir sayfa sıralanıyor mu* (teamviewer
+   için ürün + marka sayfası var) ve *bilgi içeriği var mı* (yok). Backlog ikincisini soruyor.
+   TeamViewer'da doğru cevap yine de yazı değil: 157.623 gösterim / 63 tık, sorgu
+   **navigasyonel** — arayan teamviewer.com'a gidiyor. Bu yüzden Faz İ'de navigasyonel sorgu
+   kuyruğa GİRMEYECEK; denetim raporunun kararı koda geçiyor.
+
+   **Yeni kova adayı:** 250 yayında yazının 158'i GSC eşiğini geçiyor, **92'si geçmiyor.**
+   ⚠️ Bu "sıfır gösterim" DEĞİL — `metric_page_rows` eşikli (`metrics::kept`). Doğru ifade:
+   *ölçülebilir görünürlüğü olmayan 92 yazı.* Kesin sıfır iddiası eşiksiz sorgu gerektirir.
+
+0b9. 🔴 **12 AY / 90 GÜN AYRIŞMASI — backlog kaybedilmiş görünürlüğün listesi (2026-08-12).**
+
+   Faz İ mantığı gerçek veride koşturuldu (30.190 sorgu×sayfa satırı, 90 gün) ve planın
+   temelini sarsan bir şey çıktı. Backlog'un ilk 15 maddesi **12 ayda 250.392 gösterim**
+   almış; **son 90 günde 4.804 — %1,9.**
+
+   | Sorgu | 12 ay (belge) | 90 gün | Şimdiki poz |
+   |---|---|---|---|
+   | teamviewer | 157.623 | 452 | 14,7 |
+   | fortinet | 8.737 | 21 | 38,9 |
+   | elegoo centauri carbon | 8.524 | 5 | 42,4 |
+   | veeam | 5.213 | 16 | 25,3 |
+   | creality k2 pro | 6.675 | 7 | 21,6 |
+   | workstation | 5.134 | 1.939 | 40,6 |
+   | firewall cihazı | 4.299 | 1.048 | 19,1 |
+
+   Düz seyirde beklenen oran ~%25. Yani mevsimsellik değil: **o sorgulardaki sıralama
+   çökmüş.** Backlog'un tezi "Google zaten sıralıyor, 9→4 çıkar"dı; ölçüm 14–42. pozisyon
+   diyor — bu iyileştirme değil, sıfırdan başlamak.
+
+   **Ders: toplu (12 aylık) dışa aktarım çöküşü GİZLER.** Ortalama, dönemin başındaki yüksek
+   hacmi sonundaki sıfıra karıştırıyor. Uygulamanın 90 günlük kayan penceresi bunun için var
+   ve bu, pencere seçiminin ilk kez bir stratejiyi çürüttüğü an.
+
+   ⚠️ **Ayakta kalan iki madde:** *workstation* (%38, 1.939 gösterim) ve *firewall cihazı*
+   (%24, 1.048). İçerik kararı verilecekse dayanağı bunlar, listenin tepesi değil.
+
+   🔴 **KENDİ KODUMDA ÜÇ KUSUR — üçünü de gerçek veri gösterdi, sentetik testler değil.**
+   1. **Navigasyonel tespit hiç ateşlenmedi (0 sorgu).** `NAV_MIN_IMPRESSIONS`'ı 5.000
+      koymuştum — TeamViewer'ın **belgedeki** 157 bin sayısına bakarak. 90 günde 452 var.
+      *Backlog'un yaptığı hatanın aynısını yaptım: belgenin sayısına güvenip kendi penceremi
+      ölçmedim.* Eşik paylaşılan `MIN_IMPRESSIONS_FOR_NO_CLICK`'e (50) indi.
+   2. **Kendi marka sorgumuz "açık" sayıldı.** *kurumsalit* / *kurumsal it* poz 1,0'da niyet
+      uyuşmazlığı olarak işaretlendi. Kendi adımızı arayan bizi bulmuş; bu açık değil. Site
+      adı `gsc_site_url`'den türetiliyor — koda gömülmüyor.
+   3. **En büyük kusur: sorgunun niyeti hiç ölçülmüyordu.** Kural yalnızca *sayfa tipine*
+      bakıyordu; sonuç olarak "masa standı" (poz 1,3) ve "ipad air pembe" (poz 1,4) gibi
+      **ürün sorguları ürün sayfasıyla karşılandığı hâlde** açık sayıldı — oysa o isabet.
+      Ayrıca poz 1–2'de beklenen TO eğrisi çok yüksek olduğundan orada her şey "eksik"
+      görünüyor. Eklenen sinyaller: Türkçe bilgi belirteçleri (*nedir · nasıl · ne işe yarar ·
+      farkı · hangi · mi*) + model kodu içermeyen jenerik terim + poz ≥ 3 tabanı.
+
+   ✅ Mantığın çalıştığının kanıtı: düzeltmeden önce bile gerçek veride en tepedeki madde
+   **"access point" — 4.528 gösterim, poz 7,2, 171 kaçırılan tık**. Denetim raporunun elle
+   bulduğu şeyi kod kendisi buldu.
+
 0c. ✅ **FIRSAT ANALİZİ + SÜRÜM NOTLARI (v0.5.6).**
 
    **Fırsatlar sayfası** — "önce hangi ürüne bakmalıyım?". `gsc.rs::page_stats()` ile TEK API

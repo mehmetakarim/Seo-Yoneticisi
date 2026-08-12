@@ -16,15 +16,18 @@ use serde::{Deserialize, Serialize};
 
 /// "Gösterim var ama tıklama yok" demek için gereken en az gösterim.
 /// Altındaki sayılar istatistiksel gürültü: 3 gösterim / 0 tıklama bir şey ifade etmez.
-const MIN_IMPRESSIONS_FOR_NO_CLICK: f64 = 50.0;
+pub const MIN_IMPRESSIONS_FOR_NO_CLICK: f64 = 50.0;
 
 /// Google'ın ilk sayfası ~10 sonuç. 11+ = ikinci sayfa.
-const FIRST_PAGE_LAST_POSITION: f64 = 10.0;
+pub const FIRST_PAGE_LAST_POSITION: f64 = 10.0;
 /// 20'den sonrası "ikinci sayfa fırsatı" sayılmaz — oraya çıkmak küçük bir iyileştirme değil.
 const SECOND_PAGE_LAST_POSITION: f64 = 20.0;
 
 /// Düşük CTR eşiği: beklenenin bu oranının altındaysa meta çekmiyordur.
-const LOW_CTR_RATIO: f64 = 0.5;
+///
+/// ⚠️ `pub`: içerik açığı analizi (`page_kind` / `content_gap`) **aynı** eşiği kullanıyor.
+/// Kopyalanmıyor, paylaşılıyor — projenin tekrar eden dersi bu (kopyalanan sayı zamanla sapar).
+pub const LOW_CTR_RATIO: f64 = 0.5;
 
 /// Listeye girmek için gereken en az kaçırılan tıklama — altı gürültü.
 const MIN_MISSED_CLICKS: f64 = 1.0;

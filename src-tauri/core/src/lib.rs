@@ -25,6 +25,8 @@ pub mod ideasoft;
 pub mod jsonld;
 pub mod metrics;
 pub mod images;
+pub mod content_gap;
+pub mod page_kind;
 pub mod opportunity;
 pub mod queue;
 pub mod quote;
