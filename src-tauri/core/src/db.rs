@@ -403,6 +403,15 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           showcase_content TEXT,
           status INTEGER NOT NULL DEFAULT 1,
           fetched_at TEXT NOT NULL,
+          -- Üretilen ama HENÜZ GÖNDERİLMEMİŞ taslak. Ürün akışındaki `seo_status.draft_*`
+          -- deseninin aynısı: üretim ile mağazaya yazma iki ayrı adım, arada operatör var.
+          draft_page_title TEXT,
+          draft_meta_description TEXT,
+          draft_target_keyword TEXT,
+          draft_showcase TEXT,
+          draft_model TEXT,
+          draft_at TEXT,
+          pushed_at TEXT,
           PRIMARY KEY (kind, remote_id)
         );
         CREATE INDEX IF NOT EXISTS idx_store_pages_slug ON store_pages(slug);
@@ -416,6 +425,21 @@ pub fn init(conn: &Connection) -> Result<(), String> {
 
 /// Eski DB'lere sonradan eklenen kolonları idempotent şekilde ekler.
 fn migrate(conn: &Connection) -> Result<(), String> {
+    // `store_pages` taslak sütunları: tablo bir önceki sürümde taslaksız oluşturulmuş
+    // olabilir ve `CREATE TABLE IF NOT EXISTS` sütun EKLEMEZ (aynı tuzağa `queue_dismissals`
+    // ile bir kez düşüldü, hemen aşağıda yazılı).
+    for kolon in [
+        "draft_page_title TEXT",
+        "draft_meta_description TEXT",
+        "draft_target_keyword TEXT",
+        "draft_showcase TEXT",
+        "draft_model TEXT",
+        "draft_at TEXT",
+        "pushed_at TEXT",
+    ] {
+        let _ = conn.execute(&format!("ALTER TABLE store_pages ADD COLUMN {kolon}"), []);
+    }
+
     // Faz K sonrası: "Yapıldı" işareti hangi analize karşı verildi. ⚠️ CREATE TABLE ile
     // eklenemez — tablo v0.11.0 sonrası kurulumlarda zaten var, `IF NOT EXISTS` sütun eklemez.
     // 🔴 Onarım (2026-08-12): `contact_products.sku` sütununa SKU yerine **slug** yazılmış

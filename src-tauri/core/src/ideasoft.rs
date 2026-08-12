@@ -492,6 +492,83 @@ where
     Ok(out)
 }
 
+/// Mağaza sayfası uç adresi. Uç adı çağırandan geliyor (categories/brands/blogs).
+pub fn store_page_url(domain: &str, uc: &str, id: i64) -> Result<String, String> {
+    Ok(format!("{}/admin-api/{uc}/{id}", base_url(domain)?))
+}
+
+/// Mağaza sayfasının meta alanlarını günceller.
+///
+/// ⚠️ **Kısmi PUT** — yalnızca dolu alanlar gönderiliyor, ürün gönderimindeki desenin
+/// aynısı. Canlı doğrulandı (2026-08-12, taslak bir blog kaydında): PUT birleştirme
+/// mantığında çalışıyor; gönderilmeyen `title`, `content`, `categories`, `status` alanlarına
+/// dokunulmuyor. Tam nesne göndermek gerekmiyor ve göndermek riskli olurdu.
+///
+/// ⚠️ `showcase` blogda YOK: `None` geçilmeli, yoksa uç 400 verebilir.
+///
+/// 🔴 Ölçülen kısıt: IdeaSoft `metaDescription`'ı **160 karakterde sessizce kırpıyor**
+/// (170 gönderildi, 160 saklandı, uyarı yok). Üretim tarafı 155 hedefliyor
+/// (`validation::DESC_MAX`), yani kenara yaklaşmıyor — ama elle düzenlenen metin uzun
+/// olabilir, o yüzden burada da kırpılıyor: sessiz kırpma yerine bizim kırpmamız, en azından
+/// ne gönderdiğimizi bildiğimiz anlamına geliyor.
+pub async fn put_store_page(
+    url: &str,
+    token: &str,
+    page_title: &str,
+    meta_description: &str,
+    target_keyword: &str,
+    showcase: Option<&str>,
+) -> Result<(), String> {
+    let mut body = serde_json::Map::new();
+    let mut koy = |k: &str, v: &str| {
+        if !v.trim().is_empty() {
+            body.insert(k.to_string(), serde_json::Value::String(v.trim().to_string()));
+        }
+    };
+    koy("pageTitle", page_title);
+    koy("metaDescription", &kirp(meta_description, 160));
+    koy("targetKeyword", target_keyword);
+    if let Some(sc) = showcase {
+        koy("showcaseContent", sc);
+    }
+    if body.is_empty() {
+        return Err("Gönderilecek dolu alan yok.".to_string());
+    }
+
+    let resp = http()?
+        .put(url)
+        .bearer_auth(token.trim())
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&serde_json::Value::Object(body))
+        .send()
+        .await
+        .map_err(|e| format!("IdeaSoft'a ulaşılamadı: {e}"))?;
+    let status = resp.status();
+    if status.as_u16() == 401 {
+        return Err("IdeaSoft token süresi dolmuş — Ayarlar'dan yenileyin.".into());
+    }
+    if !status.is_success() {
+        let t = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "Sayfa güncellenemedi (HTTP {}): {}",
+            status.as_u16(),
+            t.chars().take(200).collect::<String>()
+        ));
+    }
+    Ok(())
+}
+
+/// Grapheme değil **karakter** bazlı kırpma: IdeaSoft'un sınırı da öyle davranıyor
+/// (170 karakterlik metin 160'a indi).
+fn kirp(s: &str, max: usize) -> String {
+    let t = s.trim();
+    if t.chars().count() <= max {
+        return t.to_string();
+    }
+    t.chars().take(max).collect()
+}
+
 pub async fn fetch_catalog<F>(
     domain: &str,
     token: &str,
@@ -1115,6 +1192,35 @@ mod tests {
             t0.elapsed().as_secs_f64()
         );
         assert!(hit.is_some(), "slug çözülemedi — arama merdiveni yetersiz olabilir");
+    }
+
+    // ===================== Mağaza sayfası gönderimi (Faz İ4) =====================
+
+    /// 🔴 Ölçülen kısıt: IdeaSoft `metaDescription`'ı 160'ta **sessizce** kırpıyor
+    /// (2026-08-12, taslak blog kaydında 170 gönderildi → 160 saklandı, uyarı yok).
+    /// Kendimiz kırpıyoruz ki ne gönderdiğimizi bilelim.
+    #[test]
+    fn meta_description_160ta_kirpiliyor() {
+        let uzun = "a".repeat(200);
+        assert_eq!(kirp(&uzun, 160).chars().count(), 160);
+        // Kısa metne dokunulmuyor, yalnızca kırpılıyor.
+        assert_eq!(kirp("kısa metin", 160), "kısa metin");
+        // ⚠️ Karakter bazlı: Türkçe harfler tek karakter sayılmalı, bayt değil.
+        let tr = "ğüşiöçĞÜŞİÖÇ".repeat(20);
+        assert_eq!(kirp(&tr, 160).chars().count(), 160);
+    }
+
+    #[test]
+    fn store_page_url_uc_adini_cagirandan_aliyor() {
+        assert_eq!(
+            store_page_url("https://m.com", "categories", 42).unwrap(),
+            "https://m.com/admin-api/categories/42"
+        );
+        assert_eq!(
+            store_page_url("m.com/", "blogs", 7).unwrap(),
+            "https://m.com/admin-api/blogs/7"
+        );
+        assert!(store_page_url("", "blogs", 1).is_err(), "adres yoksa hata");
     }
 
     // ===================== Ürün-dışı sayfa envanteri (Faz İ) =====================
