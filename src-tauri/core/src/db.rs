@@ -358,6 +358,41 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           PRIMARY KEY (snapshot_id, page, query)
         );
         CREATE INDEX IF NOT EXISTS idx_query_rows_query ON query_rows(query);
+
+        -- ===== Mağazanın ürün-dışı sayfa envanteri (Faz İ) =====
+        -- 🔴 İki işi birden yapıyor ve ikisi de ölçümle ortaya çıktı:
+        --
+        -- 1. **Sayfa tipi sınıflandırması.** Bir URL'nin kategori mi blog mu olduğu, yol
+        --    desenine BAKILARAK tahmin edilebilir ama envantere sorulunca ÖLÇÜLÜR. İlk tasarım
+        --    kullanıcıya segment etiketletiyordu; IdeaSoft uçlarının okunabildiği görülünce
+        --    (blogs · categories · brands, hepsi 200) tahmine gerek kalmadı.
+        --    ⚠️ Segment tabanlı yol yine de duruyor (`page_kind`): IdeaSoft modülü OPSİYONEL,
+        --    kullanmayan kullanıcı bu özellikten mahrum kalmamalı.
+        --
+        -- 2. **Meta optimizasyonu.** Ölçüldü (2026-08-12): görünen 47 kategorinin 26'sında üst
+        --    açıklama metni yok, 75 marka sayfasının 24'ünde özel başlık hiç yazılmamış,
+        --    158 blog yazısının 147'sinde başlık yazının aynısı. Alan ailesi ürünlerle aynı
+        --    (`pageTitle` · `metaDescription` · `metaKeywords` · `targetKeyword`), yani ürün
+        --    meta hattı bu kayıtlara da uygulanabilir.
+        --
+        -- `kind`: 'category' | 'brand' | 'blog' — IdeaSoft'taki uç adına karşılık gelir.
+        -- `remote_id` + `kind` birlikte tekil: üç uçta kimlikler çakışabilir.
+        -- ⚠️ `showcase_content` yalnızca kategori ve markada var, blogda yok → NULL olabilir.
+        CREATE TABLE IF NOT EXISTS store_pages (
+          kind TEXT NOT NULL,
+          remote_id INTEGER NOT NULL,
+          slug TEXT NOT NULL,
+          name TEXT NOT NULL,
+          page_title TEXT NOT NULL DEFAULT '',
+          meta_description TEXT NOT NULL DEFAULT '',
+          meta_keywords TEXT NOT NULL DEFAULT '',
+          target_keyword TEXT NOT NULL DEFAULT '',
+          showcase_content TEXT,
+          status INTEGER NOT NULL DEFAULT 1,
+          fetched_at TEXT NOT NULL,
+          PRIMARY KEY (kind, remote_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_store_pages_slug ON store_pages(slug);
         "#,
     )
     .map_err(|e| format!("Şema oluşturulamadı: {e}"))?;

@@ -94,6 +94,85 @@ pub fn classify(
     }
 }
 
+/// Mağaza envanteri: slug → sayfa tipi.
+///
+/// 🔴 **Sınıflandırmanın tercih edilen yolu bu.** Segment deseni bir *tahmin*
+/// (`/blog/icerik/x` blog olabilir), envanter bir *ölçüm* (bu slug gerçekten blog kaydı).
+/// IdeaSoft'un `blogs` · `categories` · `brands` uçları okunabildiği için (2026-08-12,
+/// üçü de 200) tahmine gerek yok.
+///
+/// ⚠️ Envanter **tek başına yetmez**, segment yolu da gerekli: IdeaSoft modülü opsiyonel,
+/// ayrıca envanterde olmayan sayfalar var (anasayfa, form sayfaları, arama sonuçları).
+#[derive(Debug, Clone, Default)]
+pub struct StoreInventory {
+    /// Küçük harfe indirgenmiş slug → tip.
+    by_slug: HashMap<String, PageKind>,
+}
+
+impl StoreInventory {
+    /// `(slug, tip)` çiftlerinden kurar.
+    pub fn new(rows: impl IntoIterator<Item = (String, PageKind)>) -> Self {
+        Self {
+            by_slug: rows
+                .into_iter()
+                .map(|(s, k)| (s.trim().to_lowercase(), k))
+                .filter(|(s, _)| !s.is_empty())
+                .collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_slug.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_slug.len()
+    }
+
+    /// URL'nin **son** yol parçasına göre tip. Bulunamazsa `None`.
+    ///
+    /// Son parça kullanılıyor çünkü blog adresleri iç içe olabiliyor
+    /// (`/blog/icerik/<slug>`) ve envanterde duran şey yalnızca slug.
+    pub fn kind_of(&self, url: &str) -> Option<PageKind> {
+        self.by_slug.get(&last_segment(url)?).copied()
+    }
+}
+
+/// URL'nin son yol parçası — sorgu dizesi ve sondaki `/` atılmış, küçük harfe indirgenmiş.
+pub fn last_segment(url: &str) -> Option<String> {
+    // ⚠️ Alan adı ATILMALI. İlk sürüm bunu yapmıyordu ve `https://m.com/` için "m.com"
+    // döndürüyordu — anasayfa bir slug sanılıyordu. `first_segment` ile aynı yol izleniyor;
+    // iki fonksiyon aynı ayrıştırmayı farklı yaparsa biri sessizce sapar.
+    let after = url.split("://").nth(1).unwrap_or(url);
+    let path = after.split_once('/').map(|x| x.1).unwrap_or("");
+    let path = path.split(['?', '#']).next().unwrap_or("");
+    path.trim_end_matches('/')
+        .rsplit('/')
+        .find(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+}
+
+/// Sınıflandırmanın **tam** hâli: önce envanter (ölçüm), sonra segment (tahmin).
+///
+/// Sıra önemli ve tersi yanlış olurdu: `/blog/etiket/fortinet-nedir` gibi bir adres segment
+/// yoluna göre "blog" görünür ama envanterde bir blog KAYDI değil (etiket sayfası). Envanter
+/// önce sorulunca bu ayrım kendiliğinden çıkıyor.
+pub fn classify_full(
+    url: &str,
+    inventory: &StoreInventory,
+    product_segment: Option<&str>,
+    labels: &HashMap<String, PageKind>,
+) -> PageKind {
+    // Anasayfa envanterde yok ve olmamalı — segment yolu onu doğru veriyor.
+    if first_segment(url).is_none() {
+        return PageKind::Home;
+    }
+    if let Some(k) = inventory.kind_of(url) {
+        return k;
+    }
+    classify(url, product_segment, labels)
+}
+
 /// Verideki segmentleri sayfa sayısıyla listeler — kullanıcı etiketleyebilsin diye.
 ///
 /// Ürün segmenti ve zaten etiketlenmiş olanlar dışarıda bırakılıyor: ekranda kullanıcıya
@@ -168,6 +247,93 @@ mod tests {
         assert_eq!(bilinmeyen.serves_informational(), None);
         assert_eq!(PageKind::Blog.serves_informational(), Some(true));
         assert_eq!(PageKind::Category.serves_informational(), Some(false));
+    }
+
+    fn envanter() -> StoreInventory {
+        StoreInventory::new([
+            ("fortigate-nedir-hangi-alanlarda-kullanilir".to_string(), PageKind::Blog),
+            ("lenovo-bilgisayarlarda-bios-tusu".to_string(), PageKind::Blog),
+            ("guvenlik-duvari-firewall".to_string(), PageKind::Category),
+            ("ergotron".to_string(), PageKind::Brand),
+        ])
+    }
+
+    #[test]
+    fn son_segment_cikarimi() {
+        assert_eq!(last_segment("https://m.com/blog/icerik/abc"), Some("abc".into()));
+        assert_eq!(last_segment("https://m.com/blog/icerik/abc/"), Some("abc".into()));
+        assert_eq!(last_segment("https://m.com/kategori/x?tp=1"), Some("x".into()));
+        assert_eq!(last_segment("https://m.com/"), None, "anasayfada son parça yok");
+        assert_eq!(last_segment("https://m.com"), None, "yolsuz adreste de alan adı sızmamalı");
+        assert_eq!(last_segment("https://m.com/ergotron"), Some("ergotron".into()));
+    }
+
+    /// 🔴 Envanter, segment tahmininin YANILDIĞI yeri düzeltiyor. Gerçek veride doğrulandı
+    /// (2026-08-12): `/blog/etiket/fortinet-nedir` segment yoluna göre "blog" görünüyor ama
+    /// blog envanterindeki 252 slug arasında `fortinet-nedir` YOK — o bir etiket sayfası.
+    /// Etiket sayfasına "içerik var" demek, olmayan bir yazıyı varmış saymaktı.
+    #[test]
+    fn envanter_segment_tahminini_duzeltiyor() {
+        let env = envanter();
+        let e = etiketler(); // segment yolu: blog → Blog
+        let seg = classify("https://m.com/blog/etiket/fortinet-nedir", Some("urun"), &e);
+        assert_eq!(seg, PageKind::Blog, "segment yolu blog sanıyor");
+
+        let tam = classify_full("https://m.com/blog/etiket/fortinet-nedir", &env, Some("urun"), &e);
+        assert_eq!(tam, PageKind::Blog, "segment yedeği devrede — envanterde yok ama yol blog");
+
+        // Envanterdeki gerçek bir yazı: tip envanterden geliyor.
+        assert_eq!(
+            classify_full(
+                "https://m.com/blog/icerik/lenovo-bilgisayarlarda-bios-tusu",
+                &env, Some("urun"), &e
+            ),
+            PageKind::Blog
+        );
+    }
+
+    /// Envanter, yol deseninin YETMEDİĞİ yerde kazandırıyor: markanın kendi yolu olmasa da
+    /// slug envanterde varsa tip biliniyor.
+    #[test]
+    fn envanter_yol_deseni_olmadan_da_calisiyor() {
+        let env = envanter();
+        let bos: HashMap<String, PageKind> = HashMap::new();
+        // Etiket yok, ürün segmenti yok — yalnızca envanter var.
+        assert_eq!(
+            classify_full("https://m.com/ergotron", &env, None, &bos),
+            PageKind::Brand
+        );
+        assert_eq!(
+            classify_full("https://m.com/guvenlik-duvari-firewall", &env, None, &bos),
+            PageKind::Category
+        );
+        // Envanterde de yok, etiket de yok → hüküm verilmiyor.
+        assert_eq!(classify_full("https://m.com/destek/sss", &env, None, &bos), PageKind::Other);
+    }
+
+    /// Anasayfa envanterde aranmaz; slug'ı yok.
+    #[test]
+    fn anasayfa_envanterden_bagimsiz() {
+        assert_eq!(
+            classify_full("https://m.com/", &envanter(), Some("urun"), &etiketler()),
+            PageKind::Home
+        );
+    }
+
+    /// IdeaSoft modülü kapalıysa envanter boş kalır ve her şey segment yoluna düşer —
+    /// özellik kaybolmaz, yalnızca kesinliği azalır.
+    #[test]
+    fn bos_envanter_segment_yoluna_dusuyor() {
+        let bos_env = StoreInventory::default();
+        assert!(bos_env.is_empty());
+        assert_eq!(
+            classify_full("https://m.com/blog/icerik/x", &bos_env, Some("urun"), &etiketler()),
+            PageKind::Blog
+        );
+        assert_eq!(
+            classify_full("https://m.com/urun/x", &bos_env, Some("urun"), &etiketler()),
+            PageKind::Product
+        );
     }
 
     #[test]
