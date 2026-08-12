@@ -43,6 +43,13 @@ pub struct OpportunityReport {
     pub cannibalization: Vec<opportunity::Cannibalization>,
     /// Önceki döneme göre gerileyen sayfalar — kaybedilen tıklamaya göre sıralı.
     pub decay: Vec<opportunity::Decay>,
+    /// **İçerik açığı** (Faz İ): sıralanan sayfanın tipi sorgunun niyetini karşılamıyor.
+    /// ⚠️ `serde(default)`: eski önbellekte bu alanlar YOK.
+    #[serde(default)]
+    pub content_gaps: Vec<content_gap::ContentGap>,
+    /// Kovalanmayacak sorgular — kuyruğa girmiyorlar ama kullanıcı gerekçesini görsün.
+    #[serde(default)]
+    pub navigational: Vec<content_gap::Navigational>,
 }
 
 impl Default for OpportunityReport {
@@ -59,6 +66,8 @@ impl Default for OpportunityReport {
             striking: Vec::new(),
             cannibalization: Vec::new(),
             decay: Vec::new(),
+            content_gaps: Vec::new(),
+            navigational: Vec::new(),
         }
     }
 }
@@ -194,12 +203,19 @@ pub async fn analyze_opportunities(
     // Yol öneki ürünlerden türetiliyor; blog/kategori sayfaları hiç gelmesin diye.
     // Bu çağrı başarısız olursa analizin GERİ KALANI YİNE DÖNSÜN — sorgu katmanı
     // ek bilgidir, onun yokluğu tüm raporu kaybettirmemeli.
+    let mut icerik: (Vec<content_gap::ContentGap>, Vec<content_gap::Navigational>) =
+        (Vec::new(), Vec::new());
+    // 🔴 **Ürün yolu filtresi KALDIRILDI.** Daha önce `path_prefix` GSC'ye
+    // `dimensionFilterGroups` olarak gidiyordu, yani blog/kategori/marka sorgu satırları
+    // hiç indirilmiyordu. Ölçüldü (2026-08-12): filtre kalkınca +6.276 satır / +5.700 sorgu /
+    // +101.118 gösterim geliyor ve içerik açığı tam olarak orada. Maliyet ihmal edilebilir:
+    // 23.914 → 30.190 satır, 2,1 → 3,8 sn.
     let (striking, cannibalization) = match seo_data::gsc::query_page_stats(
         &client,
         &gsc_json,
         gsc_site.trim(),
         OPPORTUNITY_DAYS,
-        path_prefix.as_deref(),
+        None,
         60_000,
     )
     .await
@@ -228,6 +244,14 @@ pub async fn analyze_opportunities(
                     )
                 })
                 .collect();
+            // Sorgu satırlarını sakla (eşik `metrics::kept` ile paylaşımlı) ve içerik
+            // açığını çıkar. Bu bloğun `striking`/`cannibalization` ile aynı veriyi
+            // kullanması bilinçli: aynı çekimden iki farklı soru cevaplanıyor.
+            {
+                let conn = state.conn.lock().unwrap();
+                let _ = kaydet_query_rows(&conn, &qp);
+                icerik = icerik_acigi(&conn, &qp, &product_index);
+            }
             (
                 opportunity::striking_distance(&rows, &by_page),
                 opportunity::cannibalization(&rows, &by_page),
@@ -271,6 +295,8 @@ pub async fn analyze_opportunities(
         striking,
         cannibalization,
         decay,
+        content_gaps: icerik.0,
+        navigational: icerik.1,
     };
 
     // Önbelleğe al: GSC verisi günlük değişir, her sayfa açılışında API'ye gitmeye gerek yok.
@@ -297,6 +323,91 @@ pub struct SuccessorSuggestion {
     pub model: String,
     /// Deterministik adaylar — model seçmese de operatör kendi bakabilsin.
     pub candidates: Vec<opportunity::SuccessorCandidate>,
+}
+
+/// Sorgu × sayfa satırlarını saklar. Eşik sayfa satırlarıyla **aynı** (`metrics::kept`).
+///
+/// Tam yenileme: `query_rows` yalnızca en son çekimi tutuyor (gerekçe `db.rs`'de).
+fn kaydet_query_rows(
+    conn: &Connection,
+    qp: &[seo_data::QueryPageStat],
+) -> Result<usize, String> {
+    let now = now_str();
+    conn.execute("DELETE FROM query_rows", [])
+        .map_err(|e| format!("Sorgu satırları temizlenemedi: {e}"))?;
+    let mut stmt = conn
+        .prepare(
+            "INSERT OR REPLACE INTO query_rows
+             (captured_at, window_days, page, query, clicks, impressions, position)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        )
+        .map_err(|e| format!("Sorgu satırları yazılamadı: {e}"))?;
+    let mut n = 0usize;
+    for r in qp {
+        if !seo_core::metrics::kept(r.clicks, r.impressions) {
+            continue;
+        }
+        if stmt
+            .execute(params![
+                now,
+                OPPORTUNITY_DAYS,
+                norm_url(&r.page),
+                r.query,
+                r.clicks,
+                r.impressions,
+                r.position
+            ])
+            .is_ok()
+        {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// İçerik açığını çıkarır: navigasyonel sorguları ayırır, kalanı üç kovaya böler.
+///
+/// Sınıflandırma **envanter öncelikli** (`page_kind::classify_full`): IdeaSoft modülü açıksa
+/// sayfa tipi ölçülüyor, kapalıysa segment yoluna düşülüyor.
+fn icerik_acigi(
+    conn: &Connection,
+    qp: &[seo_data::QueryPageStat],
+    product_index: &std::collections::HashMap<String, (String, String)>,
+) -> (Vec<content_gap::ContentGap>, Vec<content_gap::Navigational>) {
+    use std::collections::HashSet;
+
+    let rows: Vec<(String, String, f64, f64, f64)> = qp
+        .iter()
+        .filter(|r| seo_core::metrics::kept(r.clicks, r.impressions))
+        .map(|r| (norm_url(&r.page), r.query.clone(), r.clicks, r.impressions, r.position))
+        .collect();
+
+    // Markalar KATALOGDAN, site adı GSC adresinden — ikisi de koda gömülü değil.
+    let markalar: HashSet<String> = conn
+        .prepare("SELECT DISTINCT lower(trim(brand)) FROM products WHERE COALESCE(brand,'') <> ''")
+        .and_then(|mut st| {
+            st.query_map([], |r| r.get::<_, String>(0))
+                .map(|it| it.filter_map(|x| x.ok()).collect())
+        })
+        .unwrap_or_default();
+    let site = db::get_setting(conn, "gsc_site_url").ok().flatten().unwrap_or_default();
+    let site_tokens: HashSet<String> =
+        content_gap::site_brand_tokens(&site).into_iter().collect();
+
+    let (kalan, nav) = content_gap::split_navigational(&rows, &markalar, &site_tokens);
+
+    let envanter = super::load_inventory(conn);
+    let urun_urls: Vec<String> = product_index.keys().cloned().collect();
+    let urun_seg = opportunity::common_path_prefix(&urun_urls)
+        .map(|p| p.trim_matches('/').to_string());
+    // Segment etiketleri: envanter varsa gerekmiyor. IdeaSoft kapalıysa kullanıcı Ayarlar'dan
+    // verecek — o akış henüz yok, o yüzden şimdilik boş ve etiketsiz segment iş düşürmüyor.
+    let etiketler = std::collections::HashMap::new();
+
+    let kind_of = |u: &str| page_kind::classify_full(u, &envanter, urun_seg.as_deref(), &etiketler);
+    let name_of = |u: &str| product_index.get(u).map(|(_, ad)| ad.clone());
+    let gaps = content_gap::find_gaps(&kalan, &kind_of, &name_of);
+    (gaps, nav)
 }
 
 /// Satışta olmayan bir sayfa için halef ürün önerisi.
@@ -496,6 +607,8 @@ mod tests {
                     clicks_lost: 15.0,
                 })
                 .collect(),
+            content_gaps: Vec::new(),
+            navigational: Vec::new(),
         };
 
         let t = Instant::now();

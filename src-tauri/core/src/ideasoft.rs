@@ -381,6 +381,117 @@ pub async fn resolve_slug(
 ///
 /// `on_progress` her sayfadan sonra (çekilen, toplam) ile çağrılır — uzun süren işlemde
 /// kullanıcı ilerlemeyi görsün.
+/// Ürün-dışı bir mağaza sayfası: kategori · marka · blog kaydı.
+///
+/// 🔴 Üçü **tek yapıda** duruyor çünkü alan ailesi birebir aynı — IdeaSoft'un üç ucu da
+/// `pageTitle` · `metaDescription` · `metaKeywords` · `targetKeyword` veriyor (canlı
+/// doğrulandı 2026-08-12). Üç ayrı yapı yazmak, aynı meta hattını üç kez kurmak demekti.
+///
+/// ⚠️ `showcase_content` yalnızca kategori ve markada var; blogda karşılığı yok → `None`.
+/// Kategoride ölçülen eksik tam olarak bu alan (görünen 47 kategorinin 26'sında boş).
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+pub struct StorePage {
+    pub kind: String,
+    pub id: i64,
+    pub slug: String,
+    pub name: String,
+    pub page_title: String,
+    pub meta_description: String,
+    pub meta_keywords: String,
+    pub target_keyword: String,
+    pub showcase_content: Option<String>,
+    pub status: i64,
+}
+
+/// Envanterde çekilecek üç uç. `(kind, uç adı, ad alanı)`.
+///
+/// `name` alanı blogda `title`, diğerlerinde `name` — tek fark bu, o yüzden tabloda.
+pub const STORE_PAGE_KINDS: &[(&str, &str, &str)] = &[
+    ("category", "categories", "name"),
+    ("brand", "brands", "name"),
+    ("blog", "blogs", "title"),
+];
+
+fn parse_store_page(v: &serde_json::Value, kind: &str, ad_alani: &str) -> StorePage {
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+    StorePage {
+        kind: kind.to_string(),
+        id: v.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
+        slug: s("slug"),
+        name: s(ad_alani),
+        page_title: s("pageTitle"),
+        meta_description: s("metaDescription"),
+        meta_keywords: s("metaKeywords"),
+        target_keyword: s("targetKeyword"),
+        // ⚠️ `is_string()` kontrolü gerekli: blogda alan HİÇ YOK, kategoride null olabilir.
+        // İkisini ayırmak önemli — "alan yok" ile "alan boş" farklı şeyler.
+        showcase_content: v
+            .get("showcaseContent")
+            .and_then(|x| x.as_str())
+            .map(|x| x.to_string()),
+        status: v.get("status").and_then(|x| x.as_i64()).unwrap_or(1),
+    }
+}
+
+/// Ürün-dışı sayfa envanterini çeker (kategori + marka + blog).
+///
+/// ⚠️ Hız sınırı ~40 istek/dk. Ölçülen gerçek hacim (2026-08-12): kategori 1 sayfa,
+/// marka 3, blog 3 → toplam ~7 istek. Yine de sayfalar arasında bekleniyor;
+/// `fetch_catalog` ile aynı nezaket.
+pub async fn fetch_store_pages<F>(
+    domain: &str,
+    token: &str,
+    mut on_progress: F,
+) -> Result<Vec<StorePage>, String>
+where
+    F: FnMut(&str, usize),
+{
+    const PAGE: usize = 100;
+    let base = base_url(domain)?;
+    let client = http()?;
+    let mut out: Vec<StorePage> = Vec::new();
+
+    for (kind, uc, ad_alani) in STORE_PAGE_KINDS {
+        let mut page = 1usize;
+        loop {
+            let resp = client
+                .get(format!("{base}/admin-api/{uc}"))
+                .query(&[("limit", PAGE.to_string()), ("page", page.to_string())])
+                .bearer_auth(token.trim())
+                .header("Accept", "application/json")
+                .send()
+                .await
+                .map_err(|e| format!("IdeaSoft'a ulaşılamadı: {e}"))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if status.as_u16() == 401 {
+                return Err("IdeaSoft token süresi dolmuş — Ayarlar'dan yenileyin.".into());
+            }
+            // ⚠️ Bir uç yoksa (404) TÜM envanter düşmüyor: temaya/sürüme göre bir uç
+            // kapalı olabilir ve kalan ikisi yine değerli.
+            if status.as_u16() == 404 {
+                break;
+            }
+            if !status.is_success() {
+                return Err(format!("IdeaSoft {uc} hatası (HTTP {})", status.as_u16()));
+            }
+            let arr: Vec<serde_json::Value> = serde_json::from_str(&text)
+                .map_err(|e| format!("{uc} yanıtı okunamadı: {e}"))?;
+            let got = arr.len();
+            for v in &arr {
+                out.push(parse_store_page(v, kind, ad_alani));
+            }
+            on_progress(kind, out.len());
+            if got < PAGE {
+                break;
+            }
+            page += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(1600)).await;
+        }
+    }
+    Ok(out)
+}
+
 pub async fn fetch_catalog<F>(
     domain: &str,
     token: &str,
@@ -1004,5 +1115,62 @@ mod tests {
             t0.elapsed().as_secs_f64()
         );
         assert!(hit.is_some(), "slug çözülemedi — arama merdiveni yetersiz olabilir");
+    }
+
+    // ===================== Ürün-dışı sayfa envanteri (Faz İ) =====================
+
+    /// 🔴 "Alan YOK" ile "alan BOŞ" ayrımı. Blogda `showcaseContent` hiç yok, kategoride
+    /// null ya da dolu olabiliyor. İkisini `""` diye birleştirseydik "bu kategoride üst
+    /// metin yazılmamış" ile "bu varlıkta böyle bir alan yok" aynı görünürdü — ve ölçülen
+    /// asıl eksik tam olarak o alan (görünen 47 kategorinin 26'sında boş).
+    #[test]
+    fn showcase_alani_yok_ile_bos_ayri() {
+        let kategori_dolu = serde_json::json!({
+            "id": 2212, "name": "Bilgisayar", "slug": "bilgisayar",
+            "pageTitle": "Bilgisayar ve Fiyatları", "metaDescription": "…",
+            "targetKeyword": "Bilgisayar", "showcaseContent": "<p>metin</p>", "status": 1
+        });
+        let p = parse_store_page(&kategori_dolu, "category", "name");
+        assert_eq!(p.showcase_content.as_deref(), Some("<p>metin</p>"));
+        assert_eq!(p.kind, "category");
+        assert_eq!(p.name, "Bilgisayar");
+
+        // Kategori ama alan null → Some değil None (yazılmamış)
+        let kategori_null = serde_json::json!({
+            "id": 1, "name": "X", "slug": "x", "showcaseContent": serde_json::Value::Null
+        });
+        assert_eq!(parse_store_page(&kategori_null, "category", "name").showcase_content, None);
+
+        // Blog: alan hiç yok, ad alanı `title`
+        let blog = serde_json::json!({
+            "id": 225, "title": "Lenovo BIOS Tuşu", "slug": "lenovo-bios",
+            "pageTitle": "Lenovo BIOS Tuşu", "metaDescription": "d"
+        });
+        let b = parse_store_page(&blog, "blog", "title");
+        assert_eq!(b.showcase_content, None);
+        assert_eq!(b.name, "Lenovo BIOS Tuşu", "blogda ad alanı `title`");
+        assert_eq!(b.status, 1, "status yoksa yayında varsayılıyor");
+    }
+
+    /// Eksik alanlar boş dizeye düşmeli, çözümleme kırılmamalı — canlı yanıtta `metaKeywords`
+    /// %94 boş geliyor (ölçüldü).
+    #[test]
+    fn eksik_alanlar_cozumlemeyi_kirmiyor() {
+        let v = serde_json::json!({ "id": 7 });
+        let p = parse_store_page(&v, "brand", "name");
+        assert_eq!(p.id, 7);
+        assert!(p.slug.is_empty() && p.page_title.is_empty() && p.meta_keywords.is_empty());
+    }
+
+    /// Üç uç ve ad alanları — blogun `title` kullanması tek istisna.
+    #[test]
+    fn envanter_uclari_beklenen_bicimde() {
+        assert_eq!(STORE_PAGE_KINDS.len(), 3);
+        let blog = STORE_PAGE_KINDS.iter().find(|(k, _, _)| *k == "blog").unwrap();
+        assert_eq!(blog.1, "blogs");
+        assert_eq!(blog.2, "title", "blogda ad alanı farklı, bu yüzden tabloda tutuluyor");
+        for (_, uc, alan) in STORE_PAGE_KINDS {
+            assert!(!uc.is_empty() && !alan.is_empty());
+        }
     }
 }

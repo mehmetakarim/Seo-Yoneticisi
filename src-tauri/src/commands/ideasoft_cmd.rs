@@ -229,6 +229,147 @@ pub struct CatalogSyncResult {
 
 /// IdeaSoft kataloğunu (tüm ürünler) çekip yerel tabloya yazar.
 ///
+/// Ürün-dışı sayfa envanteri senkronunun sonucu — tip başına sayı ve eksik alanlar.
+#[derive(Serialize)]
+pub struct StorePageSyncResult {
+    pub total: usize,
+    /// `(tip, kayıt, GSC'de görünen, eksik alanı olan)`.
+    pub by_kind: Vec<(String, usize, usize, usize)>,
+    pub synced_at: String,
+}
+
+/// Kategori · marka · blog envanterini IdeaSoft'tan çeker.
+///
+/// **Neden ayrı bir senkron.** Ürün feed'i XML'den geliyor; bu üçünün XML'de karşılığı yok,
+/// yalnızca Admin API'de var (canlı doğrulandı 2026-08-12: üç uç da 200). Envanter iki işe
+/// yarıyor: sayfa tipini TAHMİN etmek yerine ÖLÇMEK (`page_kind::StoreInventory`) ve meta
+/// optimizasyonu için hangi alanın eksik olduğunu bilmek.
+///
+/// ⚠️ Hızlı: ölçülen gerçek hacim ~7 istek (kategori 1 · marka 3 · blog 3 sayfa).
+/// Katalog senkronundan (~110 istek) bu yüzden ayrı tutuluyor — biri dakikalar sürüyor,
+/// bu saniyeler. Tek düğmede birleştirmek kısa olanı uzun olanın arkasına saklardı.
+#[tauri::command]
+pub async fn sync_store_pages(
+    state: State<'_, AppState>,
+) -> Result<StorePageSyncResult, String> {
+    let (domain, token) = {
+        let conn = state.conn.lock().unwrap();
+        (
+            db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default(),
+            db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default(),
+        )
+    };
+    if domain.trim().is_empty() || token.trim().is_empty() {
+        return Err("IdeaSoft bağlantısı kurulmamış. Ayarlar'dan alan adı ve token girin.".into());
+    }
+
+    let pages = ideasoft::fetch_store_pages(&domain, &token, |_kind, _n| {}).await?;
+    let now = now_str();
+
+    let mut conn = state.conn.lock().unwrap();
+    let tx = conn.transaction().map_err(|e| format!("İşlem başlatılamadı: {e}"))?;
+    // Tam yenileme: mağazadan silinen kategori/marka/yazı envanterde kalmasın, yoksa
+    // sınıflandırma var olmayan bir sayfaya tip verir.
+    tx.execute("DELETE FROM store_pages", [])
+        .map_err(|e| format!("Envanter temizlenemedi: {e}"))?;
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT OR REPLACE INTO store_pages
+                 (kind, remote_id, slug, name, page_title, meta_description, meta_keywords,
+                  target_keyword, showcase_content, status, fetched_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            )
+            .map_err(|e| format!("Envanter yazılamadı: {e}"))?;
+        for x in &pages {
+            if x.slug.is_empty() {
+                continue;
+            }
+            let _ = stmt.execute(params![
+                x.kind,
+                x.id,
+                x.slug.to_lowercase(),
+                x.name,
+                x.page_title,
+                x.meta_description,
+                x.meta_keywords,
+                x.target_keyword,
+                x.showcase_content,
+                x.status,
+                now
+            ]);
+        }
+    }
+    tx.commit().map_err(|e| format!("Envanter kaydedilemedi: {e}"))?;
+
+    let by_kind = store_page_summary(&conn)?;
+    Ok(StorePageSyncResult { total: pages.len(), by_kind, synced_at: now })
+}
+
+/// Tip başına: kayıt · GSC'de görünen · eksik alanı olan.
+///
+/// "Görünen" ölçümü önemli: envanterde 265 marka var ama GSC'de yalnızca 75'i görünüyor
+/// (ölçüldü). Görünmeyen bir sayfanın meta'sını düzeltmek ölçülebilir bir sonuç üretmez —
+/// ekranda bu ayrım yapılmalı.
+pub(crate) fn store_page_summary(
+    conn: &Connection,
+) -> Result<Vec<(String, usize, usize, usize)>, String> {
+    let mut out = Vec::new();
+    for (kind, _, _) in ideasoft::STORE_PAGE_KINDS {
+        let (n, gorunen, eksik): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT
+                   COUNT(*),
+                   SUM(CASE WHEN EXISTS (
+                       SELECT 1 FROM metric_page_rows r
+                       WHERE r.snapshot_id = (SELECT MAX(id) FROM metric_snapshots)
+                         AND lower(r.url) LIKE '%/' || sp.slug
+                   ) THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN trim(page_title) = '' OR trim(meta_description) = ''
+                             OR trim(page_title) = trim(name)
+                        THEN 1 ELSE 0 END)
+                 FROM store_pages sp WHERE kind = ?1 AND status = 1",
+                [kind],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                        r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                    ))
+                },
+            )
+            .unwrap_or((0, 0, 0));
+        out.push((kind.to_string(), n as usize, gorunen as usize, eksik as usize));
+    }
+    Ok(out)
+}
+
+/// Envanteri sınıflandırma için yükler. IdeaSoft modülü kapalıysa boş döner ve
+/// `classify_full` segment yoluna düşer — özellik kaybolmaz.
+pub(crate) fn load_inventory(conn: &Connection) -> page_kind::StoreInventory {
+    let mut st = match conn.prepare("SELECT slug, kind FROM store_pages WHERE status = 1") {
+        Ok(s) => s,
+        Err(_) => return page_kind::StoreInventory::default(),
+    };
+    let rows = st
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map(|it| {
+            it.filter_map(|x| x.ok())
+                .filter_map(|(slug, kind)| {
+                    let k = match kind.as_str() {
+                        "category" => page_kind::PageKind::Category,
+                        "brand" => page_kind::PageKind::Brand,
+                        "blog" => page_kind::PageKind::Blog,
+                        _ => return None,
+                    };
+                    Some((slug, k))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    page_kind::StoreInventory::new(rows)
+}
+
 /// **Neden:** XML feed bilinçli olarak sınırlı — bu mağazada 10.909 üründen 262'si.
 /// Feed dışı sayfalar Google'dan ciddi trafik alıyor (ölçüm: ürün trafiğinin %69'u) ama
 /// uygulama onları hiç görmüyordu. Katalog bir kez çekilince EOL sayfalar slug ile

@@ -5,7 +5,10 @@ use seo_core::validation::{
     details_badge, image_badge, meta_badge, overall_status, MetaBadge, MetaInput, OverallInput,
     OverallStatus,
 };
-use seo_core::{db, csv_import, feed, fingerprint, gemini, history, jsonld, opportunity, sync};
+use seo_core::{
+    content_gap, csv_import, db, feed, fingerprint, gemini, history, jsonld, opportunity,
+    page_kind, sync,
+};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::path::PathBuf;

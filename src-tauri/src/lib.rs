@@ -130,6 +130,7 @@ pub fn run() {
             commands::get_opportunity_cache,
             commands::suggest_eol_successor,
             commands::sync_ideasoft_catalog,
+            commands::sync_store_pages,
             commands::lookup_catalog,
             commands::search_live_products,
             commands::assistant_ask,

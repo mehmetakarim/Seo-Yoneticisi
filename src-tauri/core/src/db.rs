@@ -348,14 +348,27 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         -- 169.944 gösterim · blog 2.467 / 54.519 · kategori 2.211 / 29.682 · marka 1.187 /
         -- 10.338 · anasayfa+diğer 411 / 6.579. Ürün dışı toplam **5.700 sorgu, 101.118
         -- gösterim** — uygulamanın bugüne kadar hiç görmediği kısım.
+        -- ⚠️ `metric_snapshots`'a BAĞLI DEĞİL ve bu bilinçli: pencereler farklı. Anlık
+        -- görüntüler 28 günlük döşenmiş dilimler, sorgu verisi 90 günlük analiz penceresi.
+        -- Sorgu satırlarını bir anlık görüntünün kimliğine bağlamak, satırların o
+        -- görüntünün penceresine ait olduğunu söylemek olurdu — yanlış olurdu.
+        --
+        -- ⚠️ **Yalnızca EN SON çekim tutuluyor**, her analizde değiştiriliyor. Faz Ö'nün
+        -- "anlık görüntüler değiştirilemez" kuralı burada geçerli değil çünkü soru farklı:
+        -- içerik açığı bir DURUM sorusu ("bugün hangi sorguda yanlış sayfa çıkıyor"), trend
+        -- sorusu değil. "İşe yaradı mı?" sorusu sayfa düzeyinde `metric_page_rows` ile
+        -- cevaplanıyor — bir kategori sayfasına metin eklenince o sayfanın tıklaması değişir.
+        -- Sorgu düzeyi trend gerekirse o zaman ölçülüp eklenir; şimdi eklemek, ihtiyacı
+        -- ölçülmemiş bir maliyet olurdu (30.190 satır × dönem).
         CREATE TABLE IF NOT EXISTS query_rows (
-          snapshot_id INTEGER NOT NULL REFERENCES metric_snapshots(id) ON DELETE CASCADE,
+          captured_at TEXT NOT NULL,
+          window_days INTEGER NOT NULL,
           page TEXT NOT NULL,
           query TEXT NOT NULL,
           clicks REAL NOT NULL DEFAULT 0,
           impressions REAL NOT NULL DEFAULT 0,
           position REAL NOT NULL DEFAULT 0,
-          PRIMARY KEY (snapshot_id, page, query)
+          PRIMARY KEY (page, query)
         );
         CREATE INDEX IF NOT EXISTS idx_query_rows_query ON query_rows(query);
 
