@@ -610,6 +610,14 @@ def main():
         "      return Promise.resolve(new URLSearchParams(location.search).has('kullanimyok')\n"
         f"        ? {json.dumps(KULLANIM_BOS, ensure_ascii=False)}\n"
         f"        : {json.dumps(KULLANIM, ensure_ascii=False)});\n"
+        # Sayfa envanteri (Faz İ). ⚠️ Sayılar UYDURULMADI — 2026-08-12 canlı ölçümü:
+        # kategori 56 kayıt / 47 görünen · marka 265 / 75 · blog 250 / 158.
+        # `?envhata=1` → IdeaSoft kapalı/token geçersiz hâli.
+        "    if (cmd === 'sync_store_pages')\n"
+        "      return new URLSearchParams(location.search).has('envhata')\n"
+        "        ? Promise.reject('IdeaSoft bağlantısı kurulmamış. Ayarlar\\'dan alan adı ve token girin.')\n"
+        "        : Promise.resolve({ total: 571, synced_at: '2026-08-12T19:00:00',\n"
+        "            by_kind: [['category', 56, 47, 8], ['brand', 265, 75, 26], ['blog', 250, 158, 151]] });\n"
         "    if (new URLSearchParams(location.search).has('setup')) {\n"
         "      if (cmd === 'needs_setup') return Promise.resolve(true);\n"
         "      if (cmd === 'get_settings') return Promise.resolve({\n"

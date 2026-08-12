@@ -144,6 +144,33 @@ interface Zincir {
   secim: string;
 }
 
+// ===================== Sayfa envanteri (Faz İ) =====================
+const envanter = ref<[string, number, number, number][]>([]);
+const envYukleniyor = ref(false);
+const envHint = ref("");
+const envHataMi = ref(false);
+const ENV_AD: Record<string, string> = {
+  category: "Kategori",
+  brand: "Marka",
+  blog: "İçerik",
+};
+
+async function envanterCek() {
+  envYukleniyor.value = true;
+  envHint.value = "";
+  try {
+    const r = await api.syncStorePages();
+    envanter.value = r.by_kind;
+    envHataMi.value = false;
+    envHint.value = `${r.total} kayıt alındı.`;
+  } catch (e) {
+    envHataMi.value = true;
+    envHint.value = String(e);
+  } finally {
+    envYukleniyor.value = false;
+  }
+}
+
 const modeller = ref<string[]>([]);
 const modelYukleniyor = ref(false);
 const modelHint = ref("");
@@ -694,6 +721,44 @@ async function doImport() {
             </div>
             <div class="fhint" :style="{ color: isHint ? (isOk ? 'var(--green)' : 'var(--red)') : 'var(--c-faint)' }">
               {{ isHint || "Token günlük yenilenir; gönderim yetki hatası verirse buradan güncelleyin." }}
+            </div>
+          </div>
+
+          <!-- Sayfa envanteri (Faz İ) -->
+          <div>
+            <label class="lbl">Sayfa envanteri</label>
+            <div class="zhint">
+              Kategori, marka ve blog kayıtlarınız. İçerik açığı ekranı bir adresin hangi tür
+              sayfa olduğunu bu envanterden <b>ölçer</b>; envanter yoksa adres deseninden
+              tahmin etmek zorunda kalır.
+            </div>
+            <div class="css-row">
+              <button class="ghost" :disabled="envYukleniyor" @click="envanterCek">
+                <Icon name="refresh" :size="14" :class="{ spin: envYukleniyor }" />
+                {{ envYukleniyor ? "Çekiliyor…" : "Envanteri çek" }}
+              </button>
+              <span class="fhint" :style="{ color: envHataMi ? 'var(--red)' : 'var(--c-faint)' }">
+                {{ envHint || "Birkaç saniye sürer (~7 istek)." }}
+              </span>
+            </div>
+            <div v-if="envanter.length" class="env-tablo">
+              <!-- ⚠️ Sütun başlıkları bir kez: metin her satırda tekrarlanınca hem
+                   gürültü oluyor hem dar ekranda sarıp satır ritmini bozuyordu. -->
+              <div class="env-sat env-bas">
+                <span></span><span>Kayıt</span><span>Görünen</span><span>Eksik meta</span>
+              </div>
+              <div v-for="[tip, kayit, gorunen, eksik] in envanter" :key="tip" class="env-sat">
+                <span class="env-ad">{{ ENV_AD[tip] || tip }}</span>
+                <span class="env-say">{{ kayit }}</span>
+                <span class="env-say">{{ gorunen }}</span>
+                <span class="env-eksik" :class="{ var: eksik > 0 }">{{ eksik }}</span>
+              </div>
+              <!-- ⚠️ Ayrım bilerek: görünmeyen bir sayfanın meta'sını düzeltmek ölçülebilir
+                   bir sonuç üretmiyor. Ölçüldü: 265 marka kaydının 75'i görünüyor. -->
+              <div class="fhint">
+                <b>Görünen</b> = son analizde arama sonuçlarında görülen sayfa sayısı.
+                Yalnızca orada yapılan düzeltme ölçülebilir sonuç üretir.
+              </div>
             </div>
           </div>
         </div>
@@ -1277,6 +1342,46 @@ async function doImport() {
 .eye:hover {
   background: var(--c-hover);
 }
+/* ===== Sayfa envanteri (Faz İ) ===== */
+.env-tablo {
+  margin-top: 10px;
+}
+.env-sat {
+  display: grid;
+  grid-template-columns: 1fr 70px 80px 90px;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--c-border);
+  font-size: 12px;
+  align-items: baseline;
+}
+.env-ad {
+  font-weight: 560;
+}
+.env-bas {
+  color: var(--c-faint);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom-color: var(--c-border);
+}
+.env-bas span:not(:first-child),
+.env-say,
+.env-eksik {
+  text-align: right;
+}
+.env-say {
+  color: var(--c-faint);
+  font-variant-numeric: tabular-nums;
+}
+.env-eksik {
+  color: var(--c-faint);
+  font-variant-numeric: tabular-nums;
+}
+.env-eksik.var {
+  color: var(--amber);
+}
+
 /* ===== Model zinciri ve kullanım (Faz G) ===== */
 /* Mevcut token'lar; yeni renk/gölge icat edilmiyor. */
 .zhint {
