@@ -13,6 +13,16 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.19.0
+- Yeni: **İçerik açığı** ekranı (SEO Araçları'nın yedincisi). Google'ın sizi sıraladığı ama çıkan sayfanın aramanın niyetine uymadığı aramaları gösteriyor — kategori, marka ve blog sayfalarınız ilk kez uygulamada görünür oldu
+- Üç durum ayrı ayrı: **niyet uyuşmuyor** (vitrin sayfası bilgi aramasına çıkıyor) · **sayfa yok** (aramayı anasayfa karşılıyor) · **yanlış eşleşme** (Google alakasız bir ürün sayfasını seçmiş)
+- ⚠️ Kurtarılamayacak aramalar listeye alınmıyor: bir markanın adı arandığında kişi üreticinin sitesine gitmek istiyor ve sıralamayı yükseltmek bunu değiştirmiyor. Hangi aramaların neden elendiği ekranda yazıyor
+- Yeni: **Sayfa iyileştirme paneli.** Kategori/marka/blog sayfanız için başlık, açıklama, hedef kelime ve tanıtım metni üretiliyor; mağazadaki hâliyle yan yana görüp düzenleyip gönderiyorsunuz
+- Üretim, o sayfanın Google'da aldığı **gerçek aramalara** ve kataloğunuzdaki **gerçek ürünlere** dayanıyor. Ölçüm verisi yoksa panel bunu söylüyor
+- ⚠️ Taslak metin doğrulanmıyor: sayısal iddialar engelleniyor ama diğer bilgiler kontrol edilemiyor — göndermeden önce okuyun
+- Yeni: Ayarlar'da **sayfa envanteri** — kategori, marka ve blog kayıtlarınız çekiliyor; hangilerinde başlık/açıklama eksik olduğunu gösteriyor
+- Bugün listesine **İçerik** kovası eklendi. Günlük iş sayısı 13'ten 14'e çıktı: yeni kova mevcut işlerin yerini almıyor
+
 ## v0.18.0
 - Yeni: **Yapay Zekâ Modelleri** ayarı. Üretimin hangi modelleri hangi sırayla deneyeceğini artık siz belirliyorsunuz. Bir model emekliye ayrıldığında yeni sürüm beklemeden listeyi düzeltebilirsiniz — daha önce bu, üretimi tamamen durduran bir sorundu
 - Model listesi Google'dan **canlı** geliyor: "Modelleri getir" deyince o an sunulan modelleri görürsünüz, emekli olanlar listede hiç çıkmaz

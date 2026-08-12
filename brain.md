@@ -3,7 +3,7 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-08-12 (v0.18.0 yayında)
+**Son güncelleme:** 2026-08-13 (v0.19.0 — Faz İ)
 **Aktif faz:** **v0.17.0 yayında — yol haritasının SEKİZ fazı da bitti.** Sıra:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
@@ -14,7 +14,8 @@ v0.16.0 = Faz T1: teklif çekirdeği (katalog fiyatları + teklif ekranı) ·
 v0.17.0 = Faz T2: teklif belgesi, takip önerisi, kazanma/kaybetme raporu ·
 v0.17.1 = PDF açma, sütun hizası, satır geri alma ·
 v0.17.2 = ödünç alınmış alan: slug/SKU karışıklığı (0b5) ·
-**v0.18.0 = Faz G: model zinciri ayarlara + Gemini kullanım sayacı (0b7)**
+v0.18.0 = Faz G: model zinciri ayarlara + Gemini kullanım sayacı (0b7) ·
+**v0.19.0 = Faz İ: içerik açığı + mağaza sayfası iyileştirme (0b8, 0b9, 0c0)**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -44,22 +45,32 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **202 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+bağımlı DEĞİL, **238 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
 **43 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
 
-### 🧭 Durum (2026-08-12)
+### 🧭 Durum (2026-08-13)
 
-**v0.18.0 yayında ve doğrulandı** (CI yeşil, `latest.json` → 7 platformun 7'si imzalı,
-6 not satırı). **Yol haritasında yapılacak iş kalmadı:** sekiz fazın hepsi bitti —
+**v0.19.0 hazır — Faz İ (içerik açığı) bitti.** Öncesi: v0.18.0 yayında ve doğrulandı.
+Sekiz fazın hepsi bitti —
 **B** (v0.9.0) · **Ö** (v0.10.0) · **A** (v0.11.0) · **K** (v0.12.0) · **S** (v0.13.0) ·
 **D** (v0.14.0) · **C** (v0.15.0) · **T** (v0.16.0 + v0.17.0) — ve **Faz G** kalemlerinin
-kod gerektirenleri de kapandı (v0.18.0).
+kod gerektirenleri de kapandı (v0.18.0). **Faz İ yol haritasında YOKTU** — GSC dışa
+aktarımlarından çıkan ölçümle doğdu (0b8): uygulama ürün dışı 5.700 sorgu / 101.118
+gösterimi hiç görmüyordu.
 Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v0.17.2 slug-SKU.
 
-**Geriye üç şey kaldı; ikisi bize bağlı değil, biri takvimde:**
+**Sıradaki iş — içerik pilotu (karar bekliyor).** Faz İ'nin makinesi hazır; hangi sayfalarla
+başlanacağı kullanıcı kararı. Ölçülen adaylar: TO'nun kaldıraç olduğu **dört kategori**
+(Güvenlik Duvarı 4.831 gösterim/poz 9,1 · Access Point 1.274/15,7 · Stand ve Dock 1.084/13,8 ·
+Video Konferans 849/10,8) ya da 26 kategorinin tamamı (poz 40'takiler dahil — orada metin
+TO'yu değil sıralamayı hedefler, iki mekanizma ölçüme karışır).
+⚠️ Marka fırsatı ÇÜRÜDÜ: eksik alanı olan 25 marka sayfasının 34.445 gösteriminin 32.845'i
+TeamViewer, o da navigasyonel. Kalan 24 sayfa 1.600 gösterim taşıyor.
+
+**Bunun dışında üç şey; ikisi bize bağlı değil, biri takvimde:**
 
 1. **Faz P (çoklu mağaza)** — ⏸️ **başlama koşulu henüz oluşmadı.** İkinci mağaza gerçekten
    gelmeden ya da genel dağıtımdan önce başlanmıyor; tek `db_path` varsayımı kodun birçok
@@ -72,7 +83,10 @@ Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v
    ❌ i18n elendi: gerekçesi çürüdü (kullanıcı düzeltmesi — "global dağıtım" = IdeaSoft
    kullanan herhangi bir işletme, farklı dilde bir pazar değil).
 
-3. 📅 **EYLÜL SONU — sonuç eşiği kalibrasyonu. Sıradaki iş bu.**
+3. 📅 **EYLÜL SONU — sonuç eşiği kalibrasyonu.**
+   ⚠️ Faz İ ile birlikte ölçülecek şey arttı: kategori/marka/blog sayfalarına yapılan
+   düzeltmeler de `work_events`'e `store_page_push` (`reaches_store = 1`) olarak yazılıyor.
+   Kalibrasyonda bu olaylar da dağılıma girecek.
    **Kullanıcı kararı (2026-08-12): planlama ve geliştirme Eylül SONUNDA yapılacak.**
    ⚠️ Veri ile takvimi karıştırma: ölçülebilir pencere Eylül **ortasında** oluşuyor
    (72 gönderim 26 Temmuz–7 Ağustos, takip penceresi gönderimden 21 gün sonra başlıyor —
@@ -87,7 +101,8 @@ Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v
 
 Fazların **ne olduğu** aşağıdaki numaralı girdilerde (B → 0at, Ö → 0au, A → 0av, halef
 düzeltmeleri → 0aw, K → 0ax, pencere teması → 0ay, S → 0az, D → 0b0, C → 0b2, T → 0b4,
-ölçek modellemesi → 0b6, model zinciri + sayaç → 0b7);
+ölçek modellemesi → 0b6, model zinciri + sayaç → 0b7, Faz İ ön ölçümleri → 0b8,
+12ay/90gün çöküşü → 0b9, Faz İ inşası → 0c0);
 **nereye gittiğimiz** `yol-haritasi.md`'de.
 
 ### 📋 Eski kuyruk — kullanıcı önceliğiyle (2026-07-31), tamamı bitti
@@ -1483,6 +1498,64 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    ✅ Mantığın çalıştığının kanıtı: düzeltmeden önce bile gerçek veride en tepedeki madde
    **"access point" — 4.528 gösterim, poz 7,2, 171 kaçırılan tık**. Denetim raporunun elle
    bulduğu şeyi kod kendisi buldu.
+
+0c0. ✅ **FAZ İ — İÇERİK AÇIĞI VE MAĞAZA SAYFALARI (v0.19.0).**
+   Ön ölçümler 0b8'de, 12ay/90gün çöküşü ve düzeltilen üç kusur 0b9'da. Bu girdi **inşa
+   edilen şeyi** anlatıyor.
+
+   **Kapatılan kör nokta.** Altı araç ekranının hepsi ürün-merkezliydi. Artık:
+   `page_kind` (sayfa tipi) · `content_gap` (üç kova + navigasyonel ayıklama) ·
+   `query_rows` (sorgu satırları ilk kez saklanıyor) · `store_pages` (kategori/marka/blog
+   envanteri) · İçerik açığı ekranı · sayfa iyileştirme paneli · `Bucket::Content`.
+
+   🔴 **Sayfa tipi TAHMİN değil ÖLÇÜM.** İlk tasarım kullanıcıya segment etiketletiyordu.
+   IdeaSoft'un `blogs`/`categories`/`brands` uçlarının okunabildiği görülünce envanterden
+   ölçmeye çevrildi. Farkı gerçek veri gösterdi: `/blog/etiket/fortinet-nedir` yola göre
+   "blog" ama 252 blog slug'ı arasında yok — etiket sayfası. Tahmin bunu ayıramıyordu.
+   ⚠️ Segment yolu YEDEK olarak duruyor: IdeaSoft modülü opsiyonel.
+
+   🔴 **Navigasyonel ayıklama kovalanamaz hacmi listeden çıkarıyor.** İki AYRI kural, çünkü
+   iki ayrı durum — ve bunu test düşürerek öğrendim: kendi marka sorgumuz İYİ TO alıyor
+   (%48), o yüzden "TO çökmüş" koşuluna hiç takılmıyordu. Kendi adımız koşulsuz eleniyor
+   (trafik zaten bizde), başka üreticinin markası yalnızca TO beklenenin onda birinden azsa.
+   Marka listesi katalogdan, site adı GSC adresinden — koda hiçbir mağaza adı gömülü değil.
+
+   **Üretim hattı** (`gemini::store_page`): kategori/marka/blog için meta + tanıtım metni.
+   Bağlam ölçülmüş veriden iki kaynakla kuruluyor — o sayfanın GSC'de aldığı gerçek sorgular
+   ve katalogdaki gerçek ürün adları. Model "bu sayfada ne var" sorusunu tahmin etmiyor.
+   ⚠️ **Halüsinasyon kalkanı burada ürün tarafından ZAYIF ve kodda yazılı.** Teknik tabloda
+   her sayı kaynağa karşı doğrulanıyor; kategori metninde doğrulanacak kaynak yok — sayfanın
+   boş olması zaten üretme sebebimiz. `verify_no_invented_numbers` kaynakta olmayan sayı
+   bulursa metni **reddediyor** (sessizce silmiyor: silinen sayı cümleyi bozar, kullanıcı
+   fark etmez). Sayısız yanlış iddia yakalanmıyor — kabul edilen sınır, panelde de yazılı.
+
+   **IdeaSoft yazma yolu canlı doğrulandı** (kullanıcı izniyle, `status=0` taslak kayıtta):
+   `PUT /admin-api/blogs/{id}` → 200, **birleştirme mantığında** — gönderilmeyen `title`,
+   `content`, `categories`, `status` alanlarına dokunulmuyor. Test sonrası kayıt ilk hâline
+   döndürüldü. ⚠️ **Ölçülen kısıt: `metaDescription` 160 karakterde SESSİZCE kırpılıyor**
+   (170 gönderildi, 160 saklandı, uyarı yok). Artık kendimiz kırpıyoruz — ne gönderdiğimizi
+   bilmek için. Kategorilerde 193 karakterlik değer duruyor, yani sınır varlık tipine göre
+   değişiyor olabilir; blog PUT'u dışında doğrulanmadı.
+
+   **Kova:** `Bucket::Content` + `ItemRef::Query`, `TOTAL` 13 → 14 (yeni kova mevcutlardan
+   slot çalmıyor — Faz C'deki kararın aynısı). Kimlik SORGU çünkü aynı sayfa birden çok
+   sorguda açık veriyor. Ağırlık 0,6 (`Leak` ile aynı sınıf: çözümün bir kısmı dışarıda).
+   🔴 **Yalnızca eylemi olan madde kuyruğa giriyor** — sıralanan sayfa envanterde yoksa
+   panel açılamaz, eylemsiz madde kullanıcıyı "Yapıldı"dan başka bir şey yapamayacağı işe
+   yönlendirir.
+
+   **Kopyalar paylaşıma çevrildi:** meta uzunluk kuralları (`20..=60`, `50..=155`) ZATEN iki
+   yerde kopyalanmıştı; üçüncüsünü eklemek yerine `validation::TITLE_MIN/MAX`,
+   `DESC_MIN/MAX` yapıldı ve mevcut ikisi de ona bağlandı. `DESC_MAX` bilerek 155:
+   IdeaSoft'un kestiği 160'ın kenarına yaklaşmamak için.
+
+   ⚠️ **Aynı hatayı iki kez yaptım:** harness stub'ını `?setup=1` bloğunun içine koydum ve
+   ikisinde de sessizce çalışmadı. `test_ideasoft` / `test_feed_url` çapaları o bloğun içinde
+   ve genel seviyede sanılıyor. Yeni stub eklerken **girinti seviyesi kontrol edilmeli.**
+
+   Ekranda görülüp düzeltilenler: kova adı satırda iki kez · envanter tablosunda satır
+   sarması (23/26/26/26 px) · odak bağı hiç kurulmamış · süzgeç açıkken odaklanan satır
+   listede olmadığı için odağın sessizce başarısız olması.
 
 0c. ✅ **FIRSAT ANALİZİ + SÜRÜM NOTLARI (v0.5.6).**
 

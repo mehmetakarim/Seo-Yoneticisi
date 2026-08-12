@@ -9,12 +9,18 @@
 iddiaların kodda tek tek doğrulanması.
 
 **Sekiz fazın hepsi bitti** (B v0.9.0 · Ö v0.10.0 · A v0.11.0 · K v0.12.0 · S v0.13.0 ·
-D v0.14.0 · C v0.15.0 · T v0.16.0+v0.17.0) ve **Faz G'nin kod gerektiren kalemleri de
-kapandı** (v0.18.0). **Sıradaki faz yok.**
+D v0.14.0 · C v0.15.0 · T v0.16.0+v0.17.0), **Faz G'nin kod gerektiren kalemleri kapandı**
+(v0.18.0) ve **Faz İ eklendi** (v0.19.0).
 
-Kalan üç başlık: **P** koşullu bekliyor (ikinci mağaza gelene kadar) · **kod imzalama**
-maliyet kararı · ve takvimdeki tek iş: **Eylül sonu, sonuç eşiği kalibrasyonu**
-(kullanıcı kararı 2026-08-12). Ayrıntı bölüm 4'te; hangi sürümde ne çıktığı `brain.md`'de.
+⚠️ **Faz İ bu belgede planlanmamıştı** — GSC dışa aktarımlarının incelenmesinden çıkan
+ölçümle doğdu: uygulama ürün dışı 5.700 sorgu / 101.118 gösterimi hiç görmüyordu, çünkü
+altı araç ekranının hepsi ürün-merkezliydi ve GSC çağrısı bile ürün yoluyla filtreleniyordu.
+Yol haritası bir yerde eksikti ve eksikliği ölçüm gösterdi; kayıt `brain.md` 0b8/0c0'da.
+
+Kalan başlıklar: **içerik pilotu** (hangi sayfalarla başlanacağı kullanıcı kararı) ·
+**P** koşullu bekliyor (ikinci mağaza gelene kadar) · **kod imzalama** maliyet kararı ·
+ve takvimdeki iş: **Eylül sonu, sonuç eşiği kalibrasyonu** (kullanıcı kararı 2026-08-12).
+Ayrıntı bölüm 4'te; hangi sürümde ne çıktığı `brain.md`'de.
 
 ---
 
@@ -358,6 +364,29 @@ Gerekçeler `brain.md` 0b4'te.
 
 **Ekran gerekiyor mu.** ~~Evet~~ ✅ Teklifler ekranı (liste + düzenleyici) + belge modali;
 kroma mevcut ekranlarla paylaşıldı, ayrı tasarım turu gerekmedi.
+
+---
+
+### Faz İ — İçerik açığı ve mağaza sayfaları ✅ (v0.19.0)
+
+**Amaç.** Google'ın sıraladığı ama çıkan sayfanın niyeti karşılamadığı aramaları görünür
+kılmak ve o sayfaları iyileştirebilmek.
+
+**Neden sonradan eklendi.** Uygulamanın altı araç ekranı da ürün-merkezliydi; kategori,
+marka ve blog sayfaları ölçüm omurgasının tamamen dışındaydı. Ölçüldü: ürün dışı 300 sayfa,
+133.654 gösterim, hiçbir ekranda yok.
+
+**Kapsam.** Sayfa tipi sınıflandırması (envanterden ölçülerek) · içerik açığının üç kovası ·
+navigasyonel sorgu ayıklama · kategori/marka/blog meta + tanıtım metni üretimi ve IdeaSoft'a
+gönderimi · `Bucket::Content`.
+
+**Bitti sayılır.** ✅ Ürün dışı sorgular analize giriyor · ekran üç kovayı ayrı gösteriyor ·
+kovalanamaz hacim gerekçesiyle ayrılıyor · panelden üretilen metin mağazaya gidiyor ve
+`work_events`'e `reaches_store = 1` yazılıyor.
+
+⚠️ **Yapılmayan:** yeni sayfa/yazı OLUŞTURMA. Uygulama var olan sayfayı iyileştiriyor;
+"sayfa yok" kovasındaki maddeler bu yüzden kuyruğa girmiyor. Eylemsiz madde kuyruğa
+konmuyor — gerekçe `brain.md` 0c0'da.
 
 ---
 
