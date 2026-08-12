@@ -86,6 +86,29 @@ fn products_of(conn: &Connection, kind: &str, name: &str, limit: usize) -> Vec<S
         .unwrap_or_default()
 }
 
+/// Sayfanın **gerçek adresi** — ölçüm satırlarından okunuyor, kurulmuyor.
+///
+/// 🔴 Bu fonksiyonun varlık sebebi bir hata: gönderim olayına `url` olarak **slug**
+/// yazılıyordu (`access-point`), oysa `metric_page_rows.url` tam adres tutuyor
+/// (`https://…/kategori/access-point`). `metrics::outcome` URL ile eşleştirdiği için
+/// içerik gönderimlerinin sonucu HİÇBİR ZAMAN hesaplanamazdı — sessizce.
+///
+/// Adres kurulmuyor **ölçülüyor**: yol deseni mağazadan mağazaya değişir (`/kategori/` her
+/// temada aynı değil) ve kurulan bir adres eşleşmezse yine sessizce ölçülemez olurdu.
+/// Ölçüm tablosunda yoksa `None` dönüyor — o sayfanın ölçülecek trafiği zaten yok.
+fn page_url_of(conn: &Connection, slug: &str) -> Option<String> {
+    let desen = format!("%/{}", slug.to_lowercase());
+    conn.query_row(
+        "SELECT url FROM metric_page_rows
+         WHERE snapshot_id = (SELECT MAX(id) FROM metric_snapshots)
+           AND (lower(url) LIKE ?1 OR lower(url) LIKE ?1 || '/')
+         ORDER BY impressions DESC LIMIT 1",
+        [&desen],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+}
+
 fn read_detail(conn: &Connection, kind: &str, id: i64) -> Result<StorePageDetail, String> {
     let (slug, name, pt, md, tk, sc, dpt, dmd, dtk, dsc, dm, da, pa): (
         String, String, String, String, String, Option<String>,
@@ -314,7 +337,8 @@ pub async fn push_store_page(
          VALUES (?1, NULL, ?2, 'store_page_push', 1, ?3)",
         params![
             now,
-            d.slug,
+            // ⚠️ Slug DEĞİL tam adres: sonuç hesabı URL ile eşleştiriyor (bkz. page_url_of).
+            page_url_of(&conn, &d.slug).unwrap_or_else(|| d.slug.clone()),
             serde_json::json!({ "kind": kind, "id": id, "model": d.draft_model }).to_string()
         ],
     );

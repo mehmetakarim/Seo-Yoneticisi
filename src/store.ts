@@ -1526,7 +1526,9 @@ export const useStore = defineStore("app", {
           api.getOutcomeBadges(),
         ]);
         this.outcomeSummary = ozet;
-        this.outcomeBadges = Object.fromEntries(rozetler.map((b) => [b.sku, b]));
+        // ⚠️ Anahtar `sku || url`: içerik rozetlerinin sku'su boş, yalnızca sku ile
+        // anahtarlansaydı hepsi tek bir boş anahtara çakışırdı (Faz İ).
+        this.outcomeBadges = Object.fromEntries(rozetler.map((b) => [b.sku || b.url, b]));
       } catch (e) {
         // Sessiz: sonuç verisi yardımcı bir katman, ekranı düşürmemeli.
         console.warn("sonuç verisi okunamadı", e);

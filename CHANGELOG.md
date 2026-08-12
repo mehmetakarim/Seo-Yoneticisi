@@ -13,6 +13,11 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.19.1
+- Düzeltme: kategori/marka/blog sayfalarına gönderdiğiniz metinlerin **sonucu ölçülmüyordu**. Gönderim kaydediliyordu ama Sonuç kontrolü listesine hiç düşmüyor, sonuç rozeti hiç çıkmıyordu
+- İçerik açığı listesine **Sonuç** sütunu eklendi: bir sayfaya metin gönderdiyseniz 28 gün sonra ne olduğunu orada görüyorsunuz
+- Daha önce gönderdiğiniz sayfaların kaydı güncellemede **kendiliğinden onarılıyor** — o gönderimler de ölçülebilir hâle geliyor
+
 ## v0.19.0
 - Yeni: **İçerik açığı** ekranı (SEO Araçları'nın yedincisi). Google'ın sizi sıraladığı ama çıkan sayfanın aramanın niyetine uymadığı aramaları gösteriyor — kategori, marka ve blog sayfalarınız ilk kez uygulamada görünür oldu
 - Üç durum ayrı ayrı: **niyet uyuşmuyor** (vitrin sayfası bilgi aramasına çıkıyor) · **sayfa yok** (aramayı anasayfa karşılıyor) · **yanlış eşleşme** (Google alakasız bir ürün sayfasını seçmiş)

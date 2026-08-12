@@ -92,18 +92,54 @@ fn completed(conn: &Connection, analyzed_at: &str) -> Vec<(String, String)> {
     )
 }
 
-/// Ürün başına **mağazaya ulaşan** son iş — `(sku, at)`.
+/// Kimlik başına **mağazaya ulaşan** son iş — `(kimlik, at)`.
 ///
 /// ⚠️ Tek yerde: hem sonuç kontrolü kovası (28 günü DOLANLAR) hem uçuş süzgeci (28 günü
 /// DOLMAYANLAR) buradan okuyor. İki ayrı sorgu olsaydı eşikler zamanla ayrışır, madde ikisinin
 /// arasına düşüp kaybolabilirdi.
-fn store_events(conn: &Connection) -> Vec<(String, String)> {
-    sorgu(
-        conn,
-        "SELECT sku, MAX(at) FROM work_events
-         WHERE reaches_store = 1 AND sku IS NOT NULL GROUP BY sku",
-        &[],
-    )
+///
+/// 🔴 **`sku IS NOT NULL` koşulu kaldırıldı (Faz İ).** İçerik gönderimlerinin sku'su yok,
+/// kimlikleri URL. Koşul dururken o olaylar `work_events`'e yazılıyor ama HİÇBİR YERDE
+/// okunmuyordu: sonuç kontrolü kovası onları geri getirmiyor, rozet çıkmıyordu. Yani içerik
+/// işinin sonucu ölçülüyor sanılıyordu, ölçülmüyordu.
+/// ⚠️ **Kimlik seçimi.** Ürün olayı `Product(sku)`; sayfa olayı `Page(slug)` — URL değil
+/// **slug**, çünkü `ItemRef::Page` kaçak kovasında da slug taşıyor ve aynı kimlik uzayında
+/// iki farklı biçim bulundurmak, ileride "neden eşleşmiyor" diye aranacak bir tuzak olurdu.
+/// Sonuç hesabı için gereken tam adres olayın kendisinde (`work_events.url`) duruyor.
+///
+/// ⚠️ İçerik maddeleri `ItemRef::Query` taşıyor, yani buradaki `Page` kimliğiyle **eşleşmez**
+/// ve bu bilinçli: bir sayfaya metin göndermek o sayfayla sıralanan HER sorguyu çözmez.
+/// İçerik maddesinin susması "Yapıldı" işaretiyle oluyor (`queue_dismissals`, `in_flight`
+/// içinde zaten okunuyor).
+fn store_events(conn: &Connection) -> Vec<(ItemRef, String)> {
+    let mut stmt = match conn.prepare(
+        "SELECT sku, url, MAX(at) FROM work_events
+         WHERE reaches_store = 1 AND COALESCE(sku, url) IS NOT NULL
+         GROUP BY COALESCE(sku, url)",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, Option<String>>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    })
+    .map(|rows| {
+        rows.filter_map(Result::ok)
+            .filter_map(|(sku, url, at)| match sku {
+                Some(s) if !s.is_empty() => Some((ItemRef::Product(s), at)),
+                _ => {
+                    let u = url?;
+                    let slug = seo_core::page_kind::last_segment(&u).unwrap_or(u);
+                    Some((ItemRef::Page(slug), at))
+                }
+            })
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// Ölçümü **uçuşta** olan referanslar — yapıldı ama sonucu henüz görünemez.
@@ -121,9 +157,9 @@ fn store_events(conn: &Connection) -> Vec<(String, String)> {
 /// `completed` **bu analiz** boyunca, `in_flight` **sonraki analizlerde** konuşuyor.
 fn in_flight(conn: &Connection, analyzed_at: &str) -> std::collections::HashSet<ItemRef> {
     let mut out = std::collections::HashSet::new();
-    for (sku, at) in store_events(conn) {
+    for (kimlik, at) in store_events(conn) {
         if days_since(&at) < queue::REVIEW_AFTER_DAYS {
-            out.insert(ItemRef::Product(sku));
+            out.insert(kimlik);
         }
     }
     let esik = (chrono::Local::now() - chrono::Duration::days(queue::REVIEW_AFTER_DAYS))
@@ -243,8 +279,16 @@ fn candidates(
     // kullanıcının "yapıldı" beyanı (`manual_done`, reaches_store = 1). İkincisi olmadan,
     // içeriği elle mağazaya yapıştıran kullanıcının işi hiç bitmiyordu — madde her gün
     // "hiç gönderilmemiş" diye geri geliyordu (saha hatası, 2026-08-10).
-    let magazaya_ulasan: std::collections::HashSet<String> =
-        store_events(conn).into_iter().map(|(sku, _)| sku).collect();
+    // ⚠️ Yalnızca ÜRÜN olayları: bu küme acil kovasında "bu ürün hiç gönderilmiş mi?"
+    // sorusunu cevaplıyor. Sayfa olayları buraya karışsaydı bir kategori sayfasının
+    // gönderimi, adı benzeyen bir ürünü "gönderilmiş" sayabilirdi.
+    let magazaya_ulasan: std::collections::HashSet<String> = store_events(conn)
+        .into_iter()
+        .filter_map(|(k, _)| match k {
+            ItemRef::Product(s) => Some(s),
+            _ => None,
+        })
+        .collect();
     // Ürünün GSC tıklaması — acil maddelerinin skorunu da tıklama sürüyor.
     let clicks_of: std::collections::HashMap<&str, f64> = report
         .opportunities
@@ -340,24 +384,31 @@ fn candidates(
     // 🔑 Uçuş süzgecinin diğer ucu: 28 günü DOLMAYAN madde diğer kovalarda susuyor, dolan
     // madde burada geri geliyor. Aynı sorgudan okuyorlar (bkz. `store_events`).
     let mut gorulen = std::collections::HashSet::new();
-    for (sku, at) in store_events(conn) {
+    for (kimlik, at) in store_events(conn) {
         let yas = days_since(&at);
-        if yas < queue::REVIEW_AFTER_DAYS || !gorulen.insert(sku.clone()) {
+        if yas < queue::REVIEW_AFTER_DAYS || !gorulen.insert(kimlik.clone()) {
             continue;
         }
-        let ad = states
-            .iter()
-            .find(|p| p.sku == sku)
-            .map(|p| p.name.clone())
-            .unwrap_or_else(|| sku.clone());
+        let anahtar = kimlik.key().to_string();
+        // Ürün ise ürün ekranı, sayfa ise içerik açığı ekranı — sonucu orada okunuyor.
+        let urun = matches!(kimlik, ItemRef::Product(_));
+        let ad = if urun {
+            states
+                .iter()
+                .find(|p| p.sku == anahtar)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| anahtar.clone())
+        } else {
+            anahtar.clone()
+        };
         out.push(Candidate {
-            reference: ItemRef::Product(sku.clone()),
+            reference: kimlik.clone(),
             bucket: Bucket::Review,
             title: ad,
             reason: format!("{yas} gün önce mağazaya gönderildi — sonucuna bakılabilir"),
             clicks: 0.0,
-            page: "products".into(),
-            focus_id: sku,
+            page: if urun { "products".into() } else { "contentgap".into() },
+            focus_id: anahtar,
             minutes: sure(Bucket::Review, 1).0,
             minutes_measured: sure(Bucket::Review, 1).1,
         });
@@ -1026,5 +1077,81 @@ mod tests {
         kovalar.dedup();
         println!("\nkuyruktaki kova sayısı: {}", kovalar.len());
         assert!(kovalar.len() >= 3, "kuyruk {} kovaya saplandı", kovalar.len());
+    }
+
+    // ===================== İçerik gönderimlerinin ölçümü (Faz İ, v0.19.1) =====================
+
+    fn bos_db() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&c).unwrap();
+        c
+    }
+
+    fn olay(c: &Connection, sku: Option<&str>, url: &str, kind: &str, gun_once: i64) {
+        c.execute(
+            "INSERT INTO work_events (at, sku, url, kind, reaches_store)
+             VALUES (datetime('now', ?1), ?2, ?3, ?4, 1)",
+            rusqlite::params![format!("-{gun_once} days"), sku, url, kind],
+        )
+        .unwrap();
+    }
+
+    /// 🔴 Asıl düzeltme: sku'suz (içerik) olaylar artık okunuyor. Koşul dururken bu olaylar
+    /// yazılıyor ama hiçbir yerde okunmuyordu — sonuç kontrolü kovası geri getirmiyor,
+    /// rozet çıkmıyordu. Yani ölçülüyor sanılan bir şey ölçülmüyordu.
+    #[test]
+    fn icerik_olayi_kimlige_cozuluyor() {
+        let c = bos_db();
+        olay(&c, Some("SKU.1"), "https://m.com/urun/a", "ideasoft_push", 40);
+        olay(&c, None, "https://m.com/kategori/access-point", "store_page_push", 40);
+
+        let ev = store_events(&c);
+        assert_eq!(ev.len(), 2, "ürün ve sayfa olayının ikisi de okunmalı");
+        assert!(ev.iter().any(|(k, _)| *k == ItemRef::Product("SKU.1".into())));
+        // ⚠️ Sayfa kimliği SLUG: `ItemRef::Page` kaçak kovasında da slug taşıyor, aynı
+        // uzayda iki biçim bulundurmak sonradan aranacak bir tuzak olurdu.
+        assert!(
+            ev.iter().any(|(k, _)| *k == ItemRef::Page("access-point".into())),
+            "sayfa olayı slug kimliğine çözülmeli: {ev:?}"
+        );
+    }
+
+    /// 28 günü DOLMAYAN içerik gönderimi uçuşta sayılmalı; DOLAN sayılmamalı.
+    /// İki uç aynı sorgudan okuyor — ayrışırlarsa madde ikisinin arasına düşüp kaybolur.
+    #[test]
+    fn icerik_gonderimi_ucus_suzgecine_giriyor() {
+        let c = bos_db();
+        olay(&c, None, "https://m.com/kategori/yeni", "store_page_push", 3);
+        olay(&c, None, "https://m.com/kategori/eski", "store_page_push", 40);
+
+        let ucusta = in_flight(&c, "2026-08-13T00:00:00");
+        assert!(
+            ucusta.contains(&ItemRef::Page("yeni".into())),
+            "3 gün önceki gönderim uçuşta olmalı"
+        );
+        assert!(
+            !ucusta.contains(&ItemRef::Page("eski".into())),
+            "40 gün önceki gönderim uçuştan çıkmış olmalı"
+        );
+    }
+
+    /// 🔴 Regresyon koruması: aynı sorgu iki kovayı besliyor ve ürün davranışı DEĞİŞMEMELİ.
+    #[test]
+    fn urun_olaylarinin_davranisi_degismedi() {
+        let c = bos_db();
+        olay(&c, Some("SKU.A"), "https://m.com/urun/a", "ideasoft_push", 5);
+        olay(&c, Some("SKU.B"), "https://m.com/urun/b", "manual_done", 40);
+
+        let ucusta = in_flight(&c, "2026-08-13T00:00:00");
+        assert!(ucusta.contains(&ItemRef::Product("SKU.A".into())), "yeni gönderim uçuşta");
+        assert!(!ucusta.contains(&ItemRef::Product("SKU.B".into())), "eski gönderim uçuşta değil");
+
+        // En son olay kazanmalı: aynı sku için birden çok gönderim varsa yaş sonuncudan.
+        olay(&c, Some("SKU.B"), "https://m.com/urun/b", "ideasoft_push", 1);
+        let ucusta2 = in_flight(&c, "2026-08-13T00:00:00");
+        assert!(
+            ucusta2.contains(&ItemRef::Product("SKU.B".into())),
+            "yeni gönderim eski olayı gölgelemeli"
+        );
     }
 }

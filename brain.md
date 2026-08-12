@@ -15,7 +15,8 @@ v0.17.0 = Faz T2: teklif belgesi, takip önerisi, kazanma/kaybetme raporu ·
 v0.17.1 = PDF açma, sütun hizası, satır geri alma ·
 v0.17.2 = ödünç alınmış alan: slug/SKU karışıklığı (0b5) ·
 v0.18.0 = Faz G: model zinciri ayarlara + Gemini kullanım sayacı (0b7) ·
-**v0.19.0 = Faz İ: içerik açığı + mağaza sayfası iyileştirme (0b8, 0b9, 0c0)**
+v0.19.0 = Faz İ: içerik açığı + mağaza sayfası iyileştirme (0b8, 0b9, 0c0) ·
+**v0.19.1 = içerik gönderimlerinin sonucu ölçülebilir oldu (0c1)**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -45,8 +46,8 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **238 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**43 test**; `commands/` 11 dosyaya bölünmüş durumda).
+bağımlı DEĞİL, **239 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**46 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
@@ -62,8 +63,10 @@ aktarımlarından çıkan ölçümle doğdu (0b8): uygulama ürün dışı 5.700
 gösterimi hiç görmüyordu.
 Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v0.17.2 slug-SKU.
 
-**Sıradaki iş — içerik pilotu (karar bekliyor).** Faz İ'nin makinesi hazır; hangi sayfalarla
-başlanacağı kullanıcı kararı. Ölçülen adaylar: TO'nun kaldıraç olduğu **dört kategori**
+**Sıradaki iş — içerik pilotu (karar bekliyor).** Faz İ'nin makinesi hazır ve v0.19.1 ile
+sonucu **ölçülebilir** hâle geldi (0c1: v0.19.0'da ölçülemiyordu). Kullanıcı zaten bir
+kategori sayfası göndermiş (Access Point, 2026-08-13) — pilot fiilen başladı; hangi
+sayfalarla devam edileceği kullanıcı kararı. Ölçülen adaylar: TO'nun kaldıraç olduğu **dört kategori**
 (Güvenlik Duvarı 4.831 gösterim/poz 9,1 · Access Point 1.274/15,7 · Stand ve Dock 1.084/13,8 ·
 Video Konferans 849/10,8) ya da 26 kategorinin tamamı (poz 40'takiler dahil — orada metin
 TO'yu değil sıralamayı hedefler, iki mekanizma ölçüme karışır).
@@ -1556,6 +1559,47 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    Ekranda görülüp düzeltilenler: kova adı satırda iki kez · envanter tablosunda satır
    sarması (23/26/26/26 px) · odak bağı hiç kurulmamış · süzgeç açıkken odaklanan satır
    listede olmadığı için odağın sessizce başarısız olması.
+
+0c1. 🔴 **İÇERİK GÖNDERİMİ ÖLÇÜLMÜYORDU (v0.19.1) — "ölçülüyor" sandığım şey ölçülmüyordu.**
+
+   Kullanıcı "sıradaki iş: içerik pilotu ne demek?" diye sordu; cevabı yazarken bir tur önce
+   söylediğim cümleyi doğruladım ve **yanlış çıktı**. "İçerik gönderimleri `work_events`'e
+   yazılıyor, kalibrasyonda dağılıma girecek" demiştim. Olay yazılıyordu ama **hiçbir yer
+   okumuyordu.**
+
+   İki kapı da SKU anahtarlıydı:
+   - `today::store_events` → `WHERE reaches_store = 1 AND sku IS NOT NULL`
+   - `metrics_cmd::get_outcome_badges` → `let Some(sku) = ev.sku else { continue }`
+
+   İçerik gönderimi `sku = NULL` yazıyor → sonuç kontrolü kovası maddeyi geri getirmiyor,
+   rozet hiç çıkmıyordu. **Ders: bir olayı yazmak, onu ölçmek değildir.** Yazma tarafını
+   kurup okuma tarafını kontrol etmeden "ölçülüyor" demek, en kolay yalan söyleme biçimi.
+
+   🔴 **İkinci hata, birincisinden beter: URL yerine SLUG yazıyordum.** `metrics::outcome`
+   zaten URL anahtarlı çalışıyor (yani ölçüm katmanı hazırdı) ama olaya `access-point`
+   yazılıyordu, `metric_page_rows.url` ise `https://…/kategori/access-point` tutuyor. İki
+   kapı açılsa bile eşleşme olmayacaktı.
+
+   **Hata kullanıcının GERÇEK verisinde bulundu.** Ölçüm için veritabanı kopyasına bakarken
+   beklemediğim bir satır çıktı: `store_page_push · url=access-point · 2026-08-13T00:48`.
+   Kullanıcı v0.19.0'ı kurup gerçekten bir kategori sayfası göndermiş — yani pilot fiilen
+   başlamış ve o gönderim ölçülemez durumdaydı.
+
+   **Düzeltmeler:**
+   - `store_events` artık `ItemRef` döndürüyor: ürün → `Product(sku)`, sayfa → `Page(slug)`.
+     ⚠️ Kimlik olarak URL değil **slug**: `ItemRef::Page` kaçak kovasında da slug taşıyor,
+     aynı uzayda iki biçim sonradan aranacak bir tuzak olurdu. Tam adres olayın kendisinde.
+   - `page_url_of`: gönderim anında gerçek adres **ölçüm satırlarından okunuyor**, kurulmuyor
+     — yol deseni mağazadan mağazaya değişir ve kurulan adres eşleşmezse yine sessizce
+     ölçülemez olurdu.
+   - Göç: mevcut slug'lı olaylar tam adrese çevriliyor. Eşleşme yoksa dokunulmuyor.
+   - `outcomeBadges` sözlüğü `sku || url` ile anahtarlanıyor — yalnızca sku ile
+     anahtarlansaydı bütün içerik rozetleri boş anahtarda çakışırdı.
+   - İçerik açığı ekranına **Sonuç** sütunu.
+
+   ⚠️ İçerik maddesi (`ItemRef::Query`) ile gönderim kimliği (`ItemRef::Page`) **bilerek
+   eşleşmiyor**: bir sayfaya metin göndermek o sayfayla sıralanan HER sorguyu çözmez.
+   İçerik maddesinin susması "Yapıldı" işaretiyle oluyor.
 
 0c. ✅ **FIRSAT ANALİZİ + SÜRÜM NOTLARI (v0.5.6).**
 

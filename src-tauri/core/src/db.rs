@@ -425,6 +425,32 @@ pub fn init(conn: &Connection) -> Result<(), String> {
 
 /// Eski DB'lere sonradan eklenen kolonları idempotent şekilde ekler.
 fn migrate(conn: &Connection) -> Result<(), String> {
+    // 🔴 Onarım (2026-08-13): `store_page_push` olaylarına `url` olarak **slug** yazılmıştı
+    // (`access-point`), oysa `metric_page_rows.url` tam adres tutuyor. `metrics::outcome`
+    // URL ile eşleştirdiği için bu gönderimlerin sonucu HİÇ hesaplanamıyordu — sessizce.
+    // Hata kullanıcının gerçek verisinde bulundu: uygulamayı kullanıp bir kategori sayfası
+    // göndermişti ve o gönderim ölçülemez durumdaydı.
+    //
+    // Adres KURULMUYOR, ölçüm satırlarından okunuyor: yol deseni mağazadan mağazaya değişir.
+    // Eşleşme yoksa satıra DOKUNULMUYOR — o sayfanın ölçülecek trafiği zaten yok, ve veriyi
+    // silmektense olduğu gibi bırakmak yeğdir. Idempotent: zaten tam adres olanlara değmiyor.
+    let _ = conn.execute(
+        "UPDATE work_events SET url = (
+             SELECT r.url FROM metric_page_rows r
+             WHERE r.snapshot_id = (SELECT MAX(id) FROM metric_snapshots)
+               AND (lower(r.url) LIKE '%/' || lower(work_events.url)
+                    OR lower(r.url) LIKE '%/' || lower(work_events.url) || '/')
+             ORDER BY r.impressions DESC LIMIT 1)
+         WHERE kind = 'store_page_push'
+           AND url IS NOT NULL AND url NOT LIKE 'http%'
+           AND EXISTS (
+             SELECT 1 FROM metric_page_rows r
+             WHERE r.snapshot_id = (SELECT MAX(id) FROM metric_snapshots)
+               AND (lower(r.url) LIKE '%/' || lower(work_events.url)
+                    OR lower(r.url) LIKE '%/' || lower(work_events.url) || '/'))",
+        [],
+    );
+
     // `store_pages` taslak sütunları: tablo bir önceki sürümde taslaksız oluşturulmuş
     // olabilir ve `CREATE TABLE IF NOT EXISTS` sütun EKLEMEZ (aynı tuzağa `queue_dismissals`
     // ile bir kez düşüldü, hemen aşağıda yazılı).
@@ -676,6 +702,53 @@ mod tests {
         let conn = fresh();
         set_setting(&conn, "feed_url", "   ").unwrap();
         assert!(needs_setup(&conn).unwrap());
+    }
+
+    /// 🔴 `store_page_push` olaylarındaki slug → tam adres onarımı.
+    ///
+    /// Hata kullanıcının GERÇEK verisinde bulundu (2026-08-13): uygulamayı kullanıp bir
+    /// kategori sayfası göndermişti, olayın `url`i slug'dı ve `metrics::outcome` URL ile
+    /// eşleştirdiği için o gönderimin sonucu asla hesaplanamayacaktı — sessizce.
+    #[test]
+    fn store_page_push_slug_adresi_onariliyor() {
+        let conn = fresh();
+        conn.execute(
+            "INSERT INTO metric_snapshots (captured_at, window_start, window_end)
+             VALUES ('2026-08-01','2026-07-01','2026-07-28')",
+            [],
+        )
+        .unwrap();
+        let sid = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO metric_page_rows (snapshot_id, url, clicks, impressions, position)
+             VALUES (?1, 'https://m.com/kategori/access-point', 13, 1274, 15.7)",
+            [sid],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO work_events (at, sku, url, kind, reaches_store)
+             VALUES ('2026-08-13T00:48:57', NULL, 'access-point', 'store_page_push', 1),
+                    ('2026-08-13T01:00:00', NULL, 'olmayan-sayfa', 'store_page_push', 1),
+                    ('2026-08-13T02:00:00', NULL, 'https://m.com/kategori/x', 'store_page_push', 1)",
+            [],
+        )
+        .unwrap();
+
+        init(&conn).unwrap(); // açılışta göç yeniden koşuyor
+
+        let mut st = conn
+            .prepare("SELECT url FROM work_events WHERE kind='store_page_push' ORDER BY at")
+            .unwrap();
+        let urls: Vec<String> =
+            st.query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        assert_eq!(
+            urls,
+            vec![
+                "https://m.com/kategori/access-point".to_string(), // slug → tam adres
+                "olmayan-sayfa".to_string(),        // eşleşme yok: SİLİNMEDİ, duruyor
+                "https://m.com/kategori/x".to_string(), // zaten tam adres, dokunulmadı
+            ]
+        );
     }
 
     /// Slug yazılmış kişi-ürün bağları onarılıyor mu?

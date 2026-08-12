@@ -77,6 +77,8 @@ watch(focusId, (id) => {
 const cols: TableCol[] = [
   { key: "name", label: "Sorgu / Sıralanan sayfa", type: "text" },
   { key: "kind", label: "Durum", type: "text" },
+  // Faz İ (v0.19.1): bu sayfaya metin gönderildiyse 28 gün sonraki sonucu.
+  { key: "sonuc", label: "Sonuç", type: "badge" },
   { key: "imp", label: "Gösterim", type: "num" },
   { key: "pos", label: "Konum", type: "num" },
   { key: "miss", label: "Kaçırılan", type: "num", emphasis: "down" },
@@ -105,6 +107,16 @@ const rows = computed<TableRow[]>(() =>
     // ⚠️ Alt satırda kova adı TEKRARLANMIYOR: "Durum" sütununda zaten var ve iki kez
     // yazmak satırı gürültüye boğuyordu. Burada yalnızca sıralanan sayfa — asıl bağlam o.
     sub: `${PK[g.page_kind]} · ${kisaUrl(g.page)}`,
+    // Sonuç rozeti sayfa ADRESİYLE eşleşiyor: içerik gönderimlerinin sku'su yok.
+    badges: {
+      sonuc: store.outcomeBadges[g.page]
+        ? {
+            label: store.outcomeBadges[g.page].label,
+            tone: store.outcomeBadges[g.page].tone,
+            tip: store.outcomeBadges[g.page].tip,
+          }
+        : { label: "—", tone: "tamamlandi", tip: "Bu sayfaya henüz metin gönderilmedi" },
+    },
     values: {
       kind: KOVA[g.kind].ad,
       imp: n(g.impressions),
@@ -137,7 +149,12 @@ async function envanteriYukle() {
   }
   envanter.value = m;
 }
-onMounted(envanteriYukle);
+onMounted(() => {
+  void envanteriYukle();
+  // Sonuç rozetleri: Fırsatlar ve Genel Bakış da açılışta yüklüyor. Bu ekrandan
+  // girilirse rozet sütunu boş kalırdı.
+  void store.loadOutcomes();
+});
 
 /** Adresin son parçası — arka uçtaki `page_kind::last_segment` ile aynı kural. */
 function sonParca(u: string): string {
@@ -160,8 +177,9 @@ function iyilestir(id: string) {
 
 async function panelKapandi() {
   panelAcik.value = false;
-  // Gönderim yapıldıysa envanterdeki meta değişti; listeyi tazele ki rozet doğru olsun.
+  // Gönderim yapıldıysa envanterdeki meta değişti ve yeni bir olay yazıldı.
   await envanteriYukle();
+  await store.loadOutcomes();
 }
 
 const toplamKacan = computed(() =>

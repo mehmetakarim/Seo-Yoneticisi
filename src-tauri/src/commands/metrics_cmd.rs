@@ -58,11 +58,16 @@ fn snapshots(conn: &Connection) -> Result<Vec<Snapshot>, String> {
 fn latest_store_events(conn: &Connection) -> Result<Vec<WorkEvent>, String> {
     let mut stmt = conn
         .prepare(
+            // ⚠️ `sku IS NOT NULL` koşulu KALDIRILDI (Faz İ): içerik gönderimlerinin
+            // sku'su yok, kimlikleri URL. Koşul dururken o olaylar yazılıyor ama hiçbir
+            // yerde okunmuyordu — rozet çıkmıyor, sonuç kontrolü kovası geri getirmiyordu.
+            // Gruplama `COALESCE(sku, url)`: ürün için sku, sayfa için adres.
             "SELECT id, at, sku, url, kind, reaches_store FROM work_events e
-             WHERE reaches_store = 1 AND sku IS NOT NULL
+             WHERE reaches_store = 1 AND COALESCE(e.sku, e.url) IS NOT NULL
                AND at = (SELECT MAX(at) FROM work_events x
-                         WHERE x.sku = e.sku AND x.reaches_store = 1)
-             GROUP BY sku",
+                         WHERE COALESCE(x.sku, x.url) = COALESCE(e.sku, e.url)
+                           AND x.reaches_store = 1)
+             GROUP BY COALESCE(sku, url)",
         )
         .map_err(|e| format!("Olaylar okunamadı: {e}"))?;
     let rows = stmt
@@ -154,7 +159,10 @@ pub fn get_outcome_summary(state: State<'_, AppState>) -> Result<OutcomeSummary,
 /// Fırsatlar tablosundaki "Sonuç" sütunu — sku → (etiket, ton).
 #[derive(Debug, Serialize)]
 pub struct OutcomeBadge {
+    /// Ürün rozetlerinde SKU; içerik rozetlerinde boş (kimlik `url`).
     pub sku: String,
+    /// Sayfa adresi — içerik rozetleri bununla eşleşiyor.
+    pub url: String,
     pub label: String,
     pub tone: String,
     /// Rozetin baloncuğu: hangi pencereler kıyaslandı, tıklama nasıl değişti.
@@ -168,10 +176,12 @@ pub fn get_outcome_badges(state: State<'_, AppState>) -> Result<Vec<OutcomeBadge
     let lookup = row_lookup(&conn);
     let mut out = Vec::new();
     for ev in latest_store_events(&conn)? {
-        let Some(sku) = ev.sku.clone() else { continue };
+        // ⚠️ Artık sku'suz olay ATLANMIYOR: içerik gönderimleri URL ile kimlikleniyor.
+        // `metrics::outcome` zaten URL anahtarlı çalışıyordu — eksik olan yalnızca buydu.
         let o = metrics::outcome(&ev, &snaps, &lookup);
         out.push(OutcomeBadge {
-            sku,
+            sku: ev.sku.clone().unwrap_or_default(),
+            url: ev.url.clone().unwrap_or_default(),
             label: o.status.label().to_string(),
             tone: o.status.tone().to_string(),
             tip: tip_of(&ev, &o),

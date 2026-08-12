@@ -186,8 +186,13 @@ def main():
         "net_delta_clicks": 137.0,
     }
     outcome_badges = [
-        {"sku": ilk_sku, "label": "İyileşti", "tone": "uygun",
+        {"sku": ilk_sku, "url": "", "label": "İyileşti", "tone": "uygun",
          "tip": "2026-06-14 gönderimi · 18 → 34 (+16 tıklama) · 2026-05-10 → 2026-06-07 ile 2026-07-07 → 2026-08-04 karşılaştırıldı"},
+        # Faz İ: içerik rozetinin sku'su YOK, kimliği adres. Sözlük `sku || url` ile
+        # anahtarlanıyor; yalnızca sku kullanılsaydı bu satır boş anahtarda çakışırdı.
+        {"sku": "", "url": "https://www.kurumsalit.com/kategori/access-point",
+         "label": "Ölçülüyor", "tone": "bekliyor",
+         "tip": "2026-08-13 gönderimi · takip penceresi henüz açılmadı"},
     ]
     product_timeline = {
         "has_store_event": True,

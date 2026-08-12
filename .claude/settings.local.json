@@ -7,7 +7,8 @@
       "Bash(python3 -c ' *)",
       "Bash(curl -s --max-time 60 \"https://www.kurumsalit.com/output/2567783262\" -o feed.xml)",
       "Bash(awk '/<product>/{f=1} f{print} /<\\\\/product>/{exit}' feed.xml)",
-      "Bash(grep -nA25 'CREATE TABLE.*products' src-tauri/src/db.rs)"
+      "Bash(grep -nA25 'CREATE TABLE.*products' src-tauri/src/db.rs)",
+      "Bash(python3 -)"
     ]
   }
 }

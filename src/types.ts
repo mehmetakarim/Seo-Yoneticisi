@@ -422,9 +422,16 @@ export interface OutcomeSummary {
   net_delta_clicks: number;
 }
 
-/** Fırsatlar tablosundaki "Sonuç" rozeti. */
+/**
+ * "Sonuç" rozeti — bir gönderimden 28 gün sonra ne olduğu.
+ *
+ * ⚠️ Kimlik İKİ ALANLI: ürün gönderimlerinde `sku`, içerik gönderimlerinde (kategori/marka/
+ * blog) `url`. Sözlük `sku || url` ile anahtarlanmalı — yalnızca `sku` kullanılırsa bütün
+ * içerik rozetleri boş anahtarda çakışır.
+ */
 export interface OutcomeBadge {
   sku: string;
+  url: string;
   label: string;
   tone: string;
   tip: string;
