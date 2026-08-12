@@ -16,6 +16,7 @@ import StrikingPage from "./components/tools/StrikingPage.vue";
 import CannibalPage from "./components/tools/CannibalPage.vue";
 import DecayPage from "./components/tools/DecayPage.vue";
 import EolPage from "./components/tools/EolPage.vue";
+import ContentGapPage from "./components/tools/ContentGapPage.vue";
 import AssistantPage from "./components/tools/AssistantPage.vue";
 import FocusBar from "./components/FocusBar.vue";
 import FocusSummaryModal from "./components/FocusSummaryModal.vue";
@@ -43,6 +44,7 @@ const PAGES: Record<Page, Component> = {
   cannibal: CannibalPage,
   decay: DecayPage,
   eol: EolPage,
+  contentgap: ContentGapPage,
   assistant: AssistantPage,
   settings: SettingsPage,
 };

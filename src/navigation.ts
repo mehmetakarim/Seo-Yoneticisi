@@ -121,6 +121,17 @@ export const NAV = [
     group: "SEO Araçları",
   },
 
+  // Faz İ: ürün-dışı sayfaların ilk kez göründüğü ekran. SEO Araçları'nın yedincisi —
+  // diğer altısı ürün-merkezli, bu onların göremediği yeri gösteriyor.
+  {
+    key: "contentgap",
+    label: "İçerik açığı",
+    icon: "fileText",
+    title: "İçerik açığı",
+    sub: "Sıralandığınız ama sayfası niyete uymayan aramalar",
+    group: "SEO Araçları",
+  },
+
   {
     key: "assistant",
     // ⚠️ Kenar çubuğu 190–238px; "Yapay Zekâ Asistanı" oraya sığmayıp iki satıra

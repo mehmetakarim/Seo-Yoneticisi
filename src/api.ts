@@ -40,6 +40,7 @@ import type {
   QuoteSummary,
   ModelChains,
   GeminiKullanim,
+  StorePageSyncResult,
 } from "./types";
 
 export const api = {
@@ -164,6 +165,8 @@ export const api = {
   setTheme: (theme: string) => invoke<void>("set_theme", { theme }),
   testFeedUrl: (url: string) => invoke<number>("test_feed_url", { url }),
   testGeminiKey: (key: string) => invoke<string>("test_gemini_key", { key }),
+  /** Kategori · marka · blog envanterini IdeaSoft'tan çeker (~7 istek). */
+  syncStorePages: () => invoke<StorePageSyncResult>("sync_store_pages"),
   getModelChains: () => invoke<ModelChains>("get_model_chains"),
   setModelChains: (uretim: string[], sohbet: string[]) =>
     invoke<void>("set_model_chains", { uretim, sohbet }),

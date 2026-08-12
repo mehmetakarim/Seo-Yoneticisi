@@ -311,6 +311,9 @@ export interface OpportunityReport {
   striking: QueryOpportunity[];
   cannibalization: Cannibalization[];
   decay: Decay[];
+  /** Faz İ — eski önbellekte yok, `?? []` ile okunmalı. */
+  content_gaps?: ContentGap[];
+  navigational?: Navigational[];
 }
 
 /** EOL sayfa için halef ürün adayı (deterministik sıralama — öneri değil, aday). */
@@ -766,4 +769,49 @@ export interface GeminiKullanim {
   uretim: number;
   uretim_basina_istek: number;
   gun_siniri: string;
+}
+
+// ===================== İçerik açığı (Faz İ) =====================
+
+export type PageKind = "product" | "category" | "brand" | "blog" | "home" | "other";
+export type GapKind = "intent_mismatch" | "no_page" | "wrong_match";
+
+/**
+ * Sıralanan sayfanın tipi sorgunun niyetini karşılamıyor.
+ *
+ * ⚠️ "İçerik yok" ile karıştırılmamalı. Ölçüm (2026-08-12) gösterdi ki teamviewer/veeam/
+ * fortinet için bir sayfa VAR ve sıralanıyor — eksik olan o sorgunun niyetine uygun sayfa.
+ */
+export interface ContentGap {
+  query: string;
+  page: string;
+  page_kind: PageKind;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  missed_clicks: number;
+  kind: GapKind;
+}
+
+/**
+ * Kovalanmayacak sorgu — kuyruğa girmez.
+ *
+ * 🔴 Gizlenmiyor, gerekçesiyle gösteriliyor: kullanıcı "bu hacim neden listede yok?"
+ * sorusunu sorabilmeli ve cevabı görebilmeli.
+ */
+export interface Navigational {
+  query: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  position: number;
+  reason: string;
+}
+
+/** Envanter senkron sonucu: tip başına kayıt · GSC'de görünen · eksik alanı olan. */
+export interface StorePageSyncResult {
+  total: number;
+  by_kind: [string, number, number, number][];
+  synced_at: string;
 }

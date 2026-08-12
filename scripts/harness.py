@@ -204,6 +204,44 @@ def main():
         ],
     }
 
+    # ===== İçerik açığı (Faz İ) =====
+    # ⚠️ Satırlar UYDURULMADI: `content_gap::gercek_veri` ölçüm testinin gerçek çıktısından
+    # alındı (2026-08-12, 90 gün, kullanıcının verisi). Taklidin üretimden ayrışması bu
+    # oturumda bir hatayı gizlemişti; fikstür gerçeğin şeklini taşımalı.
+    def _gap(q, page, kind, pk, clicks, imps, pos, miss):
+        return {"query": q, "page": page, "kind": kind, "page_kind": pk,
+                "clicks": clicks, "impressions": imps,
+                "ctr": round(clicks / imps, 5) if imps else 0.0,
+                "position": pos, "missed_clicks": miss}
+
+    _M = "https://www.kurumsalit.com"
+    CONTENT_GAPS = [
+        _gap("access point", f"{_M}/kategori/access-point", "intent_mismatch", "category", 84, 4528, 7.2, 171),
+        _gap("acces point", f"{_M}/kategori/access-point", "intent_mismatch", "category", 33, 1840, 7.3, 69),
+        _gap("dell latitude 3510", f"{_M}/urun/dell-latitude-3510-i5", "intent_mismatch", "product", 6, 663, 4.6, 31),
+        _gap("firewall cihazı", f"{_M}/urun/fortigate-100f-fg-100f-bdl-950-36", "intent_mismatch", "product", 3, 356, 5.4, 25),
+        _gap("hp mavi laptop", f"{_M}/urun/hp-probook-450-g7", "intent_mismatch", "product", 1, 240, 5.4, 17),
+        _gap("firewall cihazı", f"{_M}/kategori/guvenlik-duvari-firewall", "intent_mismatch", "category", 8, 634, 9.0, 16),
+        _gap("firewall markaları", f"{_M}/kategori/guvenlik-duvari-firewall", "intent_mismatch", "category", 2, 206, 3.5, 15),
+        _gap("teamviewer fiyat", f"{_M}/marka/teamviewer", "intent_mismatch", "brand", 4, 183, 4.2, 13),
+        _gap("masa ustu", f"{_M}/urun/ergotron-lx-desk-monitor-arm", "wrong_match", "product", 1, 102, 3.0, 11),
+        _gap("d30n5et", f"{_M}/", "no_page", "home", 18, 172, 9.0, 2),
+    ]
+    NAVIGATIONAL = [
+        {"query": "teamviewer", "impressions": 255, "clicks": 0, "ctr": 0.0, "position": 21.2,
+         "reason": "başka bir üreticinin marka adı arandı ve konum (poz 21.2) uygun olduğu hâlde "
+                   "TO beklenenin %0'ı — arayan üreticinin sitesine gidiyor, içerikle kurtarılamaz"},
+        {"query": "kurumsalit", "impressions": 398, "clicks": 193, "ctr": 0.4849, "position": 1.0,
+         "reason": "kendi markamız arandı — trafik zaten bize geliyor, yazılacak içerik yok"},
+        {"query": "jabra", "impressions": 475, "clicks": 0, "ctr": 0.0, "position": 12.4,
+         "reason": "başka bir üreticinin marka adı arandı ve konum (poz 12.4) uygun olduğu hâlde "
+                   "TO beklenenin %0'ı — arayan üreticinin sitesine gidiyor, içerikle kurtarılamaz"},
+    ]
+
+    # İçerik açığı raporun İÇİNDE taşınıyor — arka uçta da öyle (OpportunityReport alanları).
+    # Ayrı bir komut yapmak, taklidi üretimden ayırırdı.
+    report["content_gaps"], report["navigational"] = CONTENT_GAPS, NAVIGATIONAL
+
     handlers = {
         "get_eol_decisions": [],
         "get_jsonld": jsonld_stub,
@@ -541,6 +579,11 @@ def main():
         f"    const LIVE = {live_json};\n"
         "    if (new URLSearchParams(location.search).has('empty')\n"
         "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
+        # `?icerikyok=1` → analiz var ama içerik açığı yok (boş durumun dürüstlüğü).
+        "    if (new URLSearchParams(location.search).has('icerikyok')\n"
+        "        && cmd === 'get_opportunity_cache')\n"
+        "      return Promise.resolve({ ...H.get_opportunity_cache,\n"
+        "        content_gaps: [], navigational: [] });\n"
         # `?setup=1` → taze kurulum benzetimi. Sihirbaz kullanıcının GERÇEK veritabanına
         # dokunmadan uçtan uca denenebiliyor; yazan komutlar yutuluyor.
         # Model zinciri ve kullanım (Faz G). Zincirler kaynaktan okundu; bkz. zincir_oku().
