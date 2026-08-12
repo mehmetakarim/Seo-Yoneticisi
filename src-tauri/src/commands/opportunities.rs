@@ -309,10 +309,10 @@ pub async fn suggest_eol_successor(
     state: State<'_, AppState>,
     url: String,
 ) -> Result<SuccessorSuggestion, String> {
-    let (api_key, catalog) = {
+    let (api_key, catalog, zincir) = {
         let conn = state.conn.lock().unwrap();
         let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
-        (key, super::live_catalog(&conn))
+        (key, super::live_catalog(&conn), super::uretim_zinciri(&conn))
     };
 
     // Kod adayları daraltır (262 → 5), model karar verir. Bkz. successor_candidates dokümanı.
@@ -332,7 +332,15 @@ pub async fn suggest_eol_successor(
         .iter()
         .map(|c| (c.sku.clone(), c.name.clone()))
         .collect();
-    let produced = gemini::suggest_successor(&api_key, &url, &pairs).await?;
+    let toplayici = super::CallToplayici::default();
+    let kanal = toplayici.kanal();
+    let chain = gemini::ChainCtx { models: zincir, log: Some(&kanal) };
+    let sonuc = gemini::suggest_successor(&api_key, &url, &pairs, &chain).await;
+    {
+        let conn = state.conn.lock().unwrap();
+        toplayici.yaz(&conn, "successor");
+    }
+    let produced = sonuc?;
 
     let (sku, name, url_out, reason) = match produced.value {
         Some((sku, reason)) => {

@@ -165,6 +165,7 @@ pub async fn chat_stream<F>(
     api_key: &str,
     system: &str,
     history: &[ChatMessage],
+    chain: &ChainCtx<'_>,
     mut on_event: F,
 ) -> Result<Produced<String>, String>
 where
@@ -181,17 +182,22 @@ where
     let body = build_body(system, history);
     let mut last_err = String::new();
 
-    for model in CHAT_CHAIN {
+    for model in &chain.models {
         let url = format!("{API_BASE}/{model}:streamGenerateContent?alt=sse&key={api_key}");
+        // ⚠️ Akış tabanlı olduğu için ortak `post_generate` kapısını kullanamıyor; ama
+        // sayaç bakımından farkı yok — kotadan düşen gerçek bir istek. Kaydı elle düşüyor.
+        // Kapının dışında kalan TEK yer burası ve sebebi budur.
         let resp = match client.post(&url).json(&body).send().await {
             Ok(r) => r,
             Err(e) => {
+                chain.kaydet(model, 0, false);
                 last_err = format!("Gemini'ye ulaşılamadı: {e}");
                 continue;
             }
         };
 
         let status = resp.status();
+        chain.kaydet(model, status.as_u16(), status.is_success());
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             let (retry, msg) = classify_error(status.as_u16(), &text, model);
@@ -229,7 +235,7 @@ where
             last_err = format!("{model} boş cevap döndürdü.");
             continue;
         }
-        return Ok(Produced { value: full, model });
+        return Ok(Produced { value: full, model: model.clone() });
     }
 
     Err(if last_err.is_empty() {
@@ -371,6 +377,7 @@ mod tests {
                 role: "user".into(),
                 text: "Geçen yılın toplam cirosu ne kadardı?".into(),
             }],
+            &ChainCtx::chat_defaults(),
             |_| {},
         )
         .await
@@ -404,6 +411,7 @@ mod tests {
                        Tek cümleyle durumu özetle."
                     .into(),
             }],
+            &ChainCtx::chat_defaults(),
             |e| match e {
                 ChatEvent::Thinking => dusunce += 1,
                 ChatEvent::Chunk(_) => parca += 1,

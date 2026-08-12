@@ -56,8 +56,8 @@ async fn call_specs_model(
     api_key: &str,
     model: &str,
     prompt: &str,
+    chain: &ChainCtx<'_>,
 ) -> Result<Vec<TechGroup>, (bool, String)> {
-    let url = format!("{API_BASE}/{model}:generateContent");
     let body = serde_json::json!({
         "system_instruction": { "parts": [{ "text": tech_system_prompt() }] },
         "contents": [{ "parts": [{ "text": prompt }] }],
@@ -87,24 +87,8 @@ async fn call_specs_model(
             "temperature": 0.2
         }
     });
-    let resp = client
-        .post(&url)
-        .query(&[("key", api_key)])
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| (false, format!("İstek gönderilemedi: {e}")))?;
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(classify_error(status.as_u16(), &text, model));
-    }
-    let v: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| (false, format!("Yanıt çözümlenemedi: {e}")))?;
-    let inner = v["candidates"][0]["content"]["parts"][0]["text"]
-        .as_str()
-        .ok_or_else(|| (false, format!("Beklenmeyen yanıt biçimi: {}", short(&text))))?;
-    serde_json::from_str::<Vec<TechGroup>>(inner)
+    let inner = post_generate(client, api_key, model, &body, chain).await?;
+    serde_json::from_str::<Vec<TechGroup>>(&inner)
         .map_err(|e| (false, format!("Üretilen tablo okunamadı: {e}")))
 }
 
@@ -157,6 +141,7 @@ pub async fn structure_tech_specs(
     api_key: &str,
     ctx: &ProductContext<'_>,
     source_text: &str,
+    chain: &ChainCtx<'_>,
 ) -> Result<Produced<TechSpecsResult>, String> {
     let key = api_key.trim();
     if key.is_empty() {
@@ -181,8 +166,8 @@ pub async fn structure_tech_specs(
         .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
 
     let mut last_err = String::from("Bilinmeyen hata");
-    for model in MODEL_CHAIN.iter() {
-        match call_specs_model(&client, key, model, &prompt).await {
+    for model in &chain.models {
+        match call_specs_model(&client, key, model, &prompt, chain).await {
             Ok(groups) => {
                 let result = verify_traceable(groups, src);
                 if result.groups.is_empty() {
@@ -192,7 +177,7 @@ pub async fn structure_tech_specs(
                             .to_string(),
                     );
                 }
-                return Ok(Produced { value: result, model });
+                return Ok(Produced { value: result, model: model.clone() });
             }
             Err((try_next, msg)) => {
                 last_err = msg;
@@ -356,7 +341,7 @@ mod tests {
                       Operating System: FreeDOS\n\
                       Ethernet: RJ45 Gigabit\n\
                       In the box: keyboard, mouse, power adapter";
-        let produced = structure_tech_specs(&key, &ctx, source).await.expect("yapılandırma başarısız");
+        let produced = structure_tech_specs(&key, &ctx, source, &ChainCtx::defaults()).await.expect("yapılandırma başarısız");
         println!("model: {}", produced.model);
         let res = produced.value;
         println!("--- GRUPLAR ---");

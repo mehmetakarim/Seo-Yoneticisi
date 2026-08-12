@@ -72,8 +72,8 @@ async fn call_model(
     api_key: &str,
     model: &str,
     prompt: &str,
+    chain: &ChainCtx<'_>,
 ) -> Result<GeneratedMeta, (bool, String)> {
-    let url = format!("{API_BASE}/{model}:generateContent");
     let body = serde_json::json!({
         "system_instruction": { "parts": [{ "text": system_prompt() }] },
         "contents": [{ "parts": [{ "text": prompt }] }],
@@ -84,28 +84,8 @@ async fn call_model(
         }
     });
 
-    let resp = client
-        .post(&url)
-        .query(&[("key", api_key)])
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| (false, format!("İstek gönderilemedi: {e}")))?;
-
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-
-    if !status.is_success() {
-        return Err(classify_error(status.as_u16(), &text, model));
-    }
-
-    // Başarılı yanıttan JSON metni çıkar
-    let v: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| (false, format!("Yanıt çözümlenemedi: {e}")))?;
-    let inner = v["candidates"][0]["content"]["parts"][0]["text"]
-        .as_str()
-        .ok_or_else(|| (false, format!("Beklenmeyen yanıt biçimi: {}", short(&text))))?;
-    let meta: GeneratedMeta = serde_json::from_str(inner)
+    let inner = post_generate(client, api_key, model, &body, chain).await?;
+    let meta: GeneratedMeta = serde_json::from_str(&inner)
         .map_err(|e| (false, format!("Üretilen JSON okunamadı: {e}")))?;
     Ok(meta)
 }
@@ -203,6 +183,7 @@ fn correction_for(meta: &GeneratedMeta) -> Option<String> {
 pub async fn generate_meta(
     api_key: &str,
     ctx: &ProductContext<'_>,
+    chain: &ChainCtx<'_>,
 ) -> Result<Produced<GeneratedMeta>, String> {
     let key = api_key.trim();
     if key.is_empty() {
@@ -214,9 +195,9 @@ pub async fn generate_meta(
         .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
 
     let mut last_err = String::from("Bilinmeyen hata");
-    for (i, model) in MODEL_CHAIN.iter().enumerate() {
+    for model in &chain.models {
         let prompt = build_prompt(ctx, None);
-        match call_model(&client, key, model, &prompt).await {
+        match call_model(&client, key, model, &prompt, chain).await {
             Ok(meta) => {
                 // Kural fail ederse aynı modelle tek retry; iki denemenin daha iyisini seç,
                 // sonra fazla uzun alanları kelime sınırında kırparak uzunluğu garantile.
@@ -224,13 +205,16 @@ pub async fn generate_meta(
                     None => meta,
                     Some(correction) => {
                         let prompt2 = build_prompt(ctx, Some(&correction));
-                        match call_model(&client, key, model, &prompt2).await {
+                        // ⚠️ Bu ikinci deneme de kotadan düşen GERÇEK bir istek; sayaca
+                        // yazılıyor. "Bir üretim = bir istek" sanmak sayıyı olduğundan
+                        // düşük gösterirdi — `run_id` gruplaması bu yüzden var.
+                        match call_model(&client, key, model, &prompt2, chain).await {
                             Ok(meta2) if violation_count(&meta2) <= violation_count(&meta) => meta2,
                             _ => meta,
                         }
                     }
                 };
-                return Ok(Produced { value: clamp_lengths(best), model });
+                return Ok(Produced { value: clamp_lengths(best), model: model.clone() });
             }
             Err((try_next, msg)) => {
                 last_err = msg;
@@ -239,7 +223,6 @@ pub async fn generate_meta(
                     return Err(last_err);
                 }
                 // Kota ise sıradaki modele geç
-                let _ = i;
             }
         }
     }
@@ -275,7 +258,7 @@ mod tests {
             target_keyword: None,
             insights: None,
         };
-        let produced = generate_meta(&key, &ctx).await.expect("üretim başarısız");
+        let produced = generate_meta(&key, &ctx, &ChainCtx::defaults()).await.expect("üretim başarısız");
         println!("model: {}", produced.model);
         let meta = produced.value;
         println!("target_keyword: {}", meta.target_keyword);
@@ -330,7 +313,7 @@ mod tests {
             target_keyword: Some("all in one bilgisayar"),
             insights: Some(&insights),
         };
-        let produced = generate_meta(&key, &ctx).await.expect("üretim başarısız");
+        let produced = generate_meta(&key, &ctx, &ChainCtx::defaults()).await.expect("üretim başarısız");
         println!("model: {}", produced.model);
         let meta = produced.value;
         println!("target_keyword: {}", meta.target_keyword);

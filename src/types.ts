@@ -731,3 +731,39 @@ export interface QuoteSummary {
   won_totals: [string, number][];
   lost_reasons: [string, number][];
 }
+
+// ===================== Gemini model zinciri ve kullanım (Faz G) =====================
+
+/** Ayarlardaki iki zincir + koddaki varsayılanlar ("Varsayılana dön" için). */
+export interface ModelChains {
+  uretim: string[];
+  sohbet: string[];
+  uretim_varsayilan: string[];
+  sohbet_varsayilan: string[];
+}
+
+export interface ModelKullanim {
+  model: string;
+  istek: number;
+  /** HTTP 429 sayısı — "limit gerçekten darboğaz mı?" göstergesi. */
+  kota_hatasi: number;
+}
+
+export interface GunlukKullanim {
+  gun: string;
+  istek: number;
+  kota_hatasi: number;
+}
+
+/**
+ * 🔴 Burada **kalan hak alanı YOK** ve bilinçli olarak yok. Sayabildiğimiz tek şey bu
+ * uygulamanın gönderdikleri; aynı anahtar başka yerde kullanılırsa sayı eksiktir. Eksik bir
+ * sayıyı "20 hakkın var" diye sunmak, olmayan bir kapasiteyi varmış gibi gösterirdi.
+ */
+export interface GeminiKullanim {
+  bugun: ModelKullanim[];
+  gunler: GunlukKullanim[];
+  uretim: number;
+  uretim_basina_istek: number;
+  gun_siniri: string;
+}

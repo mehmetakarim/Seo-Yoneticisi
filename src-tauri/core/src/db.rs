@@ -306,6 +306,32 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_quote_versions_quote ON quote_versions(quote_id, version);
+
+        -- ===== Gemini kullanım kaydı (Faz G) =====
+        -- Ücretsiz katmanda flash modellerin günlük limiti 20; kullanıcı bunu ancak üretim
+        -- alt modele düştüğünde fark ediyordu. Kapasitenin görünmesi için her istek buraya.
+        --
+        -- ⚠️ Burada sayılan tek şey **bu uygulamanın gönderdikleri**. Aynı API anahtarı başka
+        -- bir yerde kullanılırsa sayı eksik kalır — bu yüzden ekranda "kalan hak" YAZILMIYOR,
+        -- yalnızca yapılan istek gösteriliyor (kullanıcı kararı, 2026-08-12: eksik bir sayıyı
+        -- "20 hakkın var, 14 kullandın" diye sunmak yanlış güven verir).
+        --
+        -- `run_id`: kullanıcının başlattığı TEK üretim. Zincir üç modele düşerse üç satır
+        -- oluşur, üçü de aynı `run_id`. "Üretim başına kaç istek harcanıyor" ancak böyle
+        -- hesaplanır — bir üretimin bir istek olduğunu varsaymak sayıyı düşük gösterir.
+        -- `http_code`: 0 = istek hiç gitmedi (ağ hatası). 429 ayrı sayılıyor; "limit gerçekten
+        -- darboğaz mı?" sorusunun cevabı toplam istek değil, kotaya çarpma sayısıdır.
+        CREATE TABLE IF NOT EXISTS gemini_calls (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          at TEXT NOT NULL,
+          model TEXT NOT NULL,
+          -- 'meta' | 'details' | 'tech' | 'successor' | 'chat' | 'probe'
+          kind TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          ok INTEGER NOT NULL,
+          http_code INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_gemini_calls_at ON gemini_calls(at);
         "#,
     )
     .map_err(|e| format!("Şema oluşturulamadı: {e}"))?;

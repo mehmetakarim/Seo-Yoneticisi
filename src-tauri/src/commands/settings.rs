@@ -222,6 +222,181 @@ pub async fn test_gemini_key(key: String) -> Result<String, String> {
     gemini::test_key(&key).await
 }
 
+// ===================== Model zinciri ve kullanım (Faz G) =====================
+
+/// Ayarlardaki iki zincir + koddaki varsayılanlar.
+///
+/// Varsayılanlar da dönüyor ki ekran **"Varsayılana dön"** diyebilsin: kullanıcı listeyi
+/// bozarsa geri dönebileceği bir yer olmalı, yoksa ayar bir tuzağa dönüşür.
+#[derive(Serialize)]
+pub struct ModelChains {
+    pub uretim: Vec<String>,
+    pub sohbet: Vec<String>,
+    pub uretim_varsayilan: Vec<String>,
+    pub sohbet_varsayilan: Vec<String>,
+}
+
+#[tauri::command]
+pub fn get_model_chains(state: State<'_, AppState>) -> Result<ModelChains, String> {
+    let conn = state.conn.lock().unwrap();
+    Ok(ModelChains {
+        uretim: super::uretim_zinciri(&conn),
+        sohbet: super::sohbet_zinciri(&conn),
+        uretim_varsayilan: gemini::DEFAULT_MODEL_CHAIN.iter().map(|m| m.to_string()).collect(),
+        sohbet_varsayilan: gemini::CHAT_CHAIN.iter().map(|m| m.to_string()).collect(),
+    })
+}
+
+/// Zincirleri kaydeder.
+///
+/// ⚠️ Boş liste **kaydedilebilir** ama okunurken varsayılana düşer (`ChainCtx::from_setting`).
+/// Yani "hepsini sildim" durumunda uygulama üretimsiz kalmıyor — kullanıcı kendini
+/// kilitleyemesin diye.
+#[tauri::command]
+pub fn set_model_chains(
+    state: State<'_, AppState>,
+    uretim: Vec<String>,
+    sohbet: Vec<String>,
+) -> Result<(), String> {
+    let conn = state.conn.lock().unwrap();
+    db::set_setting(&conn, "gemini_model_chain", &uretim.join("\n"))?;
+    db::set_setting(&conn, "gemini_chat_chain", &sohbet.join("\n"))?;
+    Ok(())
+}
+
+/// Google'ın şu an sunduğu modeller — anahtar ayarlardan okunur.
+#[tauri::command]
+pub async fn list_gemini_models(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let key = {
+        let conn = state.conn.lock().unwrap();
+        db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default()
+    };
+    gemini::list_models(&key).await
+}
+
+/// Tek modeli uygulamanın gerçek istek biçimiyle dener. Kotadan düşer, sayaca yazılır.
+#[tauri::command]
+pub async fn probe_gemini_model(
+    state: State<'_, AppState>,
+    model: String,
+) -> Result<String, String> {
+    let key = {
+        let conn = state.conn.lock().unwrap();
+        db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default()
+    };
+    let toplayici = super::CallToplayici::default();
+    let kanal = toplayici.kanal();
+    let chain = gemini::ChainCtx { models: vec![model.clone()], log: Some(&kanal) };
+    let sonuc = gemini::probe_model(&key, &model, &chain).await;
+    {
+        let conn = state.conn.lock().unwrap();
+        toplayici.yaz(&conn, "probe");
+    }
+    sonuc
+}
+
+/// Model başına **bugün yapılan istek sayısı**.
+///
+/// 🔴 "Kalan hak" YOK ve bilinçli olarak yok. Sayabildiğimiz tek şey bu uygulamanın
+/// gönderdikleri; aynı anahtar başka bir yerde kullanılıyorsa sayı eksiktir. Eksik bir sayıyı
+/// "20 hakkın var, 14 kullandın" diye sunmak, olmayan bir kapasiteyi varmış gibi gösterir.
+#[derive(Serialize)]
+pub struct ModelKullanim {
+    pub model: String,
+    pub istek: i64,
+    /// Kotaya çarpma sayısı (HTTP 429). "Limit gerçekten darboğaz mı?" sorusunun cevabı.
+    pub kota_hatasi: i64,
+}
+
+/// Günlük toplam — geçmiş grafiği için.
+#[derive(Serialize)]
+pub struct GunlukKullanim {
+    pub gun: String,
+    pub istek: i64,
+    pub kota_hatasi: i64,
+}
+
+#[derive(Serialize)]
+pub struct GeminiKullanim {
+    pub bugun: Vec<ModelKullanim>,
+    pub gunler: Vec<GunlukKullanim>,
+    /// Kaç ayrı üretim yapıldı (son 14 gün) — `run_id` sayısı.
+    pub uretim: i64,
+    /// Toplam istek / üretim. Zincir alt modele düştükçe bu sayı büyür; 1'e yakınsa
+    /// zincirin ilk halkası yetiyor demektir.
+    pub uretim_basina_istek: f64,
+    /// Sayımın hangi gün sınırına göre yapıldığı — ekranda açıkça yazılıyor.
+    pub gun_siniri: String,
+}
+
+/// Son 14 günün kullanımı.
+///
+/// ⚠️ **Gün sınırı yerel saat.** Google ücretsiz katman kotasını Pasifik saatiyle gece yarısı
+/// sıfırlıyor; yani yerel gün ile kota günü çakışmıyor ve gün dönümü civarında sayılar
+/// Google'ın gördüğünden farklı olur. Bunu gizlemek yerine ekranda hangi güne göre sayıldığı
+/// yazılıyor — zaten "kalan hak" iddia etmediğimiz için kayma yanıltıcı bir sonuç doğurmuyor.
+#[tauri::command]
+pub fn gemini_usage(state: State<'_, AppState>) -> Result<GeminiKullanim, String> {
+    let conn = state.conn.lock().unwrap();
+    kullanim_oku(&conn, &chrono::Local::now().format("%Y-%m-%d").to_string())
+}
+
+/// Sorgu mantığı komuttan ayrı: `State` olmadan sınanabilsin diye. "Bugün" dışarıdan
+/// veriliyor ki gün sınırı davranışı sabit bir tarihle test edilebilsin.
+fn kullanim_oku(conn: &Connection, bugun_str: &str) -> Result<GeminiKullanim, String> {
+
+    let mut st = conn
+        .prepare(
+            "SELECT model, COUNT(*), SUM(CASE WHEN http_code = 429 THEN 1 ELSE 0 END)
+             FROM gemini_calls WHERE date(at) = ?1
+             GROUP BY model ORDER BY COUNT(*) DESC",
+        )
+        .map_err(|e| format!("Kullanım okunamadı: {e}"))?;
+    let bugun: Vec<ModelKullanim> = st
+        .query_map([bugun_str], |r| {
+            Ok(ModelKullanim { model: r.get(0)?, istek: r.get(1)?, kota_hatasi: r.get(2)? })
+        })
+        .map_err(|e| format!("Kullanım okunamadı: {e}"))?
+        .filter_map(|x| x.ok())
+        .collect();
+
+    let mut st = conn
+        .prepare(
+            "SELECT date(at), COUNT(*), SUM(CASE WHEN http_code = 429 THEN 1 ELSE 0 END)
+             FROM gemini_calls WHERE date(at) >= date(?1, '-13 days')
+             GROUP BY date(at) ORDER BY date(at)",
+        )
+        .map_err(|e| format!("Kullanım geçmişi okunamadı: {e}"))?;
+    let gunler: Vec<GunlukKullanim> = st
+        .query_map([bugun_str], |r| {
+            Ok(GunlukKullanim { gun: r.get(0)?, istek: r.get(1)?, kota_hatasi: r.get(2)? })
+        })
+        .map_err(|e| format!("Kullanım geçmişi okunamadı: {e}"))?
+        .filter_map(|x| x.ok())
+        .collect();
+
+    let (uretim, toplam): (i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(DISTINCT run_id), COUNT(*) FROM gemini_calls
+             WHERE date(at) >= date(?1, '-13 days')",
+            [bugun_str],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((0, 0));
+
+    Ok(GeminiKullanim {
+        bugun,
+        gunler,
+        uretim,
+        uretim_basina_istek: if uretim > 0 {
+            (toplam as f64 / uretim as f64 * 10.0).round() / 10.0
+        } else {
+            0.0
+        },
+        gun_siniri: "yerel saat".to_string(),
+    })
+}
+
 #[tauri::command]
 pub fn export_db(state: State<'_, AppState>, path: String, format: String) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
@@ -365,6 +540,14 @@ fn export_json(conn: &Connection) -> Result<String, String> {
     )?;
     let quote_versions =
         dump(conn, "quote_versions", &["id", "quote_id", "version", "snapshot_json", "at"])?;
+    // Kullanım kaydı yedeğe DAHİL: kullanıcının amacı bu veriyle "limitler darboğaz mı,
+    // ücretli API'ye geçmeli miyim" sorusuna cevap biriktirmek. Geri yüklemede kaybolsaydı
+    // sayaç her makine değişiminde sıfırdan başlar ve o soru hiç cevaplanamazdı.
+    let gemini_calls = dump(
+        conn,
+        "gemini_calls",
+        &["id", "at", "model", "kind", "run_id", "ok", "http_code"],
+    )?;
 
     let root = json!({
         "app": "seo-yoneticisi",
@@ -384,6 +567,7 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         "quotes": quotes,
         "quote_items": quote_items,
         "quote_versions": quote_versions,
+        "gemini_calls": gemini_calls,
     });
     serde_json::to_string_pretty(&root).map_err(|e| format!("JSON oluşturulamadı: {e}"))
 }
@@ -429,7 +613,7 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
          DELETE FROM work_events; DELETE FROM metric_page_rows; DELETE FROM metric_snapshots;
          DELETE FROM contact_products; DELETE FROM contact_tags; DELETE FROM contact_events;
          DELETE FROM quote_versions; DELETE FROM quote_items; DELETE FROM quotes;
-         DELETE FROM contacts;",
+         DELETE FROM contacts; DELETE FROM gemini_calls;",
     )
     .map_err(|e| format!("Mevcut veriler temizlenemedi: {e}"))?;
 
@@ -610,6 +794,21 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
                 s(&q, "note").unwrap_or_default(), s(&q, "created_at").unwrap_or_default(),
                 s(&q, "updated_at").unwrap_or_default(), s(&q, "sent_at"), s(&q, "closed_at"),
                 s(&q, "close_reason").unwrap_or_default()
+            ],
+        );
+    }
+    for g in arr("gemini_calls") {
+        let _ = tx.execute(
+            "INSERT OR REPLACE INTO gemini_calls (id, at, model, kind, run_id, ok, http_code)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                i(&g, "id"),
+                s(&g, "at").unwrap_or_default(),
+                s(&g, "model").unwrap_or_default(),
+                s(&g, "kind").unwrap_or_default(),
+                s(&g, "run_id").unwrap_or_default(),
+                i(&g, "ok").unwrap_or(0),
+                i(&g, "http_code").unwrap_or(0)
             ],
         );
     }
@@ -922,5 +1121,91 @@ mod tests {
             .query_row("SELECT count(*) FROM chat_sessions", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
+    }
+
+    // ===================== Gemini kullanım sayacı (Faz G) =====================
+
+    fn kayit(conn: &Connection, at: &str, model: &str, run: &str, code: u16) {
+        conn.execute(
+            "INSERT INTO gemini_calls (at, model, kind, run_id, ok, http_code)
+             VALUES (?1, ?2, 'meta', ?3, ?4, ?5)",
+            rusqlite::params![at, model, run, (code == 200) as i64, code as i64],
+        )
+        .unwrap();
+    }
+
+    /// 🔴 Sayacın asıl sınavı: **bir üretim = bir istek DEĞİL.** Zincir alt modele düştükçe
+    /// aynı üretim birden çok istek harcıyor; `run_id` gruplaması bunu görünür kılıyor.
+    /// Gruplamayı kaybedersek "üretim başına istek" ortalaması 1,0 çıkar ve zincirin ne
+    /// kadar düştüğü — yani asıl bilmek istediğimiz şey — gizlenir.
+    #[test]
+    fn uretim_basina_istek_zincir_dususunu_gosteriyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+
+        // Bir üretim, üç istek: iki kota hatası, sonra başarı.
+        kayit(&conn, "2026-08-12T10:00:00", "gemini-3.6-flash", "r1", 429);
+        kayit(&conn, "2026-08-12T10:00:05", "gemini-3.5-flash", "r1", 429);
+        kayit(&conn, "2026-08-12T10:00:09", "gemini-3.5-flash-lite", "r1", 200);
+        // İkinci üretim tek istekte bitti.
+        kayit(&conn, "2026-08-12T11:00:00", "gemini-3.6-flash", "r2", 200);
+
+        let u = kullanim_oku(&conn, "2026-08-12").unwrap();
+        assert_eq!(u.uretim, 2, "iki ayrı run_id, iki üretim");
+        assert_eq!(u.uretim_basina_istek, 2.0, "4 istek / 2 üretim");
+
+        let flash = u.bugun.iter().find(|m| m.model == "gemini-3.6-flash").unwrap();
+        assert_eq!(flash.istek, 2);
+        assert_eq!(flash.kota_hatasi, 1, "429 ayrı sayılmalı — darboğaz göstergesi bu");
+    }
+
+    /// Gün sınırı: dünkü istekler bugünün sayısına karışmamalı, ama 14 günlük geçmişte
+    /// görünmeli. (Kotanın Pasifik saatiyle sıfırlandığı ayrı bir konu ve ekranda yazılı —
+    /// burada sınanan, sayımın kendi gün sınırına sadık kalması.)
+    #[test]
+    fn gun_siniri_bugunu_gecmisten_ayiriyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        kayit(&conn, "2026-08-11T23:59:00", "m", "d1", 200);
+        kayit(&conn, "2026-08-12T00:01:00", "m", "d2", 200);
+        // 14 günlük pencerenin dışı — hiçbir yerde görünmemeli.
+        kayit(&conn, "2026-07-01T10:00:00", "m", "eski", 200);
+
+        let u = kullanim_oku(&conn, "2026-08-12").unwrap();
+        assert_eq!(u.bugun.iter().map(|m| m.istek).sum::<i64>(), 1, "yalnızca bugünkü istek");
+        assert_eq!(u.gunler.len(), 2, "dün + bugün; 42 gün önceki pencere dışında");
+        assert_eq!(u.uretim, 2);
+    }
+
+    /// Yedek kullanım kaydını taşımalı: taşımazsa sayaç her makine değişiminde sıfırlanır
+    /// ve "limitler darboğaz mı" sorusu hiç cevaplanamaz. (Aynı sınıf eksik daha önce CRM
+    /// tablolarında yaşandı — yeni tablo eklenince yedek güncellenmeyi unutuyor.)
+    #[test]
+    fn yedek_gemini_kullanim_kaydini_tasiyor() {
+        let src = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&src).unwrap();
+        kayit(&src, "2026-08-12T10:00:00", "gemini-3.6-flash", "r1", 429);
+        kayit(&src, "2026-08-12T10:00:05", "gemini-3.5-flash-lite", "r1", 200);
+
+        let json = export_json(&src).unwrap();
+        let mut dst = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&dst).unwrap();
+        import_json(&mut dst, &json).unwrap();
+
+        let u = kullanim_oku(&dst, "2026-08-12").unwrap();
+        assert_eq!(u.uretim, 1, "run_id gruplaması korunmalı");
+        assert_eq!(u.bugun.iter().map(|m| m.istek).sum::<i64>(), 2);
+        assert_eq!(u.bugun.iter().map(|m| m.kota_hatasi).sum::<i64>(), 1, "429 korunmalı");
+    }
+
+    /// Hiç istek yokken bölme yapılmamalı — 0/0 NaN üretir ve ekranda "NaN" yazardı.
+    #[test]
+    fn kayit_yokken_ortalama_sifir() {
+        let conn = Connection::open_in_memory().unwrap();
+        seo_core::db::init(&conn).unwrap();
+        let u = kullanim_oku(&conn, "2026-08-12").unwrap();
+        assert_eq!(u.uretim, 0);
+        assert_eq!(u.uretim_basina_istek, 0.0);
+        assert!(u.bugun.is_empty() && u.gunler.is_empty());
     }
 }

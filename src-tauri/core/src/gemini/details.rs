@@ -111,8 +111,8 @@ async fn call_details_model(
     model: &str,
     prompt: &str,
     expected: usize,
+    chain: &ChainCtx<'_>,
 ) -> Result<Vec<String>, (bool, String)> {
-    let url = format!("{API_BASE}/{model}:generateContent");
     let body = serde_json::json!({
         "system_instruction": { "parts": [{ "text": details_system_prompt() }] },
         "contents": [{ "parts": [{ "text": prompt }] }],
@@ -122,24 +122,8 @@ async fn call_details_model(
             "temperature": 0.7
         }
     });
-    let resp = client
-        .post(&url)
-        .query(&[("key", api_key)])
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| (false, format!("İstek gönderilemedi: {e}")))?;
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(classify_error(status.as_u16(), &text, model));
-    }
-    let v: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| (false, format!("Yanıt çözümlenemedi: {e}")))?;
-    let inner = v["candidates"][0]["content"]["parts"][0]["text"]
-        .as_str()
-        .ok_or_else(|| (false, format!("Beklenmeyen yanıt biçimi: {}", short(&text))))?;
-    let arr: Vec<String> = serde_json::from_str(inner)
+    let inner = post_generate(client, api_key, model, &body, chain).await?;
+    let arr: Vec<String> = serde_json::from_str(&inner)
         .map_err(|e| (false, format!("Üretilen dizi okunamadı: {e}")))?;
     let _ = expected; // uzunluk uyuşmazlığı çağıran tarafta best-effort ele alınır
     Ok(arr)
@@ -197,6 +181,7 @@ pub async fn generate_details(
     ctx: &ProductContext<'_>,
     details_html: &str,
     target_keyword: &str,
+    chain: &ChainCtx<'_>,
 ) -> Result<Produced<String>, String> {
     let key = api_key.trim();
     if key.is_empty() {
@@ -238,8 +223,8 @@ pub async fn generate_details(
         .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
 
     let mut last_err = String::from("Bilinmeyen hata");
-    for model in MODEL_CHAIN.iter() {
-        match call_details_model(&client, key, model, &prompt, segs.len()).await {
+    for model in &chain.models {
+        match call_details_model(&client, key, model, &prompt, segs.len(), chain).await {
             Ok(mut arr) => {
                 // Uzunluk uyuşmazsa aynı modelle tek retry
                 if arr.len() != segs.len() {
@@ -247,7 +232,7 @@ pub async fn generate_details(
                         "{prompt}\n\nÖNEMLİ: Tam olarak {} parça döndür, ne eksik ne fazla.",
                         segs.len()
                     );
-                    if let Ok(arr2) = call_details_model(&client, key, model, &corr, segs.len()).await
+                    if let Ok(arr2) = call_details_model(&client, key, model, &corr, segs.len(), chain).await
                     {
                         arr = arr2;
                     }
@@ -274,14 +259,14 @@ pub async fn generate_details(
                 // Img invariant: yeni HTML'deki src'ler orijinalle aynı olmalı.
                 if extract_img_srcs(&result) != original_imgs {
                     // görsel güvenliği: orijinali koru
-                    return Ok(Produced { value: details_html.to_string(), model });
+                    return Ok(Produced { value: details_html.to_string(), model: model.clone() });
                 }
 
                 // Yoğunluk aralık dışıysa tek retry; daha iyi (hedefe yakın) olanı seç.
                 if let Some(d) = density_out_of_range(&result, target_keyword) {
                     let corr =
                         format!("{prompt}\n\nÖNEMLİ DÜZELTME: {}", density_correction(d, target_keyword));
-                    if let Ok(arr2) = call_details_model(&client, key, model, &corr, segs.len()).await {
+                    if let Ok(arr2) = call_details_model(&client, key, model, &corr, segs.len(), chain).await {
                         if arr2.len() == segs.len() {
                             let result2 = build(&arr2);
                             if extract_img_srcs(&result2) == original_imgs
@@ -293,7 +278,7 @@ pub async fn generate_details(
                         }
                     }
                 }
-                return Ok(Produced { value: result, model });
+                return Ok(Produced { value: result, model: model.clone() });
             }
             Err((try_next, msg)) => {
                 last_err = msg;
@@ -328,8 +313,8 @@ async fn call_scratch_model(
     api_key: &str,
     model: &str,
     prompt: &str,
+    chain: &ChainCtx<'_>,
 ) -> Result<Vec<(String, String)>, (bool, String)> {
-    let url = format!("{API_BASE}/{model}:generateContent");
     let body = serde_json::json!({
         "system_instruction": { "parts": [{ "text": scratch_system_prompt() }] },
         "contents": [{ "parts": [{ "text": prompt }] }],
@@ -346,24 +331,8 @@ async fn call_scratch_model(
             "temperature": 0.7
         }
     });
-    let resp = client
-        .post(&url)
-        .query(&[("key", api_key)])
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| (false, format!("İstek gönderilemedi: {e}")))?;
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(classify_error(status.as_u16(), &text, model));
-    }
-    let v: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| (false, format!("Yanıt çözümlenemedi: {e}")))?;
-    let inner = v["candidates"][0]["content"]["parts"][0]["text"]
-        .as_str()
-        .ok_or_else(|| (false, format!("Beklenmeyen yanıt biçimi: {}", short(&text))))?;
-    let arr: Vec<serde_json::Value> = serde_json::from_str(inner)
+    let inner = post_generate(client, api_key, model, &body, chain).await?;
+    let arr: Vec<serde_json::Value> = serde_json::from_str(&inner)
         .map_err(|e| (false, format!("Üretilen dizi okunamadı: {e}")))?;
     Ok(arr
         .into_iter()
@@ -429,6 +398,7 @@ pub async fn generate_details_scratch(
     ctx: &ProductContext<'_>,
     images: &[String],
     target_keyword: &str,
+    chain: &ChainCtx<'_>,
 ) -> Result<Produced<String>, String> {
     let key = api_key.trim();
     if key.is_empty() {
@@ -455,8 +425,8 @@ pub async fn generate_details_scratch(
         .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
 
     let mut last_err = String::from("Bilinmeyen hata");
-    for model in MODEL_CHAIN.iter() {
-        match call_scratch_model(&client, key, model, &prompt).await {
+    for model in &chain.models {
+        match call_scratch_model(&client, key, model, &prompt, chain).await {
             Ok(mut sections) => {
                 // Bölüm sayısı görselden azsa tek retry (tam sayıyı iste)
                 if sections.len() < images.len() {
@@ -464,7 +434,7 @@ pub async fn generate_details_scratch(
                         "{prompt}\n\nÖNEMLİ: Tam olarak {} bölüm döndür.",
                         images.len()
                     );
-                    if let Ok(s2) = call_scratch_model(&client, key, model, &corr).await {
+                    if let Ok(s2) = call_scratch_model(&client, key, model, &corr, chain).await {
                         if s2.len() > sections.len() {
                             sections = s2;
                         }
@@ -478,7 +448,7 @@ pub async fn generate_details_scratch(
                 if let Some(d) = density_out_of_range(&result, target_keyword) {
                     let corr =
                         format!("{prompt}\n\nÖNEMLİ DÜZELTME: {}", density_correction(d, target_keyword));
-                    if let Ok(s2) = call_scratch_model(&client, key, model, &corr).await {
+                    if let Ok(s2) = call_scratch_model(&client, key, model, &corr, chain).await {
                         if !s2.is_empty() {
                             let result2 = assemble_scratch(ctx.name, &s2, images);
                             if density_dist(&result2, target_keyword)
@@ -489,7 +459,7 @@ pub async fn generate_details_scratch(
                         }
                     }
                 }
-                return Ok(Produced { value: result, model });
+                return Ok(Produced { value: result, model: model.clone() });
             }
             Err((try_next, msg)) => {
                 last_err = msg;
@@ -654,6 +624,7 @@ pub async fn optimize_details(
     ctx: &ProductContext<'_>,
     details_html: &str,
     target_keyword: &str,
+    chain: &ChainCtx<'_>,
 ) -> Result<Produced<Option<String>>, String> {
     let key = api_key.trim();
     if key.is_empty() {
@@ -661,7 +632,7 @@ pub async fn optimize_details(
     }
     let blocks = match extract_blocks(details_html) {
         Some(b) if !b.is_empty() => b,
-        _ => return Ok(Produced { value: None, model: "" }),
+        _ => return Ok(Produced { value: None, model: String::new() }),
     };
 
     let items: Vec<serde_json::Value> = blocks
@@ -694,12 +665,12 @@ pub async fn optimize_details(
         .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
 
     let mut last_err = String::from("Bilinmeyen hata");
-    for model in MODEL_CHAIN.iter() {
-        match call_scratch_model(&client, key, model, &prompt).await {
+    for model in &chain.models {
+        match call_scratch_model(&client, key, model, &prompt, chain).await {
             Ok(mut texts) => {
                 if texts.len() != blocks.len() {
                     let corr = format!("{prompt}\n\nÖNEMLİ: Tam olarak {} bölüm döndür.", blocks.len());
-                    if let Ok(t2) = call_scratch_model(&client, key, model, &corr).await {
+                    if let Ok(t2) = call_scratch_model(&client, key, model, &corr, chain).await {
                         if t2.len() == blocks.len() {
                             texts = t2;
                         }
@@ -710,13 +681,13 @@ pub async fn optimize_details(
                 // Görsel değişmezliği: yeni HTML orijinaldeki tüm src'leri aynı sırada içermeli.
                 if extract_img_srcs(&result) != orig_imgs {
                     // güvenli tarafta kal → eski yol
-                    return Ok(Produced { value: None, model });
+                    return Ok(Produced { value: None, model: model.clone() });
                 }
                 // Yoğunluk aralık dışıysa tek retry; hedefe yakın olanı seç.
                 if let Some(d) = density_out_of_range(&result, target_keyword) {
                     let corr =
                         format!("{prompt}\n\nÖNEMLİ DÜZELTME: {}", density_correction(d, target_keyword));
-                    if let Ok(t2) = call_scratch_model(&client, key, model, &corr).await {
+                    if let Ok(t2) = call_scratch_model(&client, key, model, &corr, chain).await {
                         if t2.len() == blocks.len() {
                             let result2 = assemble_optimized(ctx.name, &blocks, &t2);
                             if extract_img_srcs(&result2) == orig_imgs
@@ -728,7 +699,7 @@ pub async fn optimize_details(
                         }
                     }
                 }
-                return Ok(Produced { value: Some(result), model });
+                return Ok(Produced { value: Some(result), model: model.clone() });
             }
             Err((try_next, msg)) => {
                 last_err = msg;
@@ -948,7 +919,7 @@ mod tests {
             target_keyword: None,
             insights: None,
         };
-        let produced = generate_details(&key, &ctx, SAMPLE_DETAILS, "all in one bilgisayar")
+        let produced = generate_details(&key, &ctx, SAMPLE_DETAILS, "all in one bilgisayar", &ChainCtx::defaults())
             .await
             .expect("üretim başarısız");
         println!("model: {}", produced.model);
@@ -977,7 +948,7 @@ mod tests {
             target_keyword: None,
             insights: None,
         };
-        let produced = optimize_details(&key, &ctx, REAL_DETAILS, "all in one bilgisayar")
+        let produced = optimize_details(&key, &ctx, REAL_DETAILS, "all in one bilgisayar", &ChainCtx::defaults())
             .await
             .expect("optimize hatası");
         println!("model: {}", produced.model);
@@ -1015,7 +986,7 @@ mod tests {
             "https://cdn.example/2.png".to_string(),
             "https://cdn.example/3.png".to_string(),
         ];
-        let produced = generate_details_scratch(&key, &ctx, &images, "all in one bilgisayar")
+        let produced = generate_details_scratch(&key, &ctx, &images, "all in one bilgisayar", &ChainCtx::defaults())
             .await
             .expect("sıfırdan üretim başarısız");
         println!("model: {}", produced.model);

@@ -21,13 +21,14 @@ pub async fn suggest_successor(
     api_key: &str,
     eol_slug: &str,
     candidates: &[(String, String)],
+    chain: &ChainCtx<'_>,
 ) -> Result<Produced<Option<(String, String)>>, String> {
     let key = api_key.trim();
     if key.is_empty() {
         return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
     }
     if candidates.is_empty() {
-        return Ok(Produced { value: None, model: "" });
+        return Ok(Produced { value: None, model: String::new() });
     }
 
     let list = candidates
@@ -65,8 +66,7 @@ pub async fn suggest_successor(
         .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
 
     let mut last_err = String::from("Bilinmeyen hata");
-    for model in MODEL_CHAIN.iter() {
-        let url = format!("{API_BASE}/{model}:generateContent");
+    for model in &chain.models {
         let body = serde_json::json!({
             "contents": [{ "parts": [{ "text": prompt }] }],
             "generationConfig": {
@@ -75,32 +75,17 @@ pub async fn suggest_successor(
                 "temperature": 0.2
             }
         });
-        let resp = match client.post(&url).query(&[("key", key)]).json(&body).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                last_err = format!("İstek gönderilemedi: {e}");
+        let inner = match post_generate(&client, key, model, &body, chain).await {
+            Ok(t) => t,
+            Err((try_next, msg)) => {
+                last_err = msg;
+                if !try_next {
+                    return Err(last_err);
+                }
                 continue;
             }
         };
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        if !status.is_success() {
-            let (try_next, msg) = classify_error(status.as_u16(), &text, model);
-            last_err = msg;
-            if !try_next {
-                return Err(last_err);
-            }
-            continue;
-        }
-        let v: serde_json::Value = match serde_json::from_str(&text) {
-            Ok(v) => v,
-            Err(e) => {
-                last_err = format!("Yanıt çözümlenemedi: {e}");
-                continue;
-            }
-        };
-        let inner = v["candidates"][0]["content"]["parts"][0]["text"].as_str().unwrap_or("");
-        let parsed: serde_json::Value = match serde_json::from_str(inner) {
+        let parsed: serde_json::Value = match serde_json::from_str(&inner) {
             Ok(p) => p,
             Err(e) => {
                 last_err = format!("Üretilen JSON okunamadı: {e}");
@@ -118,7 +103,7 @@ pub async fn suggest_successor(
         } else {
             Some((sku, reason))
         };
-        return Ok(Produced { value, model });
+        return Ok(Produced { value, model: model.clone() });
     }
     Err(format!("Halef önerisi alınamadı. Son hata: {last_err}"))
 }
@@ -141,7 +126,7 @@ mod tests {
             ("B".to_string(), "Creality Falcon T1 5'i 1 arada Lazer Kazıma Makinesi".to_string()),
             ("C".to_string(), "Bambu Lab A1 Combo PF002-A+SA005 3D Yazıcı".to_string()),
         ];
-        let r = suggest_successor(&key, "creality-filament-maker-m1-uretim-makinesi", &cands)
+        let r = suggest_successor(&key, "creality-filament-maker-m1-uretim-makinesi", &cands, &ChainCtx::defaults())
             .await
             .expect("çağrı başarısız");
         println!("model: {}", r.model);
@@ -156,7 +141,7 @@ mod tests {
             ("Y".to_string(), "Dell Pro 24 E2425HSM IPS Full HD Monitör".to_string()),
             ("Z".to_string(), "Logitech MK345 Kablosuz Klavye Mouse Seti".to_string()),
         ];
-        let r2 = suggest_successor(&key, "asus-zenbook-17-fold-i7-1250u-16gb-1tb-17-windows-11-home", &cands2)
+        let r2 = suggest_successor(&key, "asus-zenbook-17-fold-i7-1250u-16gb-1tb-17-windows-11-home", &cands2, &ChainCtx::defaults())
             .await
             .expect("çağrı başarısız");
         println!("VAKA-2 (halef yok) → {:?}", r2.value);

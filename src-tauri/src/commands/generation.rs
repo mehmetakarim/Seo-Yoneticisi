@@ -8,9 +8,10 @@ use super::*;
 /// Not: SQLite kilidi await'lerin ötesine taşınmaz (Send güvenliği için bloklarda tutulur).
 #[tauri::command]
 pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<ProductDetail, String> {
-    let (parts, target_keyword) = {
+    let (parts, target_keyword, zincir) = {
         let conn = state.conn.lock().unwrap();
         let parts = ctx_parts(&conn, &sku)?;
+        let zincir = uretim_zinciri(&conn);
         let kw: String = conn
             .query_row(
                 "SELECT COALESCE(target_keyword,'') FROM seo_status WHERE sku = ?1",
@@ -18,11 +19,22 @@ pub async fn generate_meta(state: State<'_, AppState>, sku: String) -> Result<Pr
                 |r| r.get(0),
             )
             .unwrap_or_default();
-        (parts, kw)
+        (parts, kw, zincir)
     };
 
     let ctx = parts.as_context(Some(&target_keyword), true);
-    let produced = gemini::generate_meta(&parts.key, &ctx).await?;
+    let toplayici = CallToplayici::default();
+    let kanal = toplayici.kanal();
+    let chain = gemini::ChainCtx { models: zincir, log: Some(&kanal) };
+    let sonuc = gemini::generate_meta(&parts.key, &ctx, &chain).await;
+
+    // ⚠️ Kayıt HATA DURUMUNDA DA yazılıyor: başarısız istekler de kotadan düşüyor ve
+    // "limit darboğaz mı?" sorusunun cevabı zaten büyük ölçüde onlarda (429'lar).
+    {
+        let conn = state.conn.lock().unwrap();
+        toplayici.yaz(&conn, "meta");
+    }
+    let produced = sonuc?;
     let (meta, model) = (produced.value, produced.model);
 
     let conn = state.conn.lock().unwrap();
@@ -60,9 +72,10 @@ pub async fn generate_details(
     sku: String,
 ) -> Result<ProductDetail, String> {
     // Ortak bağlam `ctx_parts`'tan; galeri ve mevcut açıklama yalnızca bu komuta özel.
-    let (parts, details_html, keyword, gallery) = {
+    let (parts, details_html, keyword, gallery, zincir) = {
         let conn = state.conn.lock().unwrap();
         let parts = ctx_parts(&conn, &sku)?;
+        let zincir = uretim_zinciri(&conn);
         let own = conn
             .query_row(
                 "SELECT COALESCE(s.draft_details, p.details), COALESCE(s.target_keyword,''),
@@ -88,7 +101,7 @@ pub async fn generate_details(
                 },
             )
             .map_err(|e| format!("Ürün okunamadı: {e}"))?;
-        (parts, own.0, own.1, own.2)
+        (parts, own.0, own.1, own.2, zincir)
     };
 
     // Görsel kapısı: en az 3 galeri görseli (backend savunma; UI de engeller).
@@ -102,26 +115,40 @@ pub async fn generate_details(
     // `target_keyword: None` — açıklama akışı kelimeyi ayrı `keyword` argümanıyla alıyor.
     let ctx = parts.as_context(None, true);
     let api_key = &parts.key;
+    let toplayici = CallToplayici::default();
+    let kanal = toplayici.kanal();
+    let chain = gemini::ChainCtx { models: zincir, log: Some(&kanal) };
     // Açıklama akışı:
     //  1) İçerik yok / yeniden yazılabilir metin yok → sıfırdan semantik HTML (galeri görselleri).
     //  2) Düzenli yapı → OPTIMIZE: metin iyileştirilir + yapı semantikleştirilir + anlamlı alt eklenir.
     //  3) Düzensiz yapı → eski güvenli yol (yapıyı aynen koruyarak yalnızca metni yeniden yaz).
-    let (new_html, model) = if details_html.trim().is_empty()
-        || !gemini::has_rewritable_content(&details_html)
-    {
-        let p = gemini::generate_details_scratch(api_key, &ctx, &gallery, &keyword).await?;
-        (p.value, p.model)
-    } else {
-        let opt = gemini::optimize_details(api_key, &ctx, &details_html, &keyword).await?;
-        match opt.value {
-            Some(html) => (html, opt.model),
-            // Yapı beklenmedik → yapı-koruyan eski yol. Modeli o çağrıdan al.
-            None => {
-                let p = gemini::generate_details(api_key, &ctx, &details_html, &keyword).await?;
-                (p.value, p.model)
+    // ⚠️ Üç yolun hepsi AYNI toplayıcıyı kullanıyor: bir açıklama üretimi "optimize dene,
+    // olmazsa yapı-koruyan yola geç" diye iki tur atabiliyor ve ikisi de kotadan düşüyor.
+    // Ayrı toplayıcılar olsaydı bu üretim iki ayrı `run_id` gibi görünür, "üretim başına
+    // istek" ortalaması olduğundan düşük çıkardı.
+    let sonuc = async {
+        if details_html.trim().is_empty() || !gemini::has_rewritable_content(&details_html) {
+            let p = gemini::generate_details_scratch(api_key, &ctx, &gallery, &keyword, &chain).await?;
+            Ok::<_, String>((p.value, p.model))
+        } else {
+            let opt = gemini::optimize_details(api_key, &ctx, &details_html, &keyword, &chain).await?;
+            match opt.value {
+                Some(html) => Ok((html, opt.model)),
+                // Yapı beklenmedik → yapı-koruyan eski yol. Modeli o çağrıdan al.
+                None => {
+                    let p = gemini::generate_details(api_key, &ctx, &details_html, &keyword, &chain).await?;
+                    Ok((p.value, p.model))
+                }
             }
         }
-    };
+    }
+    .await;
+
+    {
+        let conn = state.conn.lock().unwrap();
+        toplayici.yaz(&conn, "details");
+    }
+    let (new_html, model) = sonuc?;
 
     let conn = state.conn.lock().unwrap();
     ensure_seo_row(&conn, &sku)?;
@@ -216,9 +243,10 @@ pub async fn structure_tech_specs(
     state: State<'_, AppState>,
     sku: String,
 ) -> Result<gemini::TechSpecsResult, String> {
-    let (parts, source, prev_specs, prev_hist) = {
+    let (parts, source, prev_specs, prev_hist, zincir) = {
         let conn = state.conn.lock().unwrap();
         let parts = ctx_parts(&conn, &sku)?;
+        let zincir = uretim_zinciri(&conn);
         let own = conn
             .query_row(
                 "SELECT COALESCE(tech_source_text,''), tech_specs_json, tech_history_json
@@ -233,13 +261,21 @@ pub async fn structure_tech_specs(
                 },
             )
             .unwrap_or_default();
-        (parts, own.0, own.1, own.2)
+        (parts, own.0, own.1, own.2, zincir)
     };
 
     // `with_insights: false` — teknik tablo pazarlama verisi değil; SEO araştırması
     // karıştırılırsa modelin olmayan özellik uydurma riski doğar.
     let ctx = parts.as_context(None, false);
-    let produced = gemini::structure_tech_specs(&parts.key, &ctx, &source).await?;
+    let toplayici = CallToplayici::default();
+    let kanal = toplayici.kanal();
+    let chain = gemini::ChainCtx { models: zincir, log: Some(&kanal) };
+    let sonuc = gemini::structure_tech_specs(&parts.key, &ctx, &source, &chain).await;
+    {
+        let conn = state.conn.lock().unwrap();
+        toplayici.yaz(&conn, "tech");
+    }
+    let produced = sonuc?;
     let (result, model) = (produced.value, produced.model);
 
     let json = serde_json::to_string(&result.groups)

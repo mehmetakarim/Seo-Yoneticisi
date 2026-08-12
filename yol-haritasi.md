@@ -366,8 +366,8 @@ alındığında kendi "bitti sayılır" tanımı o anda yazılır.
 
 | Kalem | Neden |
 |---|---|
-| `MODEL_CHAIN` → ayarlar | Model emekliliği bugün **yeni sürüm** gerektiriyor. 0ao dersi birebir: kodda yalnızca varsayılan, gerçek değer `settings`'te |
-| Gemini kota/kullanım sayacı (yerel) | Ücretsiz katmanla çalışan bir üretim aracının kapasitesi bugün görünmez. Google kesin sayaç vermiyor → yerel sayım yeterli |
+| ~~`MODEL_CHAIN` → ayarlar~~ ✅ | **v0.18.0.** Liste ayarlarda ve seçenekler Google'dan canlı geliyor; ayrıca satır başına "Dene". Ayrıntı `brain.md` 0b7'de |
+| ~~Gemini kullanım sayacı~~ ✅ | **v0.18.0.** "Kalan hak" değil **yapılan istek** gösteriliyor (kullanıcı kararı); 429 ayrı sayılıyor ve `run_id` ile üretim başına istek hesaplanıyor. 0b7 |
 | ~~Ölçek modellemesi~~ ✅ | **Ölçüldü (2026-08-12), sonuç: eşikler ayarlanabilir OLMAYACAK.** Hız hiçbir ölçekte sorun değil; ölçek sınırı raporun tek parça JSON olması. Sayılar `brain.md` 0b6'da |
 | Kod imzalama / notarization | Kod işi değil, **maliyet kararı** (~$99/yıl). İmzasız kurulumda macOS uyarı veriyor |
 

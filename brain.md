@@ -13,7 +13,8 @@ v0.15.0 = Faz C: CRM ince dilim + kuyruk saha düzeltmeleri (0b2, 0b3) ·
 v0.16.0 = Faz T1: teklif çekirdeği (katalog fiyatları + teklif ekranı) ·
 v0.17.0 = Faz T2: teklif belgesi, takip önerisi, kazanma/kaybetme raporu ·
 v0.17.1 = PDF açma, sütun hizası, satır geri alma ·
-**v0.17.2 = ödünç alınmış alan: slug/SKU karışıklığı (0b5)**
+v0.17.2 = ödünç alınmış alan: slug/SKU karışıklığı (0b5) ·
+**v0.18.0 = Faz G: model zinciri ayarlara + Gemini kullanım sayacı (0b7)**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -43,8 +44,8 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **198 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
-**39 test**; `commands/` 11 dosyaya bölünmüş durumda).
+bağımlı DEĞİL, **202 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+**43 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
 ## ⏭️ KALDIĞIMIZ YER (yeni oturum buradan devam etsin)
@@ -62,9 +63,10 @@ Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v
    gelmeden ya da genel dağıtımdan önce başlanmıyor; tek `db_path` varsayımı kodun birçok
    yerinde ve erken refactor bedava değil. Karar yol haritasında, burada çoğaltılmıyor.
 
-2. **Faz G kalemleri** — birbirinden bağımsız, tek tek alınabilir:
-   `MODEL_CHAIN` → ayarlar · Gemini kullanım sayacı · kod imzalama (maliyet kararı, kod işi
-   değil). ✅ **Ölçek modellemesi bitti** (0b6) — sonucu: eşikler ayarlanabilir olmayacak.
+2. **Faz G kalemleri** — üçü bitti, biri kod işi bile değil:
+   ✅ `MODEL_CHAIN` → ayarlar + ✅ Gemini kullanım sayacı (0b7, v0.18.0) ·
+   ✅ ölçek modellemesi (0b6) — sonucu: eşikler ayarlanabilir olmayacak ·
+   ⏸️ kod imzalama: **maliyet kararı**, kod işi değil (~$99/yıl).
    ❌ i18n elendi: gerekçesi çürüdü (kullanıcı düzeltmesi — "global dağıtım" = IdeaSoft
    kullanan herhangi bir işletme, farklı dilde bir pazar değil).
 
@@ -1327,6 +1329,54 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    Ayarlanabilir eşik, olmayan bir problemi çözen bir ayar olurdu. Ölçek sorunu çıkarsa
    çözülecek şey **rapor blob'u** (kovaların ayrı ayrı ve sayfalı okunması) — bu, ikinci
    mağaza/genel dağıtım geldiğinde Faz P ile birlikte bakılacak, şimdi değil.
+
+0b7. ✅ **MODEL ZİNCİRİ AYARLARA + KULLANIM SAYACI (Faz G, v0.18.0).**
+
+   İki kalem tek iş olarak yapıldı: sayacın anlamlı olması için hangi modellerin
+   kullanıldığını bilmesi gerekiyor, o liste de artık ayarlardan geliyor. Ayrı yapılsalardı
+   aynı veri iki yerde dururdu.
+
+   **Neden:** `MODEL_CHAIN` kodda sabitti. 2026-07-28'de `gemini-1.5-flash` emekli olunca
+   üretim **tamamen durdu** ve düzeltmek yeni sürüm gerektirdi (0 numaralı ders). Soru
+   "tekrar olacak mı" değil, "ne zaman"dı.
+
+   **Bayatlama kökünden çözüldü:** liste artık Google'ın `models` uç noktasından **canlı**
+   geliyor; emekli bir model kullanıcının karşısına hiç çıkmıyor. Ama "var" ile "bizim
+   isteğimizi kaldırıyor" farklı sorular — uç nokta `system_instruction` + `responseSchema`
+   desteğini söylemiyor. Bu yüzden satır başına **Dene**: uygulamanın gerçek istek biçimiyle
+   tek çağrı. ⚠️ O deneme de kotadan düşen gerçek bir istek; sayaca yazılıyor.
+
+   🔴 **Sayaç "kalan hak" DEMİYOR — kullanıcı kararı.** *"20 hakkın var, 14 kullandın dersek
+   bir beklenti oluşur"*. Sayabildiğimiz tek şey bu uygulamanın gönderdikleri; aynı anahtar
+   başka yerde kullanılırsa sayı eksik. Eksik bir sayıyı kapasite gibi sunmak yanlış güven
+   verir. Ekranda yazan: `gemini-3.6-flash · bugün 14 istek`, altında sınırın kendisi.
+
+   **Geçmiş grafiği süs değil, karar girdisi.** Kullanıcının amacı: *"limitler bir darboğaz mı
+   değil mi"* ve *"günde kaç üretim, üretim başına kaç istek"* — çıktısı ileride **ücretli
+   API'ye geçme kararı**. Bunun için iki tasarım kararı gerekti:
+   - `run_id`: bir üretim = bir istek DEĞİL. Zincir üç modele düşerse üç satır, aynı `run_id`.
+     Gruplama olmasaydı ortalama hep 1,0 çıkar, yani asıl bilmek istenen şey gizlenirdi.
+   - `http_code` ve 429'un **ayrı sayılması**: darboğazın göstergesi toplam istek değil,
+     kotaya çarpma sayısı.
+
+   🔴 **Ortak HTTP kapısı — sayacın doğru olmasının ön koşulu.** İstek gönderme mantığı dört
+   dosyada birebir kopyalanmıştı. Sayaç kopyalardan birini atlarsa **sessizce** yanlış sayar.
+   Tek `post_generate` çıkarıldı; kapının dışında kalan tek yer akış tabanlı `chat_stream` ve
+   sebebi kodda yazılı. (Aynı ders beşinci kez: *kopyalanan mantık sapar, paylaşılır.*)
+
+   ⚠️ **Kayıt DB'ye üretim sırasında yazılmıyor.** Kanal `await`'ler arasında çağrılıyor;
+   oradan SQLite kilidini almak, kilidi zaten tutan bir çağıranla **kilitlenme** üretirdi.
+   `CallToplayici` toplayıp üretim bitince yazıyor. Bedeli: üretimin ortasında çökülürse o
+   kayıtlar kaybolur — kabul edilebilir, sayaç muhasebe defteri değil.
+
+   ⚠️ **Gün sınırı yerel saat, Google Pasifik'e göre sıfırlıyor.** Gün dönümünde sayılar
+   Google'ın gördüğünden farklı olabilir; gizlenmiyor, ekranda yazılı. "Kalan hak" iddia
+   etmediğimiz için bu kayma yanıltıcı bir sonuç doğurmuyor.
+
+   Zincir **asla boş kalmaz**: ayar boş/bozuksa `DEFAULT_MODEL_CHAIN`'e düşülüyor. Boş
+   kalsaydı üretim tek istek göndermeden "tüm modeller denendi" derdi. Sohbet zinciri ayrı
+   tutuldu (bilerek — asistan üretimin 20/gün kotasını yiyemez). Kullanım kaydı **yedeğe
+   dahil**: taşınmasaydı sayaç her makine değişiminde sıfırlanır ve asıl soru cevaplanamazdı.
 
 0c. ✅ **FIRSAT ANALİZİ + SÜRÜM NOTLARI (v0.5.6).**
 

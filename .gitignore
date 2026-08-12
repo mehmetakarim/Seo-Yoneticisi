@@ -32,3 +32,4 @@ dist-ssr
 *-service-account*.json
 *.db
 feed.xml
+__pycache__/

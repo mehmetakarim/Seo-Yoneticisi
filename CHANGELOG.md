@@ -13,6 +13,14 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.18.0
+- Yeni: **Yapay Zekâ Modelleri** ayarı. Üretimin hangi modelleri hangi sırayla deneyeceğini artık siz belirliyorsunuz. Bir model emekliye ayrıldığında yeni sürüm beklemeden listeyi düzeltebilirsiniz — daha önce bu, üretimi tamamen durduran bir sorundu
+- Model listesi Google'dan **canlı** geliyor: "Modelleri getir" deyince o an sunulan modelleri görürsünüz, emekli olanlar listede hiç çıkmaz
+- Her modelin yanında **Dene** düğmesi: uygulamanın gerçek istek biçimiyle tek çağrı yapar, model destekliyor mu anında söyler
+- Asistan için **ayrı zincir**: sohbet, üretimin dar günlük kotasını tüketmesin diye
+- Yeni: **Gemini Kullanımı** kartı. Bugün hangi modele kaç istek gitti, kaç kez kota doldu, son 14 günün dağılımı ve üretim başına ortalama istek sayısı
+- ⚠️ Sayaç yalnızca bu uygulamanın gönderdiği istekleri sayar; aynı anahtarı başka yerde kullanıyorsanız gerçek toplam daha yüksektir. Bu yüzden "kalan hakkınız" gösterilmiyor
+
 ## v0.17.2
 - Düzeltme: teklifte **katalogdan ürün eklenemiyordu** — *"Ürün bulunamadı"* hatası veriyordu. Artık ekleniyor
 - Düzeltme: kişi kartında bir ürünü "ilgilendiği ürünler"e bağladığınızda bağ **yanlış kaydediliyordu**. Hata görünmüyordu ama ürün ekranındaki "bu ürünle ilgilenenler" listesi hiç dolmuyordu

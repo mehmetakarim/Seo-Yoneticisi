@@ -38,6 +38,8 @@ import type {
   Quote,
   QuoteDoc,
   QuoteSummary,
+  ModelChains,
+  GeminiKullanim,
 } from "./types";
 
 export const api = {
@@ -162,6 +164,14 @@ export const api = {
   setTheme: (theme: string) => invoke<void>("set_theme", { theme }),
   testFeedUrl: (url: string) => invoke<number>("test_feed_url", { url }),
   testGeminiKey: (key: string) => invoke<string>("test_gemini_key", { key }),
+  getModelChains: () => invoke<ModelChains>("get_model_chains"),
+  setModelChains: (uretim: string[], sohbet: string[]) =>
+    invoke<void>("set_model_chains", { uretim, sohbet }),
+  listGeminiModels: () => invoke<string[]>("list_gemini_models"),
+  /** ⚠️ Gerçek bir istek gönderir — kotadan düşer ve sayaca yazılır. */
+  probeGeminiModel: (model: string) =>
+    invoke<string>("probe_gemini_model", { model }),
+  geminiUsage: () => invoke<GeminiKullanim>("gemini_usage"),
   testCapsolverKey: (key: string) =>
     invoke<string>("test_capsolver_key", { key }),
   exportDb: (path: string, format: "db" | "json") =>

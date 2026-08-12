@@ -68,6 +68,80 @@ fn now_str() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
+// ===================== Gemini kullanım kaydı (Faz G) =====================
+
+/// Bir üretim boyunca Gemini'ye giden istekleri toplar; veritabanına **üretim bittikten
+/// sonra** yazar.
+///
+/// 🔴 **Neden hemen yazmıyor.** Kayıt kanalı üretimin ortasında, `await`'ler arasında
+/// çağrılıyor. Oradan SQLite kilidini almak, kilidi zaten tutan bir çağıranla
+/// **kilitlenmeye** yol açardı — ve bu, üretimi sessizce donduran, yeniden üretilmesi zor
+/// bir hata sınıfı. Projenin mevcut kuralı da aynı yönde: *SQLite kilidi `await`'lerin
+/// ötesine taşınmaz.* Toplayıcı bu kuralı bozmamak için var.
+///
+/// Bedeli: uygulama üretimin tam ortasında çökerse o isteklerin kaydı kaybolur. Kabul
+/// edilebilir — sayaç bir muhasebe defteri değil, kapasite göstergesi.
+#[derive(Default)]
+pub(crate) struct CallToplayici {
+    satirlar: Mutex<Vec<(String, u16, bool)>>,
+}
+
+impl CallToplayici {
+    pub(crate) fn kanal(&self) -> impl Fn(gemini::CallRecord<'_>) + Send + Sync + '_ {
+        move |r| {
+            if let Ok(mut v) = self.satirlar.lock() {
+                v.push((r.model.to_string(), r.http_code, r.ok));
+            }
+        }
+    }
+
+    /// Toplananları yazar. `kind`: 'meta' | 'details' | 'tech' | 'successor' | 'chat' | 'probe'.
+    ///
+    /// Bir çağrı = bir `run_id`. Zincir üç modele düşerse üç satır, aynı `run_id` — "üretim
+    /// başına kaç istek harcanıyor" sorusu ancak bu gruplamayla cevaplanabiliyor.
+    pub(crate) fn yaz(&self, conn: &Connection, kind: &str) {
+        let satirlar = match self.satirlar.lock() {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        if satirlar.is_empty() {
+            return;
+        }
+        let at = now_str();
+        let run_id = format!(
+            "{at}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        );
+        for (model, code, ok) in satirlar.iter() {
+            // ⚠️ Kayıt başarısız olursa üretim DÜŞMEZ: sayaç bir yan defter, asıl iş değil.
+            let _ = conn.execute(
+                "INSERT INTO gemini_calls (at, model, kind, run_id, ok, http_code)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![at, model, kind, run_id, *ok as i64, *code as i64],
+            );
+        }
+    }
+}
+
+/// Üretim zincirini ayarlardan okur; ayar yoksa/bozuksa koddaki varsayılana düşer.
+///
+/// Tek yerde duruyor çünkü altı üretim yolu da aynı zinciri kullanmalı. İki yerde okunsaydı
+/// biri güncellenmeyi unutur ve kullanıcının ayarı bazı ekranlarda geçerli olmazdı.
+pub(crate) fn uretim_zinciri(conn: &Connection) -> Vec<String> {
+    let raw = db::get_setting(conn, "gemini_model_chain").ok().flatten().unwrap_or_default();
+    gemini::ChainCtx::from_setting(&raw, gemini::DEFAULT_MODEL_CHAIN).models
+}
+
+/// Sohbet zinciri **ayrı**: asistan, üretimin 20 istek/gün kotasını yiyemez
+/// (gerekçe `gemini::CHAT_CHAIN`'de). Ayarı da ayrı tutuluyor.
+pub(crate) fn sohbet_zinciri(conn: &Connection) -> Vec<String> {
+    let raw = db::get_setting(conn, "gemini_chat_chain").ok().flatten().unwrap_or_default();
+    gemini::ChainCtx::from_setting(&raw, gemini::CHAT_CHAIN).models
+}
+
 /// IdeaSoft'tan "Getir" sonucu: güncel ürün + ne yapıldığının kullanıcıya dönük özeti.
 ///
 /// Mesaj arka uçta kuruluyor çünkü "yazıldı mı, korundu mu, hiç yok muydu" ayrımını yalnızca

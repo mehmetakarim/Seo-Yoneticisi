@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "../api";
 import { useStore } from "../store";
 import { BUCKET_LABEL } from "../buckets";
-import type { CalibrationRow, SilenceState } from "../types";
+import type { CalibrationRow, GeminiKullanim, SilenceState } from "../types";
 import Icon from "./Icon.vue";
 
 const store = useStore();
@@ -105,6 +105,11 @@ onMounted(async () => {
   ideasoftToken.value = store.settings.ideasoft_token;
   gscEmail.value = store.settings.gsc_client_email;
 
+  // Model zincirleri ve kullanım sayacı (Faz G). Model LİSTESİ burada çekilmiyor:
+  // canlı bir istek ve her ayarlar açılışında yapılması gereksiz — kullanıcı isteyince.
+  await zincirleriYukle();
+  await kullanimiYukle();
+
   // Odak seansı: kayıtlı süreler + ölçüm durumu.
   await store.loadSession();
   seansDk.value = store.session?.planned_minutes ?? 25;
@@ -122,6 +127,148 @@ onMounted(async () => {
     .catch(() => ({ days: 0, suggestion: null, sample_contacts: 0 }));
   sessizGun.value = sessizlik.value.days;
 });
+
+// ===================== Model zinciri ve kullanım (Faz G) =====================
+//
+// 🔴 Bu bölümün varlık sebebi: model listesi kodda sabitti ve bayatlaması üretimi
+// durduruyordu. 2026-07-28'de `gemini-1.5-flash` emekli olunca üretim tamamen durdu ve
+// düzeltmek YENİ SÜRÜM gerektirdi. Liste artık ayarlarda; üstelik seçenekler Google'dan
+// canlı geliyor, yani emekli bir model kullanıcının karşısına hiç çıkmıyor.
+
+interface Zincir {
+  ad: "uretim" | "sohbet";
+  baslik: string;
+  aciklama: string;
+  liste: string[];
+  varsayilan: string[];
+  secim: string;
+}
+
+const modeller = ref<string[]>([]);
+const modelYukleniyor = ref(false);
+const modelHint = ref("");
+const modelHataMi = ref(false);
+const denenen = ref("");
+const deneme = ref<Record<string, { ok: boolean; metin: string }>>({});
+const kullanim = ref<GeminiKullanim | null>(null);
+const kayitliZincir = ref("");
+
+const zincirler = ref<Zincir[]>([
+  {
+    ad: "uretim",
+    baslik: "Üretim zinciri",
+    aciklama:
+      "Meta, açıklama, teknik tablo ve halef önerisi bu sırayla denenir. Kaliteli ama kotası dar modeller başta, havuzu geniş olanlar sonda.",
+    liste: [],
+    varsayilan: [],
+    secim: "",
+  },
+  {
+    ad: "sohbet",
+    baslik: "Asistan zinciri",
+    aciklama:
+      "Asistan ayrı bir zincir kullanır — bilerek. Sohbet, üretimin dar günlük kotasını tüketirse asıl işinizi yapamaz hâle gelirsiniz.",
+    liste: [],
+    varsayilan: [],
+    secim: "",
+  },
+]);
+
+/** Kaydedilmemiş değişiklik var mı? Kaydet düğmesi buna bakıyor. */
+const zincirKirli = computed(
+  () => JSON.stringify(zincirler.value.map((z) => z.liste)) !== kayitliZincir.value,
+);
+
+/** Türkçe ondalık: 1.8 değil 1,8. Uygulamanın geri kalanı da böyle yazıyor. */
+const ondalik = (n: number) => n.toFixed(1).replace(".", ",");
+
+/** Grafiğin tavanı: en yoğun gün. En az 1 — sıfıra bölmeyi engeller. */
+const grafikTavan = computed(() =>
+  Math.max(1, ...(kullanim.value?.gunler ?? []).map((g) => g.istek)),
+);
+
+async function zincirleriYukle() {
+  try {
+    const c = await api.getModelChains();
+    zincirler.value[0].liste = [...c.uretim];
+    zincirler.value[0].varsayilan = c.uretim_varsayilan;
+    zincirler.value[1].liste = [...c.sohbet];
+    zincirler.value[1].varsayilan = c.sohbet_varsayilan;
+    kayitliZincir.value = JSON.stringify([c.uretim, c.sohbet]);
+  } catch (e) {
+    store.toast(String(e), "error");
+  }
+}
+
+async function kullanimiYukle() {
+  try {
+    kullanim.value = await api.geminiUsage();
+  } catch (e) {
+    store.toast(String(e), "error");
+  }
+}
+
+async function modelleriGetir() {
+  modelYukleniyor.value = true;
+  modelHint.value = "";
+  try {
+    modeller.value = await api.listGeminiModels();
+    modelHataMi.value = false;
+    modelHint.value = `${modeller.value.length} model bulundu.`;
+  } catch (e) {
+    modelHataMi.value = true;
+    modelHint.value = String(e);
+  } finally {
+    modelYukleniyor.value = false;
+  }
+}
+
+/**
+ * Tek modeli dener.
+ *
+ * ⚠️ Bu gerçek bir istek: kotadan düşer ve sayaca yazılır. Listenin "var" demesi yetmiyor —
+ * uygulamanın isteği `system_instruction` + `responseSchema` kullanıyor ve her model ikisini
+ * birden desteklemiyor; uç nokta bunu söylemiyor.
+ */
+async function dene(model: string) {
+  denenen.value = model;
+  try {
+    deneme.value[model] = { ok: true, metin: await api.probeGeminiModel(model) };
+  } catch (e) {
+    deneme.value[model] = { ok: false, metin: String(e) };
+  } finally {
+    denenen.value = "";
+    void kullanimiYukle(); // deneme de kotadan düştü; sayaç güncellensin
+  }
+}
+
+function tasi(z: Zincir, i: number, yon: number) {
+  const j = i + yon;
+  [z.liste[i], z.liste[j]] = [z.liste[j], z.liste[i]];
+}
+
+function cikar(z: Zincir, i: number) {
+  z.liste.splice(i, 1);
+}
+
+function ekle(z: Zincir) {
+  if (z.secim && !z.liste.includes(z.secim)) z.liste.push(z.secim);
+  z.secim = "";
+}
+
+function varsayilana(z: Zincir) {
+  z.liste = [...z.varsayilan];
+}
+
+async function zincirleriKaydet() {
+  try {
+    await api.setModelChains(zincirler.value[0].liste, zincirler.value[1].liste);
+    kayitliZincir.value = JSON.stringify(zincirler.value.map((z) => z.liste));
+    store.toast("Model zincirleri kaydedildi.", "ok");
+  } catch (e) {
+    store.toast(String(e), "error");
+  }
+}
 
 async function persist() {
   try {
@@ -547,6 +694,124 @@ async function doImport() {
             </div>
             <div class="fhint" :style="{ color: isHint ? (isOk ? 'var(--green)' : 'var(--red)') : 'var(--c-faint)' }">
               {{ isHint || "Token günlük yenilenir; gönderim yetki hatası verirse buradan güncelleyin." }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Yapay zekâ modelleri (Faz G) -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ch-title">
+            <Icon name="sparkles" :size="17" style="color:var(--accent)" />
+            Yapay Zekâ Modelleri
+          </div>
+          <div class="ch-sub">
+            Üretim sırasıyla denenecek modeller. Bir model kotaya takılır ya da emekliye
+            ayrılırsa sıradakine geçilir — listeyi buradan güncelleyebilirsiniz, yeni sürüm
+            beklemenize gerek yok.
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="css-row">
+            <button class="ghost" :disabled="modelYukleniyor" @click="modelleriGetir">
+              <Icon name="refresh" :size="14" :class="{ spin: modelYukleniyor }" />
+              {{ modelYukleniyor ? "Getiriliyor…" : "Modelleri getir" }}
+            </button>
+            <span class="fhint" :style="{ color: modelHataMi ? 'var(--red)' : 'var(--c-faint)' }">
+              {{ modelHint }}
+            </span>
+          </div>
+
+          <div v-for="z in zincirler" :key="z.ad">
+            <label class="lbl">{{ z.baslik }}</label>
+            <div class="zhint">{{ z.aciklama }}</div>
+
+            <div v-for="(m, i) in z.liste" :key="m" class="m-sat">
+              <span class="m-sira">{{ i + 1 }}</span>
+              <span class="m-ad">{{ m }}</span>
+              <span v-if="denenen === m" class="m-not">deneniyor…</span>
+              <span
+                v-else-if="deneme[m]"
+                class="m-not"
+                :style="{ color: deneme[m]!.ok ? 'var(--green)' : 'var(--red)' }"
+              >{{ deneme[m]!.metin }}</span>
+              <button class="m-dug" title="Yukarı taşı" :disabled="i === 0" @click="tasi(z, i, -1)">↑</button>
+              <button class="m-dug" title="Aşağı taşı" :disabled="i === z.liste.length - 1" @click="tasi(z, i, 1)">↓</button>
+              <button class="m-dug" title="Bu modeli gerçek istek biçimimizle dene" :disabled="!!denenen" @click="dene(m)">Dene</button>
+              <button class="m-dug sil" title="Zincirden çıkar" @click="cikar(z, i)">×</button>
+            </div>
+
+            <div class="m-ekle">
+              <select v-model="z.secim" class="fx inp">
+                <option value="">{{ modeller.length ? "Listeden model ekle…" : "Önce modelleri getirin" }}</option>
+                <option v-for="m in modeller.filter((x) => !z.liste.includes(x))" :key="m" :value="m">{{ m }}</option>
+              </select>
+              <button class="ghost" :disabled="!z.secim" @click="ekle(z)">Ekle</button>
+              <button class="ghost" @click="varsayilana(z)">Varsayılana dön</button>
+            </div>
+          </div>
+
+          <!-- ⚠️ Kullanıcı kendini kilitleyemesin: boş liste kaydedilebilir ama okunurken
+               koddaki varsayılana düşülüyor. Bu, ekranda da söyleniyor. -->
+          <div class="fhint">
+            Zinciri tamamen boşaltırsanız uygulama koddaki varsayılan listeye döner — üretimsiz kalmazsınız.
+            <b v-if="zincirKirli"> · Kaydedilmemiş değişiklik var.</b>
+          </div>
+          <div class="css-row">
+            <button class="primary" :disabled="!zincirKirli" @click="zincirleriKaydet">Zincirleri kaydet</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gemini kullanımı (Faz G) -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ch-title">
+            <Icon name="chartLine" :size="17" style="color:var(--accent)" />
+            Gemini Kullanımı
+          </div>
+          <div class="ch-sub">
+            Bugün hangi modele kaç istek gitti. Zincir alt modele düştükçe bir üretim birden
+            fazla istek harcar; aşağıdaki ortalama bunu gösterir.
+          </div>
+        </div>
+        <div class="card-body">
+          <div v-if="!kullanim || !kullanim.bugun.length" class="fhint">
+            Bugün henüz istek gönderilmedi.
+          </div>
+          <div v-else>
+            <div v-for="m in kullanim.bugun" :key="m.model" class="k-sat">
+              <span class="k-ad">{{ m.model }}</span>
+              <span class="k-say">bugün {{ m.istek }} istek</span>
+              <span v-if="m.kota_hatasi" class="k-kota">{{ m.kota_hatasi }} kez kota doldu</span>
+            </div>
+          </div>
+
+          <!-- 🔴 Dürüstlük notu: gizlenmiyor, ekranda duruyor. -->
+          <div class="fhint">
+            Yalnızca bu uygulamanın gönderdiği istekler sayılır — aynı API anahtarını başka bir
+            yerde kullanıyorsanız gerçek toplam daha yüksektir. Bu yüzden "kalan hakkınız"
+            gösterilmiyor. Gün sınırı: {{ kullanim?.gun_siniri || "yerel saat" }}; Google kotayı
+            Pasifik saatine göre sıfırlar, gün dönümünde sayılar farklı olabilir.
+          </div>
+
+          <div v-if="kullanim && kullanim.gunler.length">
+            <label class="lbl">Son 14 gün</label>
+            <div class="g-grafik">
+              <div v-for="g in kullanim.gunler" :key="g.gun" class="g-sut" :title="`${g.gun}: ${g.istek} istek${g.kota_hatasi ? ` · ${g.kota_hatasi} kota hatası` : ''}`">
+                <div class="g-dolgu" :style="{ height: `${Math.max(4, (g.istek / grafikTavan) * 100)}%` }">
+                  <div v-if="g.kota_hatasi" class="g-kota" :style="{ height: `${(g.kota_hatasi / g.istek) * 100}%` }"></div>
+                </div>
+                <span class="g-etiket">{{ g.gun.slice(8) }}</span>
+              </div>
+            </div>
+            <div class="fhint">
+              Son 14 günde <b>{{ kullanim.uretim }}</b> üretim ·
+              üretim başına ortalama <b>{{ ondalik(kullanim.uretim_basina_istek) }}</b> istek.
+              <template v-if="kullanim.uretim_basina_istek > 1.5">
+                Ortalama 1'in belirgin üstünde: zincir sık sık alt modellere düşüyor.
+              </template>
             </div>
           </div>
         </div>
@@ -1012,6 +1277,126 @@ async function doImport() {
 .eye:hover {
   background: var(--c-hover);
 }
+/* ===== Model zinciri ve kullanım (Faz G) ===== */
+/* Mevcut token'lar; yeni renk/gölge icat edilmiyor. */
+.zhint {
+  font-size: 11.5px;
+  color: var(--c-faint);
+  margin: 2px 0 8px;
+  line-height: 1.5;
+}
+.m-sat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--c-border);
+  font-size: 12.5px;
+}
+.m-sira {
+  width: 18px;
+  color: var(--c-faint);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+}
+.m-ad {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.m-not {
+  font-size: 11.5px;
+  color: var(--c-faint);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.m-dug {
+  height: 24px;
+  min-width: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--c-border);
+  background: var(--c-input);
+  color: var(--c-mid);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.m-dug:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.m-dug.sil:hover {
+  color: var(--red);
+  border-color: var(--red);
+}
+.m-ekle {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+.m-ekle .inp {
+  flex: 1;
+}
+.k-sat {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12.5px;
+}
+.k-ad {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  flex: 1;
+}
+.k-say {
+  font-variant-numeric: tabular-nums;
+}
+.k-kota {
+  font-size: 11.5px;
+  color: var(--red);
+}
+/* Grafik: 14 sütun, en yoğun gün tavan. Kota hataları sütunun içinde ayrı bir dilim —
+   "kaç istek attım" ile "kaç kez duvara çarptım" farklı sorular. */
+.g-grafik {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 76px;
+  margin: 8px 0 6px;
+}
+.g-sut {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  height: 100%;
+  gap: 4px;
+}
+.g-dolgu {
+  width: 100%;
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  transition: height 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.g-kota {
+  width: 100%;
+  background: var(--red);
+  border-radius: 3px 3px 0 0;
+}
+.g-etiket {
+  font-size: 9.5px;
+  color: var(--c-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .ghost {
   flex: none;
   height: 38px;

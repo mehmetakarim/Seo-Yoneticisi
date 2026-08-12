@@ -38,22 +38,32 @@ pub async fn assistant_ask(
     sources: String,
     on_event: Channel<AssistantEvent>,
 ) -> Result<String, String> {
-    let key = {
+    let (key, zincir) = {
         let conn = state.conn.lock().unwrap();
-        db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default()
+        (
+            db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default(),
+            sohbet_zinciri(&conn),
+        )
     };
 
     let system = gemini::assistant_system_prompt(&context, &sources);
-    let produced = gemini::chat_stream(&key, &system, &history, |e| {
+    let toplayici = CallToplayici::default();
+    let kanal = toplayici.kanal();
+    let chain = gemini::ChainCtx { models: zincir, log: Some(&kanal) };
+    let sonuc = gemini::chat_stream(&key, &system, &history, &chain, |e| {
         // Kanal hatası (pencere kapandı vb.) sohbeti düşürmesin: kullanıcı zaten gitmiş.
         let _ = match e {
             gemini::ChatEvent::Thinking => on_event.send(AssistantEvent::Thinking),
             gemini::ChatEvent::Chunk(t) => on_event.send(AssistantEvent::Chunk { text: t.to_string() }),
         };
     })
-    .await?;
+    .await;
 
-    Ok(produced.model.to_string())
+    {
+        let conn = state.conn.lock().unwrap();
+        toplayici.yaz(&conn, "chat");
+    }
+    Ok(sonuc?.model)
 }
 
 /// Kaydedilen sohbetin liste görünümü — mesaj gövdeleri taşınmaz, yalnızca üstveri.

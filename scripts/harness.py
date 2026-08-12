@@ -25,6 +25,7 @@ işaretlenir.
 import datetime
 import json
 import os
+import re
 import pathlib
 import sqlite3
 import sys
@@ -59,6 +60,19 @@ def load_report(conn):
         ]
         print("not: önbellekte `decay` yok → bölüm sentetik satırla gösteriliyor")
     return rep
+
+
+def zincir_oku(dosya, sabit):
+    """Rust kaynağındaki model zincirini okur.
+
+    ⚠️ Zincirler burada ELLE YAZILMIYOR. Taklit ile üretim ayrışırsa harness "çalışıyor"
+    der ama gerçek başka davranır — bu tuzağa 2026-08-12'de düşüldü (slug/SKU karışıklığını
+    taklit tam da bu yüzden gizlemişti). Tek kaynak: kodun kendisi.
+    """
+    src = pathlib.Path(dosya).read_text(encoding="utf-8")
+    blok = src.split(f"{sabit}: &[&str] = &[", 1)[1].split("];", 1)[0]
+    # Yorum satırlarındaki metinler değil, yalnızca tırnak içindeki model adları.
+    return [m for m in re.findall(r'"([^"]+)"', blok) if " " not in m]
 
 
 def load_live_products(conn):
@@ -324,6 +338,47 @@ def main():
     # modalın düzeni, kopyalama ve yazdırma düğmeleri için.
     QUOTE_DOC = {"html": "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"560\" style=\"width:560px;border-collapse:collapse;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1d1d1f;font-size:12.5px;line-height:1.55;\"><tr><td style=\"padding:0;\"><table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"width:100%;border-collapse:collapse;\"><tr><td style=\"vertical-align:top;padding:0;\"><div style=\"font-size:15px;font-weight:650;letter-spacing:-0.01em;\">Kurumsal BT</div><div style=\"color:#86868b;font-size:11.5px;margin-top:1px;\">Teklif T-2026-001</div></td><td style=\"vertical-align:top;padding:0;text-align:right;color:#86868b;font-size:11.5px;\"><div>10.08.2026</div><div>Geçerlilik 25.08.2026</div></td></tr></table><div style=\"margin-top:18px;\"><span style=\"color:#86868b;font-size:11.5px;\">Sayın</span><div style=\"font-weight:600;\">Ahmet Yılmaz · Anadolu Yapı</div></div><table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"width:100%;border-collapse:collapse;margin-top:16px;\"><thead><tr><th align=\"left\" style=\"text-align:left;padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#86868b;\">Kalem</th><th align=\"right\" style=\"text-align:right;padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#86868b;padding-left:10px;\">Adet</th><th align=\"right\" style=\"text-align:right;padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#86868b;padding-left:10px;\">Birim</th><th align=\"right\" style=\"text-align:right;padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#86868b;padding-left:10px;\">KDV</th><th align=\"right\" style=\"text-align:right;padding:0 0 6px;border-bottom:1px solid #d2d2d7;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#86868b;padding-left:10px;\">Tutar</th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #f0f0f2;padding:8px 0;\">Bambu Lab P2S Combo</td><td align=\"right\" style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">1</td><td align=\"right\" style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">749,00</td><td align=\"right\" style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">%20</td><td align=\"right\" style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;font-weight:600;\">749,00</td></tr><tr><td style=\"border-bottom:1px solid #f0f0f2;padding:8px 0;\">Lenovo ThinkCentre Neo 50q G5</td><td align=\"right\" style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">2</td><td align=\"right\" style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">949,00</td><td align=\"right\" style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;color:#86868b;\">%20</td><td align=\"right\" style=\"text-align:right;border-bottom:1px solid #f0f0f2;font-variant-numeric:tabular-nums;padding:8px 0 8px 10px;font-weight:600;\">1.898,00</td></tr></tbody></table><table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"width:100%;border-collapse:collapse;margin-top:14px;\"><tr><td width=\"100%\" style=\"width:100%;padding:0;\">&nbsp;</td><td style=\"padding:0;vertical-align:top;white-space:nowrap;\"><table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border-collapse:collapse;font-size:12px;\"><tr><td style=\"padding:3px 18px 3px 0;white-space:nowrap;color:#86868b;\">Ara toplam</td><td align=\"right\" style=\"text-align:right;font-variant-numeric:tabular-nums;padding:3px 0;white-space:nowrap;\">2.647,00 USD</td></tr><tr><td style=\"padding:3px 18px 3px 0;white-space:nowrap;color:#86868b;\">KDV %20 · 2.647,00</td><td align=\"right\" style=\"text-align:right;font-variant-numeric:tabular-nums;padding:3px 0;white-space:nowrap;\">529,40</td></tr><tr><td style=\"padding:3px 18px 3px 0;white-space:nowrap;border-top:1px solid #d2d2d7;padding-top:8px;\">Genel toplam</td><td align=\"right\" style=\"text-align:right;font-variant-numeric:tabular-nums;padding:3px 0;white-space:nowrap;border-top:1px solid #d2d2d7;padding-top:8px;font-weight:660;font-size:14px;\">3.176,40 USD</td></tr></table></td></tr></table><div style=\"margin-top:10px;white-space:pre-wrap;font-size:11.5px;color:#86868b;\">Fiyatlarımız 15 gün geçerlidir. Teslim: stoktan 2 iş günü.</div></td></tr></table>", "text": "Kurumsal BT\nTeklif T-2026-001 · 10.08.2026\nGeçerlilik: 25.08.2026\nSayın Ahmet Yılmaz · Anadolu Yapı\n\nBambu Lab P2S Combo — 1 x 749,00 (KDV %20) = 749,00 USD\nLenovo ThinkCentre Neo 50q G5 — 2 x 949,00 (KDV %20) = 1.898,00 USD\n\nAra toplam: 2.647,00 USD\nKDV %20 (2.647,00 üzerinden): 529,40\nGenel toplam: 3.176,40 USD\n\nFiyatlarımız 15 gün geçerlidir. Teslim: stoktan 2 iş günü.\n"}
 
+    # ===== Model zinciri + kullanım sayacı (Faz G) =====
+    URETIM_ZINCIRI = zincir_oku("src-tauri/core/src/gemini/mod.rs", "DEFAULT_MODEL_CHAIN")
+    SOHBET_ZINCIRI = zincir_oku("src-tauri/core/src/gemini/chat.rs", "CHAT_CHAIN")
+    ZINCIRLER = {
+        "uretim": URETIM_ZINCIRI,
+        "sohbet": SOHBET_ZINCIRI,
+        "uretim_varsayilan": URETIM_ZINCIRI,
+        "sohbet_varsayilan": SOHBET_ZINCIRI,
+    }
+    # Canlı liste: zincirdekiler + zincirde OLMAYAN birkaçı. Hepsi zincirde olsaydı
+    # "listeden ekle" akışı hiç denenemezdi.
+    CANLI_MODELLER = sorted(set(URETIM_ZINCIRI + SOHBET_ZINCIRI + [
+        "gemini-3.6-pro", "gemini-2.0-flash", "gemma-4-12b-it", "gemini-3.5-flash-image",
+    ]))
+
+    _gunler = []
+    for _i in range(13, -1, -1):
+        if _i in (11, 6):  # iki gün hiç çalışılmamış — grafik boşluğu göstermeli
+            continue
+        _n = 4 + (_i * 7) % 23
+        _gunler.append({
+            "gun": (datetime.date.today() - datetime.timedelta(days=_i)).isoformat(),
+            "istek": _n,
+            "kota_hatasi": 3 if _n > 20 else 0,
+        })
+    _toplam = sum(g["istek"] for g in _gunler)
+    _uretim = max(1, round(_toplam / 1.8))
+    KULLANIM = {
+        "bugun": [
+            {"model": URETIM_ZINCIRI[0], "istek": 14, "kota_hatasi": 2},
+            {"model": URETIM_ZINCIRI[3], "istek": 6, "kota_hatasi": 0},
+            {"model": SOHBET_ZINCIRI[0], "istek": 9, "kota_hatasi": 0},
+        ],
+        "gunler": _gunler,
+        "uretim": _uretim,
+        "uretim_basina_istek": round(_toplam / _uretim, 1),
+        "gun_siniri": "yerel saat",
+    }
+    KULLANIM_BOS = {"bugun": [], "gunler": [], "uretim": 0,
+                    "uretim_basina_istek": 0, "gun_siniri": "yerel saat"}
+
     # Canonical hedefi araması: gerçek feed ürünleri üzerinde, terimle süzülerek.
     live_json = json.dumps(live, ensure_ascii=False)
 
@@ -488,6 +543,30 @@ def main():
         "        && cmd === 'get_opportunity_cache') return Promise.resolve(null);\n"
         # `?setup=1` → taze kurulum benzetimi. Sihirbaz kullanıcının GERÇEK veritabanına
         # dokunmadan uçtan uca denenebiliyor; yazan komutlar yutuluyor.
+        # Model zinciri ve kullanım (Faz G). Zincirler kaynaktan okundu; bkz. zincir_oku().
+        "    if (cmd === 'get_model_chains') return Promise.resolve(\n"
+        f"      (window.__ZINCIR__ = window.__ZINCIR__ || {json.dumps(ZINCIRLER, ensure_ascii=False)}));\n"
+        "    if (cmd === 'set_model_chains') {\n"
+        "      window.__ZINCIR__ = { ...window.__ZINCIR__,\n"
+        "        uretim: args.uretim, sohbet: args.sohbet };\n"
+        "      return Promise.resolve(null);\n"
+        "      }\n"
+        # `?modelyok=1` → anahtar geçersiz / ağ yok: liste getirilemiyor hâli.
+        "    if (cmd === 'list_gemini_models')\n"
+        "      return new URLSearchParams(location.search).has('modelyok')\n"
+        "        ? Promise.reject('Anahtar reddedildi · geçersiz veya yetkisiz.')\n"
+        f"        : Promise.resolve({json.dumps(CANLI_MODELLER, ensure_ascii=False)});\n"
+        # ⚠️ Gerçek arka uçtaki gibi bazı modeller istek biçimimizi KALDIRMIYOR;
+        # taklit hepsine 'çalışıyor' deseydi 'Dene' düğmesinin anlamı kalmazdı.
+        "    if (cmd === 'probe_gemini_model')\n"
+        "      return /gemma|image/.test(args.model)\n"
+        "        ? Promise.reject(args.model + ' yanıt verdi ama beklenen JSON biçiminde değil.')\n"
+        "        : Promise.resolve(args.model + ' çalışıyor · istek biçimimizi destekliyor.');\n"
+        # `?kullanimyok=1` → hiç istek gönderilmemiş (boş durum).
+        "    if (cmd === 'gemini_usage')\n"
+        "      return Promise.resolve(new URLSearchParams(location.search).has('kullanimyok')\n"
+        f"        ? {json.dumps(KULLANIM_BOS, ensure_ascii=False)}\n"
+        f"        : {json.dumps(KULLANIM, ensure_ascii=False)});\n"
         "    if (new URLSearchParams(location.search).has('setup')) {\n"
         "      if (cmd === 'needs_setup') return Promise.resolve(true);\n"
         "      if (cmd === 'get_settings') return Promise.resolve({\n"
