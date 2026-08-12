@@ -9,9 +9,12 @@
 iddiaların kodda tek tek doğrulanması.
 
 **Sekiz fazın hepsi bitti** (B v0.9.0 · Ö v0.10.0 · A v0.11.0 · K v0.12.0 · S v0.13.0 ·
-D v0.14.0 · C v0.15.0 · T v0.16.0+v0.17.0). **Sıradaki faz yok** — kalan iki başlık:
-**P** koşullu bekliyor (ikinci mağaza gelene kadar), **G** ise tek tek alınabilen serbest
-kalemler. Ayrıntı bölüm 4'te; hangi sürümde ne çıktığı `brain.md`'de.
+D v0.14.0 · C v0.15.0 · T v0.16.0+v0.17.0) ve **Faz G'nin kod gerektiren kalemleri de
+kapandı** (v0.18.0). **Sıradaki faz yok.**
+
+Kalan üç başlık: **P** koşullu bekliyor (ikinci mağaza gelene kadar) · **kod imzalama**
+maliyet kararı · ve takvimdeki tek iş: **Eylül sonu, sonuç eşiği kalibrasyonu**
+(kullanıcı kararı 2026-08-12). Ayrıntı bölüm 4'te; hangi sürümde ne çıktığı `brain.md`'de.
 
 ---
 

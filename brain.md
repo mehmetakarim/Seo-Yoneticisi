@@ -3,7 +3,7 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-08-12
+**Son güncelleme:** 2026-08-12 (v0.18.0 yayında)
 **Aktif faz:** **v0.17.0 yayında — yol haritasının SEKİZ fazı da bitti.** Sıra:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
@@ -52,31 +52,42 @@ bağımlı DEĞİL, **202 test** + 32 canlı `--ignored`) + `src-tauri/src/` (in
 
 ### 🧭 Durum (2026-08-12)
 
-**v0.17.2 yayında. Yol haritasındaki SEKİZ fazın hepsi bitti:**
+**v0.18.0 yayında ve doğrulandı** (CI yeşil, `latest.json` → 7 platformun 7'si imzalı,
+6 not satırı). **Yol haritasında yapılacak iş kalmadı:** sekiz fazın hepsi bitti —
 **B** (v0.9.0) · **Ö** (v0.10.0) · **A** (v0.11.0) · **K** (v0.12.0) · **S** (v0.13.0) ·
-**D** (v0.14.0) · **C** (v0.15.0) · **T** (v0.16.0 + v0.17.0).
+**D** (v0.14.0) · **C** (v0.15.0) · **T** (v0.16.0 + v0.17.0) — ve **Faz G** kalemlerinin
+kod gerektirenleri de kapandı (v0.18.0).
 Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v0.17.2 slug-SKU.
 
-**Geriye üç şey kaldı, üçü de "sıradaki faz" değil:**
+**Geriye üç şey kaldı; ikisi bize bağlı değil, biri takvimde:**
 
 1. **Faz P (çoklu mağaza)** — ⏸️ **başlama koşulu henüz oluşmadı.** İkinci mağaza gerçekten
    gelmeden ya da genel dağıtımdan önce başlanmıyor; tek `db_path` varsayımı kodun birçok
    yerinde ve erken refactor bedava değil. Karar yol haritasında, burada çoğaltılmıyor.
 
-2. **Faz G kalemleri** — üçü bitti, biri kod işi bile değil:
-   ✅ `MODEL_CHAIN` → ayarlar + ✅ Gemini kullanım sayacı (0b7, v0.18.0) ·
-   ✅ ölçek modellemesi (0b6) — sonucu: eşikler ayarlanabilir olmayacak ·
-   ⏸️ kod imzalama: **maliyet kararı**, kod işi değil (~$99/yıl).
+2. **Faz G** — ✅ **bitti.** `MODEL_CHAIN` → ayarlar + Gemini kullanım sayacı (0b7, v0.18.0) ·
+   ölçek modellemesi (0b6, sonucu: eşikler ayarlanabilir olmayacak).
+   ⏸️ Geriye yalnızca **kod imzalama** kaldı: kod işi değil, ~$99/yıl **maliyet kararı** —
+   kullanıcıda.
    ❌ i18n elendi: gerekçesi çürüdü (kullanıcı düzeltmesi — "global dağıtım" = IdeaSoft
    kullanan herhangi bir işletme, farklı dilde bir pazar değil).
 
-3. ⚠️ **Eylül ortası — sonuç eşiği kalibrasyonu.** İyileşti/geriledi eşikleri hâlâ gerekçeli
-   varsayımla duruyor; gerçek delta dağılımına bakılacak. 72 gönderim 26 Temmuz–7 Ağustos
-   arasında yapıldı ve takip penceresi gönderimden **21 gün sonra** başlıyor. Gerekçe 0au'da.
-   Sonuç kontrolü kovası o güne kadar boş kalacak — bu bir kusur değil.
+3. 📅 **EYLÜL SONU — sonuç eşiği kalibrasyonu. Sıradaki iş bu.**
+   **Kullanıcı kararı (2026-08-12): planlama ve geliştirme Eylül SONUNDA yapılacak.**
+   ⚠️ Veri ile takvimi karıştırma: ölçülebilir pencere Eylül **ortasında** oluşuyor
+   (72 gönderim 26 Temmuz–7 Ağustos, takip penceresi gönderimden 21 gün sonra başlıyor —
+   0au'da yazılı), ama işe Eylül **sonunda** oturulacak. Bu bir takvim tercihi; kullanıcı
+   gerekçe belirtmedi, uydurmaya da gerek yok. (Yan faydası şu: pencere yeni açılmışken
+   dağılım birkaç günlük veriden ibaret olur, ay sonunda daha kalın bir dağılım bulunur.)
+
+   Yapılacak: iyileşti/geriledi eşikleri bugün **gerekçeli varsayımla** duruyor; gerçek delta
+   dağılımına bakılıp yeniden belirlenecek. Bugünkü kural, iki koşul birden (≥%20 VE
+   ≥3 tıklama) — gerekçesi 0au'da, kalibrasyonda o gerekçe de sınanacak.
+   O güne kadar sonuç kontrolü kovasının boş kalması **kusur değil**; ekran tarihi söylüyor.
 
 Fazların **ne olduğu** aşağıdaki numaralı girdilerde (B → 0at, Ö → 0au, A → 0av, halef
-düzeltmeleri → 0aw, K → 0ax, pencere teması → 0ay, S → 0az, D → 0b0, C → 0b2, T → 0b4);
+düzeltmeleri → 0aw, K → 0ax, pencere teması → 0ay, S → 0az, D → 0b0, C → 0b2, T → 0b4,
+ölçek modellemesi → 0b6, model zinciri + sayaç → 0b7);
 **nereye gittiğimiz** `yol-haritasi.md`'de.
 
 ### 📋 Eski kuyruk — kullanıcı önceliğiyle (2026-07-31), tamamı bitti
