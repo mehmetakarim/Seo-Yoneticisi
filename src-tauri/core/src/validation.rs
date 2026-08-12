@@ -2,6 +2,23 @@ use serde::Serialize;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Türkçe karakterler için grapheme bazlı sayım (ham byte değil).
+/// Meta başlığın kabul edilen uzunluk aralığı (grapheme).
+///
+/// 🔴 **Tek kaynak.** Bu aralık `validation`, `gemini::meta` ve `gemini::store_page`
+/// tarafından kullanılıyor; üç kopya olsaydı biri güncellenmediğinde üretim bir kuralı,
+/// rozet başka bir kuralı uygular ve kullanıcı "uygun" yazan bir başlığın neden yeniden
+/// üretildiğini anlayamazdı. (Projede kopyalanan sayı dört kez saptı.)
+pub const TITLE_MIN: usize = 20;
+pub const TITLE_MAX: usize = 60;
+
+/// Meta açıklamanın kabul edilen aralığı.
+///
+/// ⚠️ Üst sınır 155, IdeaSoft'un kestiği 160'tan **bilinçli olarak kısa**: canlı ölçümde
+/// (2026-08-12) blog PUT'unda 170 karakter gönderildi, 160 saklandı, uyarı çıkmadı. 155
+/// hedeflemek o sessiz kırpmanın kenarına yaklaşmamayı sağlıyor.
+pub const DESC_MIN: usize = 50;
+pub const DESC_MAX: usize = 155;
+
 pub fn grapheme_len(s: &str) -> usize {
     s.graphemes(true).count()
 }
@@ -46,8 +63,8 @@ pub fn meta_badge(m: &MetaInput) -> MetaBadge {
     }
     let tl = grapheme_len(title);
     let dl = grapheme_len(desc);
-    let title_len_ok = (20..=60).contains(&tl);
-    let desc_len_ok = (50..=155).contains(&dl);
+    let title_len_ok = (TITLE_MIN..=TITLE_MAX).contains(&tl);
+    let desc_len_ok = (DESC_MIN..=DESC_MAX).contains(&dl);
     let title_kw_ok = contains_keyword(title, m.target_keyword).unwrap_or(true);
     let desc_kw_ok = contains_keyword(desc, m.target_keyword).unwrap_or(true);
     if title_len_ok && desc_len_ok && title_kw_ok && desc_kw_ok {

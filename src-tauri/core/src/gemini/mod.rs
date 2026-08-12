@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 mod chat;
 mod details;
 mod meta;
+mod store_page;
 mod successor;
 mod tech;
 
@@ -21,6 +22,10 @@ mod tech;
 pub use chat::{assistant_system_prompt, chat_stream, session_title, ChatEvent, ChatMessage, CHAT_CHAIN};
 pub use details::{generate_details, generate_details_scratch, has_rewritable_content, optimize_details};
 pub use meta::{generate_meta, GeneratedMeta};
+pub use store_page::{
+    build_prompt as store_page_prompt, generate_store_page, verify_no_invented_numbers,
+    GeneratedStorePage, StorePageContext,
+};
 pub use successor::suggest_successor;
 pub use tech::{assemble_tech_html, structure_tech_specs, TechGroup, TechRow, TechSpecsResult, TECH_GROUPS};
 

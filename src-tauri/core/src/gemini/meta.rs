@@ -96,10 +96,10 @@ fn violation_count(meta: &GeneratedMeta) -> u32 {
     let dl = grapheme_len(meta.descriptions.trim());
     let kw = meta.target_keyword.trim().to_lowercase();
     let mut n = 0;
-    if !(20..=60).contains(&tl) {
+    if !(crate::validation::TITLE_MIN..=crate::validation::TITLE_MAX).contains(&tl) {
         n += 1;
     }
-    if !(50..=155).contains(&dl) {
+    if !(crate::validation::DESC_MIN..=crate::validation::DESC_MAX).contains(&dl) {
         n += 1;
     }
     if !kw.is_empty() {
@@ -116,8 +116,8 @@ fn violation_count(meta: &GeneratedMeta) -> u32 {
 /// Fazla uzun alanları kelime sınırında grapheme-bazlı kırpar (üretim tüketmez).
 /// Yalnızca üst sınırı aşanları düzeltir; kısa olanlara dokunmaz.
 fn clamp_lengths(mut meta: GeneratedMeta) -> GeneratedMeta {
-    meta.title = clamp_to(meta.title.trim(), 60);
-    meta.descriptions = clamp_to(meta.descriptions.trim(), 155);
+    meta.title = clamp_to(meta.title.trim(), crate::validation::TITLE_MAX);
+    meta.descriptions = clamp_to(meta.descriptions.trim(), crate::validation::DESC_MAX);
     meta
 }
 
