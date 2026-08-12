@@ -368,8 +368,7 @@ alındığında kendi "bitti sayılır" tanımı o anda yazılır.
 |---|---|
 | `MODEL_CHAIN` → ayarlar | Model emekliliği bugün **yeni sürüm** gerektiriyor. 0ao dersi birebir: kodda yalnızca varsayılan, gerçek değer `settings`'te |
 | Gemini kota/kullanım sayacı (yerel) | Ücretsiz katmanla çalışan bir üretim aracının kapasitesi bugün görünmez. Google kesin sayaç vermiyor → yerel sayım yeterli |
-| Ölçek modellemesi | Eşikler tek mağazada kalibre; 10k ürünlü sentetik feed ile senkron süresi, fırsat sayısı ve liste boyu ölçülecek. Eşiklerin ayarlanabilir olması **gerekip gerekmediğini** bu ölçüm belirler |
-| i18n | Global dağıtım hedefiyle Türkçe arayüz çelişiyor |
+| ~~Ölçek modellemesi~~ ✅ | **Ölçüldü (2026-08-12), sonuç: eşikler ayarlanabilir OLMAYACAK.** Hız hiçbir ölçekte sorun değil; ölçek sınırı raporun tek parça JSON olması. Sayılar `brain.md` 0b6'da |
 | Kod imzalama / notarization | Kod işi değil, **maliyet kararı** (~$99/yıl). İmzasız kurulumda macOS uyarı veriyor |
 
 ---
@@ -410,6 +409,7 @@ Bu bölüm, aynı soruların tekrar açılmaması için var.
 | `-preview` sınıfı Live / native-audio modeller | Habersiz kayboluyorlar; zincire preview model konmaz (0 numaralı ders) |
 | Full cloud / login | Ertelendi — asıl fatura para değil; kimlik, senkron, conflict, secret vault, migration ve offline UX |
 | Marketplace merkezi | Farklı bir operasyon |
+| **i18n (çoklu dil)** | ⚠️ **Gerekçesi çürüdü (kullanıcı düzeltmesi, 2026-08-12).** Faz G'de *"global dağıtım hedefiyle Türkçe arayüz çelişiyor"* diye duruyordu; "global dağıtım" ile kastedilen **IdeaSoft altyapısını kullanan herhangi bir işletme**, farklı dilde bir pazar değil. Hedef kitlenin tamamı zaten Türkçe → çeviri katmanı kimseye bir şey kazandırmaz. *"Kişiselleştirilmemiş" ile "çok dilli" aynı şey değil* |
 
 **Koşullu — kapı açılırsa yeniden değerlendirilir:**
 

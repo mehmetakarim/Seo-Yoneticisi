@@ -595,4 +595,91 @@ mod tests {
         assert_eq!(s2.updated, s.active);
         assert_eq!(s2.deleted, 0);
     }
+
+    /// 🔬 **Ölçek modellemesi (Faz G).** Eşikler ve akış tek mağazada kalibre edildi:
+    /// 283 ürün. 10 bin ürünlü bir katalogda ne olacağı BİLİNMİYOR — bu test onu ölçüyor.
+    ///
+    /// `cargo test -p seo-core olcek_senkron -- --ignored --nocapture`
+    ///
+    /// Üç şey ayrı ayrı ölçülüyor, çünkü "senkron yavaş" demek bir şey söylemez; hangi
+    /// adımın yavaş olduğu söyler:
+    ///   1. **Ayrıştırma** — 10 bin ürünlük XML'i okumak,
+    ///   2. **İlk yazma** — boş veritabanına 10 bin satır,
+    ///   3. **İkinci koşu** — hiçbir şey değişmemişken. Üretimde OLAĞAN durum bu; her
+    ///      senkron 10 bin satırı okuyup parmak izi karşılaştırıyor. Asıl maliyet burada
+    ///      çıkarsa çözüm de farklı olur (yazma değil, karşılaştırma optimize edilir).
+    ///
+    /// ⚠️ Bu bir başarı/başarısızlık testi değil, **ölçüm**. Eşik koymuyor: hangi sayının
+    /// "yavaş" olduğuna bakan kişi karar verir. Sayılar `brain.md`'ye yazılır.
+    #[test]
+    #[ignore]
+    fn olcek_senkron_10k() {
+        use std::time::Instant;
+        const N: usize = 10_000;
+
+        // Gerçekçi gövde: üretimi besleyen alanlar dolu (parmak izi bunları okuyor),
+        // açıklama gerçek katalogdakine yakın uzunlukta. Boş alanlarla ölçüm yalan söyler.
+        let aciklama = "x".repeat(1_800);
+        let body: String = (0..N)
+            .map(|i| {
+                format!(
+                    "<product><sku><![CDATA[SKU.{i:06}]]></sku>\
+                     <name><![CDATA[Ürün {i} — uzun bir ürün adı örneği]]></name>\
+                     <productBrand><![CDATA[Marka {}]]></productBrand>\
+                     <mainCategory><![CDATA[Ana Kategori {}]]></mainCategory>\
+                     <category><![CDATA[Alt Kategori {}]]></category>\
+                     <details><![CDATA[{aciklama}]]></details>\
+                     <imgUrl><![CDATA[https://m.example.com/{i}-1.jpg]]></imgUrl>\
+                     <picture2Path><![CDATA[https://m.example.com/{i}-2.jpg]]></picture2Path>\
+                     <url><![CDATA[https://m.example.com/urun/urun-{i}]]></url>\
+                     <quantity>5</quantity><status>1</status></product>",
+                    i % 40,
+                    i % 12,
+                    i % 120,
+                )
+            })
+            .collect();
+        let xml = format!("<products>{body}</products>");
+        println!("XML boyutu: {:.1} MB", xml.len() as f64 / 1_048_576.0);
+
+        let t = Instant::now();
+        let items = feed::parse(&xml).unwrap();
+        let ayristirma = t.elapsed();
+
+        // ⚠️ Bellek içi VE dosya tabanlı, ikisi birden. Kullanıcının veritabanı diskte
+        // duruyor; yalnızca bellekte ölçmek gerçekte olmayan bir hız gösterir.
+        let gecici = std::env::temp_dir().join(format!("olcek-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&gecici);
+
+        println!("ÖLÇEK/senkron N={N}");
+        println!("  ayrıştırma : {:>8.0} ms", ayristirma.as_secs_f64() * 1000.0);
+
+        for (etiket, mut conn) in [
+            ("bellek", mem_conn()),
+            ("disk  ", {
+                let c = Connection::open(&gecici).unwrap();
+                db::init(&c).unwrap();
+                c
+            }),
+        ] {
+            let t = Instant::now();
+            let s1 = sync_products(&mut conn, feed::parse(&xml).unwrap()).unwrap();
+            let ilk = t.elapsed();
+
+            let t = Instant::now();
+            let s2 = sync_products(&mut conn, feed::parse(&xml).unwrap()).unwrap();
+            let ikinci = t.elapsed();
+
+            println!(
+                "  {etiket} → ilk yazma {:>7.0} ms (eklenen {})  |  ikinci koşu {:>7.0} ms (güncellenen {})",
+                ilk.as_secs_f64() * 1000.0,
+                s1.added,
+                ikinci.as_secs_f64() * 1000.0,
+                s2.updated
+            );
+            assert_eq!(s2.added, 0, "ikinci koşuda ekleme olmamalı");
+        }
+        let _ = std::fs::remove_file(&gecici);
+        assert_eq!(items.len(), N);
+    }
 }

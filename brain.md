@@ -62,9 +62,11 @@ Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v
    gelmeden ya da genel dağıtımdan önce başlanmıyor; tek `db_path` varsayımı kodun birçok
    yerinde ve erken refactor bedava değil. Karar yol haritasında, burada çoğaltılmıyor.
 
-2. **Faz G kalemleri** — birbirinden bağımsız, tek tek alınabilir (tablo `yol-haritasi.md`'de):
-   `MODEL_CHAIN` → ayarlar · Gemini kota sayacı · ölçek modellemesi (10k sentetik feed) ·
-   i18n · kod imzalama (maliyet kararı, kod işi değil).
+2. **Faz G kalemleri** — birbirinden bağımsız, tek tek alınabilir:
+   `MODEL_CHAIN` → ayarlar · Gemini kullanım sayacı · kod imzalama (maliyet kararı, kod işi
+   değil). ✅ **Ölçek modellemesi bitti** (0b6) — sonucu: eşikler ayarlanabilir olmayacak.
+   ❌ i18n elendi: gerekçesi çürüdü (kullanıcı düzeltmesi — "global dağıtım" = IdeaSoft
+   kullanan herhangi bir işletme, farklı dilde bir pazar değil).
 
 3. ⚠️ **Eylül ortası — sonuç eşiği kalibrasyonu.** İyileşti/geriledi eşikleri hâlâ gerekçeli
    varsayımla duruyor; gerçek delta dağılımına bakılacak. 72 gönderim 26 Temmuz–7 Ağustos
@@ -1289,6 +1291,42 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    ⚠️ Bonus kusur: harness'ta `QT` (teklif fixture'ı) `invoke` gövdesinin **içinde** tanımlıydı,
    yani her çağrıda sıfırlanıyordu — durum değiştiren komutlar yazdıklarını bulamıyordu.
    `window.__QT__`e asıldı (sohbet stub'ı aynı sebeple `window.__CHATS__` kullanıyor).
+
+0b6. ✅ **ÖLÇEK MODELLEMESİ (Faz G, 2026-08-12) — eşikler ayarlanabilir OLMAYACAK.**
+   Bütün eşikler tek mağazada (283 ürün) kalibre edildi. Soru şuydu: 10 bin ürünlük bir
+   katalogda ne kırılır, eşiklerin ayarlanabilir olması gerekir mi? Üç ölçüm yapıldı
+   (`#[ignore]`'lu, sentetik, ağsız): `sync::olcek_senkron_10k`,
+   `opportunity::olcek_analiz_10k`, `commands::opportunities::olcek_rapor_10k`.
+
+   **Senkron (10.000 ürün, 22,3 MB XML):**
+   | adım | süre |
+   |---|---|
+   | ayrıştırma | ~290 ms |
+   | ilk yazma (bellek / disk) | 1.109 / 1.196 ms |
+   | ikinci koşu, hiçbir şey değişmemiş | 2.018 / 2.254 ms |
+
+   İki bulgu: **disk ile bellek arasında fark yok** (~%8) — her şey tek işlemde, maliyet
+   G/Ç değil CPU. Ve **ikinci koşu ilk yazmanın iki katı**; üretimde OLAĞAN durum bu, çünkü
+   her senkron 10 bin satırın parmak izini karşılaştırıyor. Yine de toplam ~2,5 sn: darboğaz değil.
+
+   **Analiz (10.000 ürün):** satışta olmayan 15 ms, düşüşte olanlar 18 ms; sorgu düzeyinde
+   1 milyon satırda bile yükselmeye yakın 347 ms, yarışan sayfalar 715 ms. **Hız hiçbir
+   ölçekte sorun değil.** ⚠️ Aynı testin ürettiği *madde sayıları* okunmamalı: sentetik
+   dağılım kasten geniş tutuldu, gerçek liste uzunluğunu tahmin etmez.
+
+   🔴 **ASIL BULGU — ölçek sınırı eşiklerde değil, raporun tek parça olmasında.**
+   Rapor tek bir `settings` satırında JSON. Gerçek ölçüm: **283 ürün → 520 KB.** Gerçek
+   oranlar 10 bin ürüne ölçeklenince **10,4 MB**; serileştirme 353 ms, çözümleme 162 ms.
+   Ölçülerek düzeltilen ilk varsayımım "her ekran açılışında çözümleniyor"du — hayır,
+   yükleme `if (!store.opportunity)` ile korunuyor, **uygulama başına bir kez**. Yani
+   maliyet tek seferlik yarım saniye + oturum boyunca bellekte duran 10 MB.
+
+   **KARAR (karar kapısı cevaplandı): eşikler ayarlanabilir yapılmayacak.** Gerekçe ölçüm:
+   eşiklerin ürettiği yük hiçbir ölçekte sorun çıkarmıyor, ekranlarda zaten kırpma var
+   (satışta olmayanlar 25, yükselmeye yakın 40, düşüşte olanlar 30 satır + "daha fazla").
+   Ayarlanabilir eşik, olmayan bir problemi çözen bir ayar olurdu. Ölçek sorunu çıkarsa
+   çözülecek şey **rapor blob'u** (kovaların ayrı ayrı ve sayfalı okunması) — bu, ikinci
+   mağaza/genel dağıtım geldiğinde Faz P ile birlikte bakılacak, şimdi değil.
 
 0c. ✅ **FIRSAT ANALİZİ + SÜRÜM NOTLARI (v0.5.6).**
 

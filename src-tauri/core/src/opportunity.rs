@@ -921,4 +921,115 @@ mod tests {
             ["b", "c", "a"]
         );
     }
+
+    /// 🔬 **Ölçek modellemesi (Faz G).** Eşiklerin hepsi TEK mağazada kalibre edildi
+    /// (283 ürün). Sorulan iki soru:
+    ///   1. Analiz büyük katalogda ne kadar sürüyor?
+    ///   2. **Listeler ne kadar uzuyor?** Asıl risk bu: 60 maddelik bir fırsat listesi
+    ///      çalışılabilir, 6.000 maddelik liste kullanıcıyı felç eder. Eşiklerin
+    ///      ayarlanabilir olması GEREKİYORSA gerekçesi bu sayı olacak.
+    ///
+    /// `cargo test -p seo-core olcek_analiz -- --ignored --nocapture`
+    ///
+    /// ⚠️ Sorgu satırı sayısı **tahmin edilmiyor, taranıyor**. Uygulama sorgu satırlarını
+    /// GSC'den canlı çekiyor ve saklamıyor; "10 bin üründe kaç satır olur" sorusunun
+    /// ölçülmüş bir cevabı yok. Uydurulmuş tek bir sayı vermek yerine üç ölçekte ölçülüyor,
+    /// okuyan kişi kendi mağazasını aradaki yere yerleştirir.
+    ///
+    /// Bu bir ölçüm; eşik koymuyor, geçer/kalır demiyor.
+    #[test]
+    #[ignore]
+    fn olcek_analiz_10k() {
+        use std::collections::{HashMap, HashSet};
+        use std::time::Instant;
+        const URUN: usize = 10_000;
+
+        // Ürün dizini: 10 bin ürün sayfası.
+        let by_page: HashMap<String, (String, String)> = (0..URUN)
+            .map(|i| {
+                (
+                    format!("https://m.example.com/urun/urun-{i}"),
+                    (format!("SKU.{i:06}"), format!("Ürün {i}")),
+                )
+            })
+            .collect();
+
+        // Sayfa düzeyi satırlar: her ürüne bir satır + satışta olmayan sayfalar.
+        // Konum/tıklama dağılımı bilinçli olarak GENİŞ: hepsi eşiğin altında kalırsa
+        // ölçüm "liste kısa" der ve bu yalan olur.
+        let sayfalar: Vec<(String, f64, f64, f64)> = (0..URUN + 2_000)
+            .map(|i| {
+                let pos = 1.0 + (i % 40) as f64;
+                let imps = 10.0 + (i % 400) as f64;
+                let clicks = if i % 3 == 0 { 0.0 } else { (i % 12) as f64 };
+                (format!("https://m.example.com/urun/urun-{i}"), clicks, imps, pos)
+            })
+            .collect();
+        let live: HashSet<String> = by_page.keys().cloned().collect();
+
+        let t = Instant::now();
+        let eol = find_eol(&sayfalar, &live, Some("/urun/"));
+        let eol_sure = t.elapsed();
+
+        // Düşüş: önceki dönem aynı sayfalar, daha iyi konum/tıklama.
+        let onceki: Vec<(String, f64, f64, f64)> = sayfalar
+            .iter()
+            .map(|(u, c, i, p)| (u.clone(), c * 2.0 + 6.0, *i, (p - 4.0).max(1.0)))
+            .collect();
+        let t = Instant::now();
+        let decay = find_decay(&sayfalar, &onceki, &by_page);
+        let decay_sure = t.elapsed();
+
+        println!("ÖLÇEK/analiz ürün={URUN} sayfa satırı={}", sayfalar.len());
+        println!(
+            "  satışta olmayan : {:>7.0} ms → {} madde",
+            eol_sure.as_secs_f64() * 1000.0,
+            eol.len()
+        );
+        println!(
+            "  düşüşte olanlar : {:>7.0} ms → {} madde",
+            decay_sure.as_secs_f64() * 1000.0,
+            decay.len()
+        );
+
+        // Sorgu düzeyi satırlar: üç ölçekte tara.
+        for carpan in [10usize, 50, 100] {
+            let n = URUN * carpan;
+            let rows: Vec<(String, String, f64, f64, f64, f64)> = (0..n)
+                .map(|i| {
+                    let urun = i % URUN;
+                    let pos = 1.0 + (i % 30) as f64;
+                    let imps = 5.0 + (i % 300) as f64;
+                    let clicks = (i % 7) as f64;
+                    (
+                        format!("https://m.example.com/urun/urun-{urun}"),
+                        // Sorguların bir kısmı ORTAK: kanibalizasyon ancak aynı sorguya
+                        // birden fazla sayfamız girdiğinde oluşur, tekil sorgularla ölçüm
+                        // bu kovayı hiç çalıştırmazdı.
+                        format!("sorgu {}", i % (URUN / 4)),
+                        clicks,
+                        imps,
+                        clicks / imps,
+                        pos,
+                    )
+                })
+                .collect();
+
+            let t = Instant::now();
+            let sd = striking_distance(&rows, &by_page);
+            let sd_sure = t.elapsed();
+
+            let t = Instant::now();
+            let cann = cannibalization(&rows, &by_page);
+            let cann_sure = t.elapsed();
+
+            println!(
+                "  sorgu satırı {n:>9} → yükselmeye yakın {:>6.0} ms / {:>7} madde  |  yarışan {:>6.0} ms / {:>6} madde",
+                sd_sure.as_secs_f64() * 1000.0,
+                sd.len(),
+                cann_sure.as_secs_f64() * 1000.0,
+                cann.len()
+            );
+        }
+    }
 }

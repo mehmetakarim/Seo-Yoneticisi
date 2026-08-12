@@ -397,4 +397,112 @@ mod tests {
         assert_eq!(r.eol_clicks, 0.0);
         assert_eq!(r.matched, 260);
     }
+
+    /// 🔬 **Ölçek modellemesi (Faz G) — raporun kendi ağırlığı.**
+    ///
+    /// `cargo test -p seo-yoneticisi olcek_rapor -- --ignored --nocapture`
+    ///
+    /// Analiz hızının darboğaz OLMADIĞI ölçüldü (bkz. `opportunity::olcek_analiz_10k`:
+    /// 1 milyon sorgu satırı 1 saniyenin altında). Geriye şüphelenilecek tek yer kalıyor:
+    /// rapor **tek bir `settings` satırında** JSON olarak duruyor ve bütün hâlde çözümlenip
+    /// Tauri köprüsünden JS'e geçiyor.
+    ///
+    /// ⚠️ Ölçüldü, varsayılmadı: yükleme `if (!store.opportunity)` ile korunuyor
+    /// (`ToolShell.vue`, `TodayPage.vue`, `OverviewPage.vue`, `AssistantPage.vue`), yani
+    /// **uygulama başına bir kez** — her ekran açılışında değil. Maliyet tek seferlik, ama
+    /// çözümlenen nesne oturum boyunca bellekte duruyor.
+    ///
+    /// Gerçek ölçüm (kullanıcının veritabanı, 2026-08-12): **283 ürün → 520 KB.**
+    /// Buradaki oranlar o rapordan alındı (fırsat 45 · görünmez 13 · eol 2071 · yükselmeye
+    /// yakın 116 · yarışan 5 · düşüş 47) ve 10 bin ürüne **doğrusal** ölçeklendi.
+    ///
+    /// ⚠️ Doğrusal ölçekleme bir varsayım: EOL sayısı ürün sayısıyla değil mağazanın
+    /// geçmişiyle büyüyor. Yani bu sayı bir tahmin, ölçüm değil — ama büyüklük mertebesini
+    /// verir ve asıl soru zaten o.
+    #[test]
+    #[ignore]
+    fn olcek_rapor_10k() {
+        use std::time::Instant;
+        const KAT: usize = 35; // 283 → ~10.000 ürün
+
+        let metin = |n: usize, ek: &str| format!("Ürün {n} — {ek} bir ürün adı örneği");
+        let rapor = OpportunityReport {
+            analyzed_at: "2026-08-12T10:00:00".into(),
+            days: 90,
+            total_products: 283 * KAT,
+            matched: 280 * KAT,
+            opportunities: (0..45 * KAT)
+                .map(|i| opportunity::Opportunity {
+                    sku: format!("SKU.{i:06}"),
+                    name: metin(i, "uzunca"),
+                    url: format!("https://m.example.com/urun/urun-{i}"),
+                    clicks: 3.0, impressions: 250.0, ctr: 0.012, position: 8.4,
+                    missed_clicks: 12.5, reason: opportunity::Reason::LowCtr,
+                    category: "Alt Kategori".into(), brand: "Marka".into(),
+                    meta_status: "pending".into(), details_status: "pending".into(),
+                })
+                .collect(),
+            invisible: (0..13 * KAT)
+                .map(|i| InvisibleProduct {
+                    sku: format!("SKU.G{i:05}"),
+                    name: metin(i, "görünmez"),
+                    url: format!("https://m.example.com/urun/gorunmez-{i}"),
+                })
+                .collect(),
+            eol: (0..2071 * KAT)
+                .map(|i| opportunity::EolPage {
+                    url: format!("https://m.example.com/urun/eski-urun-{i}"),
+                    slug: format!("eski-urun-{i}"),
+                    clicks: 2.0, impressions: 180.0, position: 14.2,
+                })
+                .collect(),
+            eol_clicks: 4200.0,
+            striking: (0..116 * KAT)
+                .map(|i| opportunity::QueryOpportunity {
+                    sku: format!("SKU.{i:06}"),
+                    name: metin(i, "yükselen"),
+                    query: format!("örnek arama sorgusu {i}"),
+                    clicks: 1.0, impressions: 90.0, ctr: 0.011, position: 11.0,
+                    missed_clicks: 4.4,
+                })
+                .collect(),
+            cannibalization: (0..5 * KAT)
+                .map(|i| opportunity::Cannibalization {
+                    query: format!("yarışan sorgu {i}"),
+                    clicks: 10.0, impressions: 900.0,
+                    pages: (0..3)
+                        .map(|j| opportunity::CannibalPage {
+                            sku: format!("SKU.{i:06}.{j}"),
+                            name: metin(i * 3 + j, "yarışan"),
+                            clicks: 3.0, impressions: 300.0, position: 9.0,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            decay: (0..47 * KAT)
+                .map(|i| opportunity::Decay {
+                    sku: format!("SKU.{i:06}"),
+                    name: metin(i, "düşen"),
+                    clicks_now: 4.0, clicks_before: 19.0,
+                    position_now: 12.0, position_before: 6.5,
+                    clicks_lost: 15.0,
+                })
+                .collect(),
+        };
+
+        let t = Instant::now();
+        let json = serde_json::to_string(&rapor).unwrap();
+        let yazma = t.elapsed();
+
+        let t = Instant::now();
+        let geri: OpportunityReport = serde_json::from_str(&json).unwrap();
+        let okuma = t.elapsed();
+
+        println!("ÖLÇEK/rapor ~{} ürün", 283 * KAT);
+        println!("  JSON boyutu   : {:>8.1} MB", json.len() as f64 / 1_048_576.0);
+        println!("  serileştirme  : {:>8.0} ms", yazma.as_secs_f64() * 1000.0);
+        println!("  çözümleme     : {:>8.0} ms  (uygulama başına bir kez)", okuma.as_secs_f64() * 1000.0);
+        println!("  eol satırı    : {:>8}", geri.eol.len());
+        assert_eq!(geri.eol.len(), 2071 * KAT);
+    }
 }
