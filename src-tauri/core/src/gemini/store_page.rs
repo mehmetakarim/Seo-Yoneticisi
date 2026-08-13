@@ -41,12 +41,18 @@ pub struct GeneratedStorePage {
     pub page_title: String,
     pub meta_description: String,
     pub target_keyword: String,
-    /// Sayfanın üstünde duracak tanıtım metni (düz paragraf, HTML değil).
+    /// Tanıtım metni **paragraf dizisi** olarak.
     ///
-    /// ⚠️ HTML istenmiyor: IdeaSoft `showcaseContent`'i HTML kabul ediyor ama modelden
-    /// etiket istemek, kapanmayan etiketle sayfa düzenini bozma riski demek. Paragraflar
-    /// gönderim anında sarmalanıyor.
-    pub showcase: String,
+    /// 🔴 Dizi, çünkü tek metin çalışmadı. İlk sürüm tek `String` istiyordu ve prompt
+    /// "2 paragraf" diyordu; model paragraf ayırıcısını **koymadı**. Canlı veride ölçüldü
+    /// (2026-08-13): iki sayfada da 0 satır sonu, 0 HTML etiketi — biri boşlukla, öteki
+    /// hiç ayırmadan birleşmişti (*"…yapar.İşletmeler…"*), yani sayfada tek blok görünüyordu.
+    /// *Ayırıcıyı ummak yerine yapıyı şemaya taşımak gerekiyordu.*
+    ///
+    /// ⚠️ Modelden HTML istenmiyor: kapanmayan etiket sayfa düzenini bozar. Sarmalama
+    /// gönderim anında yapılıyor (`ideasoft::wrap_paragraphs`) — ve bu sefer gerçekten
+    /// yapılıyor: önceki sürümde bu cümle yorumda yazılıydı ama kod yapmıyordu.
+    pub showcase: Vec<String>,
 }
 
 fn system_prompt(kind: &str) -> String {
@@ -65,7 +71,8 @@ fn system_prompt(kind: &str) -> String {
          3) Abartı ve pazarlama klişesi yok (\"en iyi\", \"lider\", \"eşsiz\"). \
             Ne olduğunu ve kime uygun olduğunu anlat.\n\
          4) Başlık {TITLE_MIN}-{TITLE_MAX} karakter, açıklama {DESC_MIN}-{DESC_MAX} karakter.\n\
-         5) Tanıtım metni 2 kısa paragraf, toplam 300-600 karakter. Düz metin, HTML yok.\n\
+         5) `showcase` **iki ayrı dizi elemanı** olacak: her eleman bir paragraf, \
+            toplam 300-600 karakter. Düz metin, HTML yok.\n\
          6) Hedef kelime, aramalarda en çok geçen ifadeden seçilir ve başlıkta geçer.\n\
          Yalnızca istenen JSON'u döndür."
     )
@@ -78,7 +85,7 @@ fn response_schema() -> serde_json::Value {
             "page_title": { "type": "STRING" },
             "meta_description": { "type": "STRING" },
             "target_keyword": { "type": "STRING" },
-            "showcase": { "type": "STRING" }
+            "showcase": { "type": "ARRAY", "items": { "type": "STRING" } }
         },
         "required": ["page_title", "meta_description", "target_keyword", "showcase"]
     })
@@ -153,7 +160,12 @@ pub fn violations(g: &GeneratedStorePage) -> u32 {
     if !kw.is_empty() && !g.page_title.to_lowercase().contains(&kw) {
         n += 1;
     }
-    if g.showcase.trim().chars().count() < 120 {
+    // Paragraf sayısı ve toplam uzunluk ayrı ayrı: tek uzun paragraf da, iki kısacık
+    // paragraf da istenmiyor.
+    if g.showcase.len() < 2 {
+        n += 1;
+    }
+    if g.showcase.join(" ").trim().chars().count() < 120 {
         n += 1;
     }
     n
@@ -223,7 +235,9 @@ pub async fn generate_store_page(
                 // sorun modelin yeteneği değil, çıktının güvenilmezliği.
                 let hepsi = format!(
                     "{} {} {}",
-                    best.page_title, best.meta_description, best.showcase
+                    best.page_title,
+                    best.meta_description,
+                    best.showcase.join(" ")
                 );
                 verify_no_invented_numbers(&hepsi, &prompt)?;
                 return Ok(Produced { value: best, model: model.clone() });
@@ -298,7 +312,7 @@ mod tests {
                  hangi ölçekteki işletmeye uygun olduğunu anlatıyoruz."
                     .into(),
             target_keyword: "güvenlik duvarı".into(),
-            showcase: "x".repeat(300),
+            showcase: vec!["x".repeat(160), "y".repeat(160)],
         };
         assert_eq!(violations(&g), 0, "kurallara uygun çıktı ihlal üretmemeli");
 
@@ -308,11 +322,16 @@ mod tests {
 
         // Çok kısa tanıtım → ihlal
         g.target_keyword = "güvenlik duvarı".into();
-        g.showcase = "kısa".into();
+        g.showcase = vec!["kısa".into(), "yine kısa".into()];
         assert_eq!(violations(&g), 1);
 
+        // 🔴 Tek paragraf → ihlal. Canlı veride tam bu oldu: model iki paragraf yerine
+        // tek blok döndürdü ve sayfada birleşik göründü.
+        g.showcase = vec!["x".repeat(320)];
+        assert_eq!(violations(&g), 1, "tek paragraf kabul edilmemeli");
+
         // Sınırların paylaşılan sabitlerden geldiği: başlığı taşır
-        g.showcase = "x".repeat(300);
+        g.showcase = vec!["x".repeat(160), "y".repeat(160)];
         g.page_title = "x".repeat(TITLE_MAX + 5);
         assert!(violations(&g) >= 1);
     }

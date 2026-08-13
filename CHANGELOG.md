@@ -13,6 +13,11 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.19.3
+- Düzeltme: sayfaya gönderilen tanıtım metninin **paragrafları birleşiyordu** — iki paragraf sitede tek blok olarak görünüyor, bazen cümleler bitişik yazılıyordu
+- Metin artık paragraf paragraf gönderiliyor ve elle yazdığınız `<` gibi işaretler sayfa düzenini bozmuyor
+- ⚠️ Daha önce gönderdiğiniz sayfalar düzelmez: onları **yeniden üretip göndermeniz** gerekiyor
+
 ## v0.19.2
 - Düzeltme: **arama verisi kaydedilmiyordu.** Analiz sorguları çekiyor ama veritabanına yazamıyordu ve hata görünmüyordu; sonuç olarak sayfa metni üretimi o sayfanın gerçek aramalarını görmeden çalışıyordu
 - Güncellemeden sonra **Fırsatlar ekranından analizi bir kez çalıştırın** — sorgu verisi o zaman dolacak ve üretilen metinler belirgin biçimde daha isabetli olacak

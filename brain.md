@@ -17,7 +17,8 @@ v0.17.2 = ödünç alınmış alan: slug/SKU karışıklığı (0b5) ·
 v0.18.0 = Faz G: model zinciri ayarlara + Gemini kullanım sayacı (0b7) ·
 v0.19.0 = Faz İ: içerik açığı + mağaza sayfası iyileştirme (0b8, 0b9, 0c0) ·
 v0.19.1 = içerik gönderimlerinin sonucu ölçülebilir oldu (0c1) ·
-**v0.19.2 = sessiz şema uyuşmazlığı: sorgu satırları hiç yazılmıyordu (0c2)**
+v0.19.2 = sessiz şema uyuşmazlığı: sorgu satırları hiç yazılmıyordu (0c2) ·
+**v0.19.3 = paragraflar sayfada birleşiyordu (0c3)**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -47,7 +48,7 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **241 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+bağımlı DEĞİL, **243 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
 **46 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
@@ -1644,6 +1645,35 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    *Video Konferans Ürünleri* kategorilerinde katalogda **hiç ürün yok** — XML feed 283 ürün
    taşıyor ve o kategoriler feed'de değil. Yani o iki sayfa için üretim yalnızca sayfa adı +
    sorgulara dayanacak. *Stand Ve Dock Station*'da 13 ürün var.
+
+0c3. 🔴 **YORUM YALAN SÖYLÜYORDU — paragraflar sayfada birleşiyordu (v0.19.3, 2026-08-13).**
+
+   Kullanıcı düzeltmeyi kurup analizi çalıştırdı ve iki sayfa gönderdi. Sorgu bağlamının
+   işe yaradığı görüldü: Access Point başlığı *"Access Point Modelleri ve Çeşitleri |
+   TP-Link ve Aruba"* oldu ve metne katalogdaki gerçek markalar girdi. Ama üretilen metni
+   ölçünce iki kusur çıktı.
+
+   🔴 **Birincisi ve utandırıcı olanı:** `GeneratedStorePage.showcase` alanının yorumunda
+   *"Paragraflar gönderim anında sarmalanıyor"* yazıyordu. **Sarmalanmıyordu.** Kod ham
+   metni gönderiyordu. Canlı veride ölçüldü: gönderilen iki metinde de **0 satır sonu,
+   0 HTML etiketi** — `showcaseContent` HTML olarak render edildiği için iki paragraf tek
+   blok hâlinde birleşiyordu, birinde cümleler bitişikti (*"…yapar.İşletmeler…"*).
+   *Ders: yorumun anlattığı davranış kodda yoksa, yorum yalandır — ve yalan yorum, yorum
+   olmamasından kötüdür, çünkü kontrol etmeyi engeller.*
+
+   **İkinci kusur, birincinin sebebi:** prompt "2 kısa paragraf" diyordu ama şema tek
+   `STRING` istiyordu; model ayırıcıyı koymadı. *Ayırıcıyı ummak yerine yapıyı şemaya
+   taşımak gerekiyordu* — `showcase` artık `ARRAY`. Tek paragraf dönerse `violations`
+   yakalıyor ve retry devreye giriyor.
+
+   Sarmalama gerçekten yapılıyor (`ideasoft::wrap_paragraphs`): dizi ya da boş satırla
+   ayrılmış metin kabul ediyor (model dizi verir, operatör panelde boş satır bırakır),
+   tek satır sonunu `<br>` sayıyor ve **HTML kaçışı** yapıyor — operatörün yazdığı `<`
+   sayfa düzenini bozmasın. Taslak düz metin saklanıyor ki panelde düzenlenebilsin.
+
+   ⚠️ **Zaten gönderilmiş iki sayfa birleşik metinle duruyor.** Düzeltme geriye dönük
+   çalışmıyor (mağazadaki HTML'i uygulama bilmiyor); o iki sayfa yeniden üretilip
+   gönderilmeli.
 
 0c. ✅ **FIRSAT ANALİZİ + SÜRÜM NOTLARI (v0.5.6).**
 

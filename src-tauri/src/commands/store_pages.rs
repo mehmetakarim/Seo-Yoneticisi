@@ -236,7 +236,10 @@ pub async fn generate_store_page(
                 draft_target_keyword = ?5, draft_showcase = ?6, draft_model = ?7, draft_at = ?8
          WHERE kind = ?1 AND remote_id = ?2",
         params![
-            kind, id, v.page_title, v.meta_description, v.target_keyword, v.showcase,
+            kind, id, v.page_title, v.meta_description, v.target_keyword,
+            // ⚠️ Taslak DÜZ METİN saklanıyor, paragraflar arasında boş satırla: operatör
+            // panelde düzenleyebilmeli. HTML'e çevirme gönderim anında (`wrap_paragraphs`).
+            v.showcase.join("\n\n"),
             produced.model, now_str()
         ],
     )

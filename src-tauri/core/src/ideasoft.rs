@@ -529,7 +529,10 @@ pub async fn put_store_page(
     koy("metaDescription", &kirp(meta_description, 160));
     koy("targetKeyword", target_keyword);
     if let Some(sc) = showcase {
-        koy("showcaseContent", sc);
+        // ⚠️ Ham metin DEĞİL sarmalanmış HTML: alan HTML olarak render ediliyor ve düz
+        // metin gönderilirse paragraflar sayfada birleşiyor (ölçüldü 2026-08-13).
+        let html = wrap_paragraphs(std::slice::from_ref(&sc.to_string()));
+        koy("showcaseContent", &html);
     }
     if body.is_empty() {
         return Err("Gönderilecek dolu alan yok.".to_string());
@@ -557,6 +560,43 @@ pub async fn put_store_page(
         ));
     }
     Ok(())
+}
+
+/// Paragrafları `<p>` ile sarmalar — `showcaseContent` HTML olarak render ediliyor.
+///
+/// 🔴 Bu fonksiyonun varlık sebebi: aynı iddia bir yorumda yazılıydı ama **kod yapmıyordu.**
+/// Canlı veride ölçüldü (2026-08-13): gönderilen metinde 0 satır sonu, 0 etiket vardı ve
+/// iki paragraf sayfada tek blok hâlinde birleşiyordu — birinde cümleler bitişikti bile
+/// (*"…yapar.İşletmeler…"*). *Yorumun anlattığı davranış kodda yoksa, yorum yalandır.*
+///
+/// Girdi paragraf DİZİSİ ya da satır sonlarıyla ayrılmış metin olabilir: operatör panelde
+/// elle düzenlerken boş satır bırakıyor, model dizi döndürüyor; ikisi de aynı yere çıkmalı.
+/// HTML kaçışı yapılıyor — operatörün yazdığı `<` sayfa düzenini bozmasın.
+pub fn wrap_paragraphs(parts: &[String]) -> String {
+    let mut out = String::new();
+    for parca in parts {
+        for p in parca.split("\n\n") {
+            let t = p.trim();
+            if t.is_empty() {
+                continue;
+            }
+            // Tek satır sonu paragraf değil, satır kesme.
+            let govde = t
+                .split('\n')
+                .map(|x| esc_html(x.trim()))
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+                .join("<br>");
+            out.push_str("<p>");
+            out.push_str(&govde);
+            out.push_str("</p>");
+        }
+    }
+    out
+}
+
+fn esc_html(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 /// Grapheme değil **karakter** bazlı kırpma: IdeaSoft'un sınırı da öyle davranıyor
@@ -1195,6 +1235,41 @@ mod tests {
     }
 
     // ===================== Mağaza sayfası gönderimi (Faz İ4) =====================
+
+    /// 🔴 Canlı veride bulunan kusur: paragraflar sayfada birleşiyordu. Yorum "sarmalanıyor"
+    /// diyordu ama kod yapmıyordu — ölçüm: 0 satır sonu, 0 etiket, cümleler bitişik.
+    #[test]
+    fn paragraflar_sarmalaniyor() {
+        let iki = vec!["Birinci paragraf.".to_string(), "İkinci paragraf.".to_string()];
+        assert_eq!(
+            wrap_paragraphs(&iki),
+            "<p>Birinci paragraf.</p><p>İkinci paragraf.</p>"
+        );
+
+        // Operatör panelde boş satırla ayırmış olabilir — aynı sonuca çıkmalı.
+        let elle = vec!["Birinci paragraf.\n\nİkinci paragraf.".to_string()];
+        assert_eq!(wrap_paragraphs(&elle), wrap_paragraphs(&iki));
+
+        // Tek satır sonu paragraf değil, satır kesme.
+        assert_eq!(
+            wrap_paragraphs(&["Bir satır.\nAlt satır.".to_string()]),
+            "<p>Bir satır.<br>Alt satır.</p>"
+        );
+
+        // Boş parçalar atlanıyor; boş girdi boş çıktı.
+        assert_eq!(wrap_paragraphs(&["".to_string(), "  ".to_string()]), "");
+        assert_eq!(wrap_paragraphs(&[]), "");
+    }
+
+    /// Operatörün yazdığı `<` sayfa düzenini bozmamalı.
+    #[test]
+    fn html_kacisi_yapiliyor() {
+        let out = wrap_paragraphs(&["5 < 10 & \"tırnak\" <script>".to_string()]);
+        assert!(out.contains("&lt;script&gt;"), "etiket kaçırılmalı: {out}");
+        assert!(out.contains("&amp;"));
+        assert!(!out.contains("<script>"));
+    }
+
 
     /// 🔴 Ölçülen kısıt: IdeaSoft `metaDescription`'ı 160'ta **sessizce** kırpıyor
     /// (2026-08-12, taslak blog kaydında 170 gönderildi → 160 saklandı, uyarı yok).
