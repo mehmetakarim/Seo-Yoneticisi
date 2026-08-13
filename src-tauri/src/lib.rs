@@ -131,6 +131,8 @@ pub fn run() {
             commands::suggest_eol_successor,
             commands::sync_ideasoft_catalog,
             commands::sync_store_pages,
+            commands::local_health,
+            commands::remote_health,
             commands::get_store_page,
             commands::list_store_pages,
             commands::generate_store_page,

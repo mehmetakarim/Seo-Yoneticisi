@@ -702,6 +702,27 @@ def main():
         "        showcase_content: p.draft_showcase, pushed_at: '2026-08-12T20:05' });\n"
         "      return Promise.resolve(p);\n"
         "    }\n"
+        # Bakım kontrolü. `?saglikli=1` → hepsi taze (panel kendiliğinden kapanmalı).
+        # ⚠️ Sayılar gerçek ölçümden: envanter 14 gün eşiği, analiz 7, feed 3.
+        "    if (cmd === 'local_health') {\n"
+        "      const iyi = new URLSearchParams(location.search).has('saglikli');\n"
+        "      return Promise.resolve(iyi\n"
+        "        ? [{ key:'feed', label:\"Ürün feed'i\", state:'ok', detail:'bugün', action:'sync_feed' },\n"
+        "           { key:'analysis', label:'GSC analizi', state:'ok', detail:'2 gün önce', action:'run_analysis' },\n"
+        "           { key:'inventory', label:'Sayfa envanteri', state:'ok', detail:'bugün', action:'sync_store_pages' }]\n"
+        "        : [{ key:'feed', label:\"Ürün feed'i\", state:'stale', detail:'6 gün önce — 3 günden eski', action:'sync_feed' },\n"
+        "           { key:'analysis', label:'GSC analizi', state:'ok', detail:'2 gün önce', action:'run_analysis' },\n"
+        "           { key:'inventory', label:'Sayfa envanteri', state:'off', detail:'IdeaSoft bağlanmamış', action:'' }]);\n"
+        "    }\n"
+        "    if (cmd === 'remote_health')\n"
+        "      return new Promise(r => setTimeout(() => r(\n"
+        "        new URLSearchParams(location.search).has('saglikli')\n"
+        "          ? [{ key:'gemini', label:'Yapay zekâ bağlantısı', state:'ok', detail:'12 model erişilebilir', action:'' },\n"
+        "             { key:'ideasoft', label:'IdeaSoft bağlantısı', state:'ok', detail:'bağlantı doğrulandı', action:'' }]\n"
+        "          : [{ key:'gemini', label:'Yapay zekâ bağlantısı', state:'ok', detail:'12 model erişilebilir', action:'' },\n"
+        "             { key:'ideasoft', label:'IdeaSoft bağlantısı', state:'error',\n"
+        "               detail:'IdeaSoft token süresi dolmuş — Ayarlar\\'dan yenileyin.', action:'open_settings' }]),\n"
+        "        700));\n"
         # Sayfa envanteri (Faz İ). ⚠️ Sayılar UYDURULMADI — 2026-08-12 canlı ölçümü:
         # kategori 56 kayıt / 47 görünen · marka 265 / 75 · blog 250 / 158.
         # `?envhata=1` → IdeaSoft kapalı/token geçersiz hâli.

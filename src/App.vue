@@ -22,6 +22,7 @@ import FocusBar from "./components/FocusBar.vue";
 import FocusSummaryModal from "./components/FocusSummaryModal.vue";
 import UpdateModal from "./components/UpdateModal.vue";
 import SetupWizard from "./components/SetupWizard.vue";
+import StartupCheck from "./components/StartupCheck.vue";
 import Icon from "./components/Icon.vue";
 
 const store = useStore();
@@ -160,6 +161,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
 
       <UpdateModal />
       <SetupWizard />
+      <StartupCheck />
       <FocusSummaryModal />
 
       <component :is="PAGES[store.page]" ref="pageRef" />

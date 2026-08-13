@@ -859,3 +859,19 @@ export interface StorePageDetail {
   impressions: number;
   clicks: number;
 }
+
+/**
+ * Bakım kontrolü satırı (açılış paneli + Ayarlar widget'ı).
+ *
+ * ⚠️ `off` bir hata DEĞİL: modül kapalıysa (IdeaSoft bağlanmamış) kırmızı göstermek,
+ * kullanmadığı bir şey için kullanıcıyı endişelendirir.
+ */
+export interface HealthCheck {
+  key: string;
+  label: string;
+  /** 'ok' | 'stale' | 'error' | 'off' */
+  state: string;
+  detail: string;
+  /** Bu satırı düzeltecek eylem; boşsa yapılacak bir şey yok. */
+  action: string;
+}

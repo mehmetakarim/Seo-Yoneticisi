@@ -42,6 +42,7 @@ import type {
   GeminiKullanim,
   StorePageSyncResult,
   StorePageDetail,
+  HealthCheck,
 } from "./types";
 
 export const api = {
@@ -166,6 +167,10 @@ export const api = {
   setTheme: (theme: string) => invoke<void>("set_theme", { theme }),
   testFeedUrl: (url: string) => invoke<number>("test_feed_url", { url }),
   testGeminiKey: (key: string) => invoke<string>("test_gemini_key", { key }),
+  /** Okunan kontroller — ağ yok, anında döner. */
+  localHealth: () => invoke<HealthCheck[]>("local_health"),
+  /** Ucuz ağ kontrolleri: token geçerli mi, model listesi erişilebilir mi. */
+  remoteHealth: () => invoke<HealthCheck[]>("remote_health"),
   getStorePage: (kind: string, id: number) =>
     invoke<StorePageDetail>("get_store_page", { kind, id }),
   listStorePages: (kind: string) =>

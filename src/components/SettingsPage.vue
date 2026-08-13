@@ -8,6 +8,7 @@ import { useStore } from "../store";
 import { BUCKET_LABEL } from "../buckets";
 import type { CalibrationRow, GeminiKullanim, SilenceState } from "../types";
 import Icon from "./Icon.vue";
+import HealthPanel from "./HealthPanel.vue";
 
 const store = useStore();
 
@@ -550,6 +551,24 @@ async function doImport() {
         <button class="ghost" @click="store.openSetup()">
           <Icon name="sparkles" :size="14" /> Çalıştır
         </button>
+      </div>
+
+      <!-- Bakım (kullanıcı isteği): dört ayrı ekrana dağılmış işler tek yerde.
+           ⚠️ Açılış paneliyle AYNI bileşen — kopyalanmadı, paylaşıldı. -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ch-title">
+            <Icon name="badgeCheck" :size="17" style="color:var(--accent)" />
+            Bakım
+          </div>
+          <div class="ch-sub">
+            Feed, GSC analizi, sayfa envanteri ve bağlantılar. Pahalı işler kendiliğinden
+            çalışmaz — durumu görür, gerekiyorsa siz başlatırsınız.
+          </div>
+        </div>
+        <div class="card-body">
+          <HealthPanel />
+        </div>
       </div>
 
       <!-- Kaynaklar -->
