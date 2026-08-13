@@ -3,7 +3,7 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-08-13 (v0.19.0 — Faz İ)
+**Son güncelleme:** 2026-08-14 (bakım kontrolü + sayfa tipi süzgeci — **yayınlanmadı**, 0c4)
 **Aktif faz:** **v0.17.0 yayında — yol haritasının SEKİZ fazı da bitti.** Sıra:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
@@ -18,7 +18,8 @@ v0.18.0 = Faz G: model zinciri ayarlara + Gemini kullanım sayacı (0b7) ·
 v0.19.0 = Faz İ: içerik açığı + mağaza sayfası iyileştirme (0b8, 0b9, 0c0) ·
 v0.19.1 = içerik gönderimlerinin sonucu ölçülebilir oldu (0c1) ·
 v0.19.2 = sessiz şema uyuşmazlığı: sorgu satırları hiç yazılmıyordu (0c2) ·
-**v0.19.3 = paragraflar sayfada birleşiyordu (0c3)**
+**v0.19.3 = paragraflar sayfada birleşiyordu (0c3)** ·
+⏸️ *sürümsüz:* bakım kontrolü + sayfa tipi süzgeci (0c4)
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -65,11 +66,32 @@ aktarımlarından çıkan ölçümle doğdu (0b8): uygulama ürün dışı 5.700
 gösterimi hiç görmüyordu.
 Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v0.17.2 slug-SKU.
 
-**Sıradaki iş — içerik pilotu (karar bekliyor).** Faz İ'nin makinesi hazır ve v0.19.1 ile
-sonucu **ölçülebilir** hâle geldi (0c1: v0.19.0'da ölçülemiyordu). Kullanıcı zaten bir
-kategori sayfası göndermiş (**Access Point, 2026-08-13**) — pilot fiilen başladı; hangi
-sayfalarla devam edileceği kullanıcı kararı. Önerilen devam: TO'nun kaldıraç olduğu üç
-sayfa daha (Güvenlik Duvarı · Stand ve Dock · Video Konferans), poz 40'takilere girmeden.
+🔴 **SIRADAKİ İŞ — MADDE 4: Marka / Kategori / İçerik ekranları (başlanmadı).**
+Kullanıcının 2026-08-13 tarihli dört maddesinin sonuncusu; 1 rapordu, 2 ve 3 bitti (0c4).
+İstenen: *"Marka, Kategori, Blog sorguları için modal açmak yerine … kendi ekranlarına
+göndermek. Yani Katalog grubunun altına ürünler ekranı olduğu gibi marka, kategori, blog
+ekranları da olmalı."*
+- **Kapsam kararı (kullanıcı, 2026-08-13):** önce **listeleme + iyileştirme**, **oluşturma
+  (POST) sonra.** ⚠️ IdeaSoft'ta POST hiç test edilmedi; GET/PUT doğrulandı (0c0).
+- **Tasarım niyeti:** üç ayrı ekran **yazılmayacak** — tek bileşen, `kind`'a göre
+  parametreli, navigasyona üç kayıt. Gerekçe kopya sapması (bu projede beş kez yaşandı).
+  Ürünler ekranının deseni (sol liste + sağ detay) korunmalı.
+- **Hazır olan:** `list_store_pages` + `get_store_page` komutları ve `StorePageDetail`
+  tipi zaten var (Faz İ), doğrudan kullanılabilir. Sıralama gösterime göre.
+- Bittiğinde İçerik açığı ekranındaki `edit` eylemi modal yerine bu ekrana gitmeli ve
+  `StorePageModal.vue` kaldırılmalı — yoksa aynı iş iki yerde çizilir.
+
+**Yayın borcu:** 0c4'teki iki commit sürümsüz duruyor. Madde 4 ile birlikte tek sürüm
+çıkarmak mantıklı (⚠️ iki etiketi arka arkaya atma kuralı, "Yayın" bölümünde).
+
+**Operatör işi — içerik pilotu (kullanıcıda).** Faz İ'nin makinesi hazır ve v0.19.1 ile
+sonucu **ölçülebilir** hâle geldi (0c1: v0.19.0'da ölçülemiyordu). Pilot fiilen başladı:
+**Access Point 2026-08-13'te gönderildi, v0.19.3'ten sonra düzgün paragraflarla yeniden
+üretilip gönderildi** (kullanıcı raporu). ⚠️ **Güvenlik Duvarı düzeltmeden ÖNCE gönderildi**
+— mağazada birleşik metinle duruyor, yeniden üretilmeli (0c3). Stand ve Dock · Video
+Konferans henüz gönderilmedi. Devamı kullanıcı kararı; poz 40'takilere girilmemesi önerildi.
+⚠️ Katalogda "Güvenlik Duvarı" ve "Video Konferans" için **ürün yok** (feed 283 ürün
+taşıyor); o iki sayfa yalnızca sayfa adı + sorgulardan üretiliyor, bağlamı zayıf.
 📅 İlk sonucun okunabileceği gün **~2026-10-04** (hesap aşağıda, 3. maddede). Ölçülen adaylar: TO'nun kaldıraç olduğu **dört kategori**
 (Güvenlik Duvarı 4.831 gösterim/poz 9,1 · Access Point 1.274/15,7 · Stand ve Dock 1.084/13,8 ·
 Video Konferans 849/10,8) ya da 26 kategorinin tamamı (poz 40'takiler dahil — orada metin
@@ -1675,6 +1697,54 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    çalışmıyor (mağazadaki HTML'i uygulama bilmiyor); o iki sayfa yeniden üretilip
    gönderilmeli.
 
+0c4. ✅ **BAKIM KONTROLÜ + SAYFA TİPİ SÜZGECİ (2026-08-14).** ⚠️ **Henüz yayınlanmadı** —
+   `main`'de iki commit (`2f3bfe1`, `75d6198`), sürüm numarası verilmedi, etiket yok.
+
+   Kullanıcı dört madde istedi (2026-08-13 akşamı). **1** bir rapordu (Access Point denemesi
+   gönderildi), **2 ve 3 yapıldı**, **4 sıradaki iş** (aşağıda, "Kaldığımız yer"de).
+
+   **Madde 2 — sayfa tipi süzgeci (`2f3bfe1`).** İçerik açığı ekranındaki "Tümü / Niyet
+   uyuşmuyor / Sayfa yok / Yanlış eşleşme" şeridinin altına ikinci bir kat: Ana Sayfa ·
+   Blog · Marka · Kategori · Ürün. ⚠️ Seçenekler **sabit liste değil**, o an veride
+   gerçekten bulunan tipler — sonucu boş çıkacak bir süzgeç düğmesi, olmayan bir iş vaat
+   eder. Üst süzgeç değişince kombinasyon imkânsızlaşıyorsa alt süzgeç sıfırlanıyor; yoksa
+   ekran sessizce boş kalır ve kullanıcı bunu "kayıt yok" sanardı.
+
+   **Madde 3 — bakım kontrolü (`75d6198`).** Aynı bakım işleri dört ayrı ekrana dağılmıştı
+   (feed senkronu Ürünler'de, GSC yenileme Genel Bakış'ta, model listesi ve token testi
+   Ayarlar'da) ve kullanıcı her açılışta dördünü geziyordu. Artık tek liste: feed · GSC
+   analizi · sayfa envanteri · yapay zekâ bağlantısı · IdeaSoft bağlantısı.
+   Yeri iki: açılışta sağ üstte kart (`StartupCheck.vue`), Ayarlar'da widget.
+   ⚠️ **Tek bileşen** (`HealthPanel.vue`), iki yer — bu projede kopyalanan tablo/geometri
+   beş kez saptı; kopyalamak zaten bilinen bir hatayı tekrar etmek olurdu.
+
+   Üç karar, gerekçeleriyle:
+
+   🔴 **Kontrol var, çalıştırma YOK** (kullanıcı kararı: *"kontrol et, çalıştırma"*).
+   Ucuz olanlar (token, model listesi) gerçekten koşuyor; pahalı olanların yalnızca
+   **tazeliği okunuyor**, düğmeye kullanıcı basıyor. İki katmanlı gerekçe: (a) GSC analizi
+   bir **ölçüm olayı** — `query_rows`'u yeniden yazıyor, anlık görüntü ekleyebiliyor; her
+   açılışta koşarsa ölçtüğümüz şeyi ölçüm aracıyla değiştirmiş oluruz (günde beş açılış =
+   beş analiz). (b) Maliyetler ölçüldü: token ~1 sn / 1 istek, GSC analizi 3,8 sn çekim +
+   30 bin satır yazma — ucuzu pahalıya bağlamak.
+
+   ⚠️ **Kapalı modül hata değil.** IdeaSoft ya da GSC bağlanmamışsa satır gri `off`
+   durumunda; kırmızı göstermek kullanıcıyı **kullanmadığı** bir şey için endişelendirir.
+
+   🔴 **Her şey yolundaysa panel kendiliğinden kapanıyor** (1,6 sn). Kalıcı bir "hoş
+   geldiniz" ekranı, her açılışta kapatılacak bir engel olurdu; kullanıcı üçüncü açılışta
+   okumadan kapatmayı öğrenir ve panel gerçekten bir şey söylediğinde de görmez.
+   *Bir uyarı ancak nadir olduğunda uyarıdır.*
+
+   ⚠️ **Tazelik eşikleri (feed 3 · analiz 7 · envanter 14 gün) gerekçeli VARSAYIM, ölçüm
+   değil.** Ölçülmüş bir dağılıma dayanmıyorlar; kodda da böyle işaretli. Kullanım verisi
+   birikince gözden geçirilmeli — 0au'daki sonuç eşiği kalibrasyonuyla aynı borç türü.
+
+   ⚠️ **Doğrulanamayan tek şey:** "Her şey güncel" anının ekran görüntüsü. Her araç
+   turu 1,6 sn'lik pencereden uzun sürüyor. Doğrulanan şey **davranış**: sorun varken panel
+   kalıyor (harness'ta bayat feed + geçersiz token satırları göründü), temizken
+   (`?saglikli=1`) kapanıyor. Görsel an sahada teyit edilmeli.
+
 0c. ✅ **FIRSAT ANALİZİ + SÜRÜM NOTLARI (v0.5.6).**
 
    **Fırsatlar sayfası** — "önce hangi ürüne bakmalıyım?". `gsc.rs::page_stats()` ile TEK API
@@ -2329,8 +2399,9 @@ var mı?" sorusunun bir kez gereksiz sorulmasına yol açtı. Bitmiş maddeler a
 ⚠️ Bu bölüm 2026-08-07'de tazelendi; "repo push bekliyor" gibi aylar önce bitmiş maddeler
 duruyordu (repo 2026-07-26'dan beri public).
 
-- **Testler:** `cd src-tauri && cargo test` (Tauri katmanı, 19) ·
-  `cargo test -p seo-core` (197) · canlı testler `-- --ignored` ile ve env değişkenleriyle
+- **Testler:** `cd src-tauri && cargo test --workspace --lib`
+  (2026-08-14: seo-core **243** + Tauri katmanı **50**) ·
+  canlı testler `-- --ignored` ile ve env değişkenleriyle
   (ör. `SEO_DB_COPY=... cargo test sync_fingerprint_real -- --ignored --nocapture`)
 - **Çalıştır:** `npm run tauri dev`
 - **Görsel doğrulama:** `npm run build && python3 scripts/harness.py` → `npx vite preview`
@@ -2338,7 +2409,10 @@ duruyordu (repo 2026-07-26'dan beri public).
   `?nav=<ekran>` `&tema=koyu` · `?halefyok=1` (halef bulunamadı) · `?boskuyruk=1` (Bugün boş) · `?seans=1` (odak seansı
   sürüyor) · `?hepsiyapildi=1` (günün işi bitmiş) · `?kararlar=1` (EOL'de karar verilmiş satırlar) ·
   `?musteri=0` (CRM boş) · `?sessizlik=1` (eşik önerisi hazır) ·
-  `?nav=quotes` (teklif düzenleyici, marj uyarıları dahil)
+  `?nav=quotes` (teklif düzenleyici, marj uyarıları dahil) ·
+  `?icerikyok=1` (içerik açığı boş) · `?envhata=1` (sayfa envanteri çekilmemiş) ·
+  `?modelyok=1` (model listesi gelmiyor) · `?kullanimyok=1` (kullanım sayacı boş) ·
+  `?saglikli=1` (bakım kontrolünde her şey temiz → panel kendiliğinden kapanır)
   ⚠️ `npm run build` `dist/`i siler → harness HER ZAMAN derlemeden sonra üretilir.
   🔴 **Ekran görüntüsü YETMİYOR, konsol da okunmalı** (`read_console_messages`). Ölçüldü
   (2026-08-10): harness ekranı doğru çiziyordu ama konsolda kurulum hatası vardı ve aynı kod
