@@ -21,7 +21,7 @@ import { useStore } from "../../store";
 import ToolShell from "./ToolShell.vue";
 import SeoTable, { type TableCol, type TableRow } from "./SeoTable.vue";
 import StorePageModal from "./StorePageModal.vue";
-import type { ContentGap, GapKind, StorePageDetail } from "../../types";
+import type { ContentGap, GapKind, PageKind, StorePageDetail } from "../../types";
 
 const store = useStore();
 const veri = computed<ContentGap[]>(() => store.opportunity?.content_gaps ?? []);
@@ -53,9 +53,43 @@ const sayim = computed(() => {
   return m;
 });
 
+/**
+ * İkinci süzgeç: sıralanan sayfanın TİPİ.
+ *
+ * Kova süzgeci "sorun ne", tip süzgeci "nerede" sorusunu cevaplıyor — ikisi bağımsız ve
+ * birlikte çalışıyor. Ölçüldü (2026-08-13): 97 açığın büyük kısmı ürün sayfalarında ama
+ * kategori/marka satırları iş olarak farklı (orada panelden metin üretilebiliyor), yani
+ * "hangi tür sayfayla uğraşacağım" gerçek bir ayrım.
+ */
+const tipSuzgec = ref<PageKind | "hepsi">("hepsi");
+
+/** Yalnızca veride BULUNAN tipler gösteriliyor — boş düğme sunmak gürültü. */
+const tipler = computed(() => {
+  const m = new Map<PageKind, number>();
+  for (const g of veri.value) m.set(g.page_kind, (m.get(g.page_kind) ?? 0) + 1);
+  return [...m.entries()].sort((a, b) => b[1] - a[1]);
+});
+
 const suzulmus = computed(() =>
-  suzgec.value === "hepsi" ? veri.value : veri.value.filter((g) => g.kind === suzgec.value),
+  veri.value.filter(
+    (g) =>
+      (suzgec.value === "hepsi" || g.kind === suzgec.value) &&
+      (tipSuzgec.value === "hepsi" || g.page_kind === tipSuzgec.value),
+  ),
 );
+
+/**
+ * ⚠️ Kova süzgeci değişince tip süzgeci geçersiz kalabilir (o kovada o tip hiç yok) ve
+ * liste sessizce boşalır. Boş liste "sonuç yok" gibi görünür ama aslında süzgeç kombinasyonu
+ * imkânsız — kullanıcı neden boş olduğunu anlayamaz. Bu durumda tip süzgeci sıfırlanıyor.
+ */
+watch(suzgec, () => {
+  if (tipSuzgec.value === "hepsi") return;
+  const varMi = veri.value.some(
+    (g) => (suzgec.value === "hepsi" || g.kind === suzgec.value) && g.page_kind === tipSuzgec.value,
+  );
+  if (!varMi) tipSuzgec.value = "hepsi";
+});
 
 // Kuyruktan gelen odak (Faz K mekanizması, ortak `useRowFocus`).
 // ⚠️ Kimlik `sorgu + sayfa` — arka uçtaki `focus_id` ile birebir aynı olmak zorunda,
@@ -230,6 +264,22 @@ async function ac(id: string) {
     </div>
     <p v-if="suzgec !== 'hepsi'" class="kova-not">{{ KOVA[suzgec].aciklama }}</p>
 
+    <!-- İkinci süzgeç: sıralanan sayfanın tipi. Kova "sorun ne", bu "nerede" diyor. -->
+    <div class="suz alt">
+      <span class="suz-et">Sayfa tipi</span>
+      <button :class="{ akt: tipSuzgec === 'hepsi' }" @click="tipSuzgec = 'hepsi'">
+        Hepsi <span class="rk">{{ veri.length }}</span>
+      </button>
+      <button
+        v-for="[tip, n2] in tipler"
+        :key="tip"
+        :class="{ akt: tipSuzgec === tip }"
+        @click="tipSuzgec = tip"
+      >
+        {{ PK[tip] }} <span class="rk">{{ n2 }}</span>
+      </button>
+    </div>
+
     <SeoTable
       :cols="cols"
       :rows="rows"
@@ -312,6 +362,20 @@ async function ac(id: string) {
   font-variant-numeric: tabular-nums;
   opacity: 0.75;
   font-size: 11px;
+}
+.suz.alt {
+  margin-bottom: 10px;
+  align-items: center;
+}
+.suz-et {
+  font-size: 11px;
+  color: var(--c-faint);
+  margin-right: 2px;
+}
+.suz.alt button {
+  height: 25px;
+  padding: 0 9px;
+  font-size: 11.5px;
 }
 .kova-not {
   font-size: 11.5px;
