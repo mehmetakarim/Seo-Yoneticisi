@@ -249,7 +249,13 @@ pub async fn analyze_opportunities(
             // kullanması bilinçli: aynı çekimden iki farklı soru cevaplanıyor.
             {
                 let conn = state.conn.lock().unwrap();
-                let _ = kaydet_query_rows(&conn, &qp);
+                // ⚠️ Hata YUTULMUYOR. Önceki sürümde `let _ =` vardı ve şema uyuşmazlığı
+                // yüzünden sorgu satırları sessizce hiç yazılmadı; sonuç, içerik üretiminin
+                // bağlamsız çalışması oldu ve kimse fark etmedi (kullanıcının makinesinde
+                // bulundu). Sessiz başarısızlık, gürültülü hatadan pahalı.
+                if let Err(e) = kaydet_query_rows(&conn, &qp) {
+                    eprintln!("sorgu satırları yazılamadı: {e}");
+                }
                 icerik = icerik_acigi(&conn, &qp, &product_index);
             }
             (

@@ -16,7 +16,8 @@ v0.17.1 = PDF açma, sütun hizası, satır geri alma ·
 v0.17.2 = ödünç alınmış alan: slug/SKU karışıklığı (0b5) ·
 v0.18.0 = Faz G: model zinciri ayarlara + Gemini kullanım sayacı (0b7) ·
 v0.19.0 = Faz İ: içerik açığı + mağaza sayfası iyileştirme (0b8, 0b9, 0c0) ·
-**v0.19.1 = içerik gönderimlerinin sonucu ölçülebilir oldu (0c1)**
+v0.19.1 = içerik gönderimlerinin sonucu ölçülebilir oldu (0c1) ·
+**v0.19.2 = sessiz şema uyuşmazlığı: sorgu satırları hiç yazılmıyordu (0c2)**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -46,7 +47,7 @@ v0.14.0 = Faz D: EOL karar deposu + 301 CSV + ürün sağlık skoru ·
 
 **Yapı (2026-07-28'den beri workspace):**
 `src-tauri/Cargo.toml` hem paket hem workspace kökü → `src-tauri/core/` (saf mantık, Tauri'ye
-bağımlı DEĞİL, **239 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
+bağımlı DEĞİL, **241 test** + 32 canlı `--ignored`) + `src-tauri/src/` (ince Tauri katmanı,
 **46 test**; `commands/` 11 dosyaya bölünmüş durumda).
 İş döngüsü: `cargo test -p seo-core` ≈ 60 sn soğuk / 17 sn sıcak — Tauri hiç derlenmiyor.
 
@@ -1614,6 +1615,35 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    ⚠️ İçerik maddesi (`ItemRef::Query`) ile gönderim kimliği (`ItemRef::Page`) **bilerek
    eşleşmiyor**: bir sayfaya metin göndermek o sayfayla sıralanan HER sorguyu çözmez.
    İçerik maddesinin susması "Yapıldı" işaretiyle oluyor.
+
+0c2. 🔴 **SESSİZ ŞEMA UYUŞMAZLIĞI — sorgu satırları hiç yazılmamış (v0.19.2, 2026-08-13).**
+
+   Kullanıcı "diğer üç sayfayı da gönderelim" dedi. Göndermeden önce üretimin bağlamını
+   ölçtüm ve üç sayfada da **0 sorgu** çıktı. Sebep aranınca:
+
+   `query_rows` kullanıcının makinesinde **ilk tasarımdaki `snapshot_id` şemasıyla** duruyor.
+   Tabloyu sonradan `captured_at`/`window_days` ile yeniden tanımladım ama
+   `CREATE TABLE IF NOT EXISTS` var olan tabloyu **değiştirmez**. Sonuç zinciri:
+   INSERT hazırlanamıyor → `kaydet_query_rows` hata dönüyor → çağrı `let _ =` ile
+   yazılmış → **hata yutuluyor** → sorgu satırları hiç yazılmıyor → içerik üretimi
+   bağlamsız çalışıyor → kimse fark etmiyor.
+
+   🔴 **Bu tuzağa ÜÇÜNCÜ kez düşüldü** (`queue_dismissals`, `store_pages`, `query_rows`) ve
+   iki kezinde uyarıyı kendi elimle koda yazmıştım. Uyarı yazmak, tuzaktan korumuyor.
+   Kalıcı çözüm: `refresh_schema` — `init`'in EN BAŞINDA, yeniden tanımlanmış atılabilir
+   tabloyu düşürüyor. ⚠️ Yalnızca **atılabilir** tablolar için: `query_rows` tasarımı gereği
+   son çekimi tutuyor. Kalıcı veri taşıyan tabloda `ALTER TABLE` yolu geçerli (`migrate`).
+
+   **İkinci ders, birincisinden önemli: `let _ =` bir karar, ihmal değil.** Sayaç yazımında
+   bilinçli kullanılmıştı ("kayıt başarısız olursa üretim düşmesin" — 0b7) ve orada doğru.
+   Burada yanlıştı: veri yolunun kendisi sessizce koptu. Artık hata `eprintln!` ile yüzeye
+   çıkıyor.
+
+   **Yan bulgu — pilotun bağlamı zayıfmış.** Access Point metni 11 gerçek ürünle ama
+   **sorgu bağlamı olmadan** üretilmiş. Ayrıca ölçüldü: *Güvenlik Duvarı (Firewall)* ve
+   *Video Konferans Ürünleri* kategorilerinde katalogda **hiç ürün yok** — XML feed 283 ürün
+   taşıyor ve o kategoriler feed'de değil. Yani o iki sayfa için üretim yalnızca sayfa adı +
+   sorgulara dayanacak. *Stand Ve Dock Station*'da 13 ürün var.
 
 0c. ✅ **FIRSAT ANALİZİ + SÜRÜM NOTLARI (v0.5.6).**
 

@@ -13,6 +13,11 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.19.2
+- Düzeltme: **arama verisi kaydedilmiyordu.** Analiz sorguları çekiyor ama veritabanına yazamıyordu ve hata görünmüyordu; sonuç olarak sayfa metni üretimi o sayfanın gerçek aramalarını görmeden çalışıyordu
+- Güncellemeden sonra **Fırsatlar ekranından analizi bir kez çalıştırın** — sorgu verisi o zaman dolacak ve üretilen metinler belirgin biçimde daha isabetli olacak
+- Bundan sonra benzer bir kayıt sorunu olursa **sessiz kalmıyor**
+
 ## v0.19.1
 - Düzeltme: kategori/marka/blog sayfalarına gönderdiğiniz metinlerin **sonucu ölçülmüyordu**. Gönderim kaydediliyordu ama Sonuç kontrolü listesine hiç düşmüyor, sonuç rozeti hiç çıkmıyordu
 - İçerik açığı listesine **Sonuç** sütunu eklendi: bir sayfaya metin gönderdiyseniz 28 gün sonra ne olduğunu orada görüyorsunuz

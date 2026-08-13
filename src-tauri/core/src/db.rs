@@ -8,6 +8,14 @@ pub fn open(path: &std::path::Path) -> Result<Connection, String> {
 }
 
 pub fn init(conn: &Connection) -> Result<(), String> {
+    // 🔴 Şema tazeleme, tablolar KURULMADAN önce. `CREATE TABLE IF NOT EXISTS` var olan bir
+    // tabloya sütun EKLEMEZ; yeniden tanımlanan bir tablo eski kurulumlarda eski şemayla
+    // kalır. Bu tuzağa bu projede üç kez düşüldü (`queue_dismissals`, `store_pages` ve
+    // `query_rows`) — üçüncüsü kullanıcının makinesinde bulundu: `query_rows` ilk
+    // tasarımdaki `snapshot_id` şemasıyla duruyordu, yeni INSERT hazırlanamıyordu ve hata
+    // `let _ =` ile yutulduğu için **sorgu satırları sessizce hiç yazılmıyordu.**
+    refresh_schema(conn);
+
     conn.execute_batch(
         r#"
         PRAGMA foreign_keys = ON;
@@ -423,6 +431,24 @@ pub fn init(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+/// Yeniden tanımlanmış tabloları düşürür ki `init` doğru şemayla kursun.
+///
+/// ⚠️ Yalnızca **atılabilir** tablolar için: `query_rows` tasarımı gereği son çekimi tutuyor
+/// ve her analizde yeniden yazılıyor, yani düşürmek veri kaybı değil. Kalıcı veri taşıyan
+/// bir tabloya bu uygulanamaz — orada `ALTER TABLE` ile sütun eklenir (bkz. `migrate`).
+fn refresh_schema(conn: &Connection) {
+    let sutun_var = |tablo: &str, sutun: &str| -> bool {
+        conn.prepare(&format!("SELECT {sutun} FROM {tablo} LIMIT 0")).is_ok()
+    };
+    // Tablo var ama yeni sütun yoksa → eski tasarım, düşür.
+    let tablo_var = conn
+        .prepare("SELECT 1 FROM query_rows LIMIT 0")
+        .is_ok();
+    if tablo_var && !sutun_var("query_rows", "captured_at") {
+        let _ = conn.execute("DROP TABLE query_rows", []);
+    }
+}
+
 /// Eski DB'lere sonradan eklenen kolonları idempotent şekilde ekler.
 fn migrate(conn: &Connection) -> Result<(), String> {
     // 🔴 Onarım (2026-08-13): `store_page_push` olaylarına `url` olarak **slug** yazılmıştı
@@ -702,6 +728,55 @@ mod tests {
         let conn = fresh();
         set_setting(&conn, "feed_url", "   ").unwrap();
         assert!(needs_setup(&conn).unwrap());
+    }
+
+    /// 🔴 Yeniden tanımlanan tablo eski kurulumda eski şemayla kalıyor.
+    ///
+    /// Kullanıcının makinesinde bulundu (2026-08-13): `query_rows` ilk tasarımdaki
+    /// `snapshot_id` şemasıyla duruyordu, yeni INSERT hazırlanamıyordu ve hata yutulduğu
+    /// için **sorgu satırları sessizce hiç yazılmadı** — içerik üretimi bağlamsız çalıştı.
+    #[test]
+    fn eski_query_rows_semasi_tazeleniyor() {
+        let conn = Connection::open_in_memory().unwrap();
+        // v0.19.0'ın ilk tasarımı: `snapshot_id`, `captured_at` YOK.
+        conn.execute_batch(
+            "CREATE TABLE query_rows (
+               snapshot_id INTEGER NOT NULL, page TEXT NOT NULL, query TEXT NOT NULL,
+               clicks REAL, impressions REAL, position REAL,
+               PRIMARY KEY (snapshot_id, page, query));",
+        )
+        .unwrap();
+        assert!(
+            conn.prepare("SELECT captured_at FROM query_rows LIMIT 0").is_err(),
+            "başlangıçta eski şema olmalı"
+        );
+
+        init(&conn).unwrap();
+
+        // Yeni şema kurulmuş ve YAZILABİLİR olmalı — asıl sınav bu, sütunun varlığı değil.
+        conn.execute(
+            "INSERT INTO query_rows (captured_at, window_days, page, query, clicks, impressions, position)
+             VALUES ('2026-08-13T10:00', 90, 'https://m.com/kategori/x', 'firewall', 3, 400, 6.1)",
+            [],
+        )
+        .expect("yeni şemaya yazılabilmeli");
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM query_rows", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    /// Doğru şemadaki tablo düşürülmemeli — göç idempotent ve veriyi boşuna atmamalı.
+    #[test]
+    fn dogru_semadaki_tablo_korunuyor() {
+        let conn = fresh();
+        conn.execute(
+            "INSERT INTO query_rows (captured_at, window_days, page, query, clicks, impressions, position)
+             VALUES ('2026-08-13T10:00', 90, 'p', 'q', 1, 10, 5.0)",
+            [],
+        )
+        .unwrap();
+        init(&conn).unwrap(); // ikinci kez
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM query_rows", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "doğru şemadaki satır düşürülmemeli");
     }
 
     /// 🔴 `store_page_push` olaylarındaki slug → tam adres onarımı.
