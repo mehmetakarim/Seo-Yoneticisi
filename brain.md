@@ -3,7 +3,7 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-08-14 (bakım kontrolü + sayfa tipi süzgeci — **yayınlanmadı**, 0c4)
+**Son güncelleme:** 2026-08-14 (v0.20.0 — bakım kontrolü + sayfa tipi süzgeci, 0c4)
 **Aktif faz:** **v0.17.0 yayında — yol haritasının SEKİZ fazı da bitti.** Sıra:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
@@ -19,7 +19,7 @@ v0.19.0 = Faz İ: içerik açığı + mağaza sayfası iyileştirme (0b8, 0b9, 0
 v0.19.1 = içerik gönderimlerinin sonucu ölçülebilir oldu (0c1) ·
 v0.19.2 = sessiz şema uyuşmazlığı: sorgu satırları hiç yazılmıyordu (0c2) ·
 **v0.19.3 = paragraflar sayfada birleşiyordu (0c3)** ·
-⏸️ *sürümsüz:* bakım kontrolü + sayfa tipi süzgeci (0c4)
+**v0.20.0 = bakım kontrolü + sayfa tipi süzgeci (0c4)**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -81,8 +81,9 @@ ekranları da olmalı."*
 - Bittiğinde İçerik açığı ekranındaki `edit` eylemi modal yerine bu ekrana gitmeli ve
   `StorePageModal.vue` kaldırılmalı — yoksa aynı iş iki yerde çizilir.
 
-**Yayın borcu:** 0c4'teki iki commit sürümsüz duruyor. Madde 4 ile birlikte tek sürüm
-çıkarmak mantıklı (⚠️ iki etiketi arka arkaya atma kuralı, "Yayın" bölümünde).
+✅ **Yayın borcu kapandı: v0.20.0** (2026-08-14, kullanıcı kararı — madde 4'ü beklemeden).
+⚠️ Madde 4 bitince yeni etiket atılacak; **iki etiketi arka arkaya atma** kuralı geçerli
+("Yayın" bölümünde, v0.8.1 bu yüzden kaybolmuştu).
 
 **Operatör işi — içerik pilotu (kullanıcıda).** Faz İ'nin makinesi hazır ve v0.19.1 ile
 sonucu **ölçülebilir** hâle geldi (0c1: v0.19.0'da ölçülemiyordu). Pilot fiilen başladı:
@@ -1697,8 +1698,8 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    çalışmıyor (mağazadaki HTML'i uygulama bilmiyor); o iki sayfa yeniden üretilip
    gönderilmeli.
 
-0c4. ✅ **BAKIM KONTROLÜ + SAYFA TİPİ SÜZGECİ (2026-08-14).** ⚠️ **Henüz yayınlanmadı** —
-   `main`'de iki commit (`2f3bfe1`, `75d6198`), sürüm numarası verilmedi, etiket yok.
+0c4. ✅ **BAKIM KONTROLÜ + SAYFA TİPİ SÜZGECİ (v0.20.0, 2026-08-14).**
+   Commit'ler `2f3bfe1` (süzgeç) ve `75d6198` (bakım kontrolü).
 
    Kullanıcı dört madde istedi (2026-08-13 akşamı). **1** bir rapordu (Access Point denemesi
    gönderildi), **2 ve 3 yapıldı**, **4 sıradaki iş** (aşağıda, "Kaldığımız yer"de).

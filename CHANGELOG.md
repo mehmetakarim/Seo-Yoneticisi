@@ -13,6 +13,14 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.20.0
+- Yeni: **açılışta bakım kontrolü.** Uygulama her açıldığında ürün feed'inizin, GSC analizinizin ve sayfa envanterinizin ne kadar taze olduğunu, yapay zekâ ve IdeaSoft bağlantılarınızın çalışıp çalışmadığını kendisi kontrol ediyor
+- Bayat ya da bozuk olan satırın yanında **düğmesi** var: senkronu, analizi ya da envanter çekmeyi oradan başlatıyorsunuz — dört ayrı ekranı gezmeye gerek yok
+- ⚠️ Kontrol ediliyor ama **kendiliğinden çalıştırılmıyor.** Analiz bir ölçüm işi; her açılışta koşsaydı ölçtüğünüz şeyi ölçüm aracı değiştirmiş olurdu. Düğmeye siz basıyorsunuz
+- Her şey güncelse panel **kendiliğinden kapanıyor**, sizi karşılayan bir engel olmuyor. Aynı liste Ayarlar'da **Bakım** kartında sürekli duruyor
+- IdeaSoft ya da GSC bağlamadıysanız bu bir hata olarak gösterilmiyor — kullanmadığınız bir şey için uyarı çıkmıyor
+- Yeni: İçerik açığı ekranında **sayfa tipi süzgeci.** Mevcut süzgecin altından Ana Sayfa · Blog · Marka · Kategori · Ürün ayrımı yapabiliyorsunuz; yalnızca listede gerçekten bulunan tipler görünüyor
+
 ## v0.19.3
 - Düzeltme: sayfaya gönderilen tanıtım metninin **paragrafları birleşiyordu** — iki paragraf sitede tek blok olarak görünüyor, bazen cümleler bitişik yazılıyordu
 - Metin artık paragraf paragraf gönderiliyor ve elle yazdığınız `<` gibi işaretler sayfa düzenini bozmuyor
