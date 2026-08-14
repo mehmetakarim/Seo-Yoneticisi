@@ -7,6 +7,10 @@
  *
  * Kroma (`.list-panel`, `.search`, `.filters`) `styles.css`ten geliyor — Ürünler ekranıyla
  * ortak. Kopyalanmadı: bu projede kopyalanan geometri üç kez saptı.
+ *
+ * ⚠️ Satırın ortak parçaları (`.row-name`, `.row-sub`, `.empty`, seçili satır) 2026-08-14'te
+ * oraya taşındı: kroma paylaşılmıştı ama satır kopyalanmıştı ve ölçünce ayrıştığı görüldü
+ * (ad ağırlığı 560 iken üründe 600'dü). Burada kalan `.row` çizgili düzen — bilinçli fark.
  */
 import { computed, onMounted, ref } from "vue";
 import { useStore } from "../../store";
@@ -226,31 +230,12 @@ function tarihMetni(c: { next_step_at: string | null }) {
 .row:hover {
   background: var(--c-hover);
 }
-.row.sel {
-  background: var(--accent-tint);
-}
 .row.ars {
   opacity: 0.55;
 }
 .row-main {
   flex: 1;
   min-width: 0;
-}
-.row-name {
-  font-size: 13.5px;
-  font-weight: 560;
-  color: var(--c-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.row-sub {
-  font-size: 11.5px;
-  color: var(--c-faint);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .ars-rozet {
   font-size: 10px;
@@ -271,12 +256,6 @@ function tarihMetni(c: { next_step_at: string | null }) {
 /* Zamanı gelmiş adım vurgulu: liste bu soruya göre dizili. */
 .adim.gecmis {
   color: var(--warn-text);
-}
-.empty {
-  padding: 44px 24px;
-  text-align: center;
-  color: var(--c-faint);
-  font-size: 13px;
 }
 .e-alt {
   margin: 8px auto 0;

@@ -5,6 +5,9 @@ import { subOf, titleOf, TOOL_PAGES, type Page } from "./navigation";
 import Sidebar from "./components/Sidebar.vue";
 import ProductsPage from "./components/ProductsPage.vue";
 import ContactsPage from "./components/contacts/ContactsPage.vue";
+// Faz İ2: kategori · marka · içerik ekranlarının ÜÇÜ de bu bileşen. Kayıt üç satır,
+// bileşen bir tane — üç kopya ekran bu projede beş kez sapmış bir desendi.
+import CatalogPage from "./components/catalog/CatalogPage.vue";
 import QuotesPage from "./components/quotes/QuotesPage.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 // SEO araçları: her analiz kendi ekranında (v0.7.0). Hepsi TEK `opportunity_json`
@@ -37,6 +40,9 @@ const pageRef = ref<{ focusSearch?: () => void } | null>(null);
 const PAGES: Record<Page, Component> = {
   today: TodayPage,
   products: ProductsPage,
+  categories: CatalogPage,
+  brands: CatalogPage,
+  blogs: CatalogPage,
   contacts: ContactsPage,
   quotes: QuotesPage,
   overview: OverviewPage,
@@ -164,7 +170,11 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
       <StartupCheck />
       <FocusSummaryModal />
 
-      <component :is="PAGES[store.page]" ref="pageRef" />
+      <!-- 🔴 `:key` ZORUNLU: üç katalog anahtarı AYNI bileşene çıkıyor ve anahtarsız
+           hâlde Vue örneği yeniden kurmaz — Marka'dan Kategori'ye geçince önceki seçim,
+           arama metni ve liste olduğu gibi kalırdı. Diğer ekranlar için de zararsız:
+           sayfa değişince zaten yeni bileşen kuruluyordu. -->
+      <component :is="PAGES[store.page]" :key="store.page" ref="pageRef" />
     </main>
 
     <div class="toasts">

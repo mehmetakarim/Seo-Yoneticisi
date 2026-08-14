@@ -237,6 +237,59 @@ def main():
          "draft_page_title": "", "draft_meta_description": "", "draft_target_keyword": "",
          "draft_showcase": "", "draft_model": "", "draft_at": "", "pushed_at": "",
          "queries": [], "impressions": 327.0, "clicks": 0.0},
+
+        # --- Faz İ2: katalog ekranları listeyi de çiziyor, fikstür liste ŞEKLİNİ taşımalı.
+        # Aşağıdaki satırlar kullanıcının veritabanından okundu (2026-08-14), uydurulmadı.
+        # ⚠️ Ölçülen dağılım korunuyor: markaların %20'si Google'da görünüyor, %72'sinin
+        # başlığı boş. Fikstür bunu yansıtmazsa liste ekranı gerçekte olduğundan düzenli
+        # görünür ve "hepsi sıfır gösterim" hâli hiç denenmemiş olur.
+        {"kind": "brand", "remote_id": 1665, "slug": "teamviewer", "name": "Teamviewer",
+         "page_title": "", "meta_description": "", "target_keyword": "TeamViewer",
+         "showcase_content": None,
+         "draft_page_title": "", "draft_meta_description": "", "draft_target_keyword": "",
+         "draft_showcase": "", "draft_model": "", "draft_at": "", "pushed_at": "",
+         "queries": ["teamviewer", "teamviewer indir", "teamviewer lisans"],
+         "impressions": 1361.0, "clicks": 24.0},
+        {"kind": "brand", "remote_id": 1475, "slug": "jabra", "name": "Jabra",
+         "page_title": "Jabra Ürünleri ve Fiyatları", "meta_description": "Jabra kulaklık ve konferans çözümleri.",
+         "target_keyword": "Jabra",
+         "showcase_content": "Jabra, kurumsal ses çözümlerinde uzmanlaşmış bir markadır.",
+         "draft_page_title": "", "draft_meta_description": "", "draft_target_keyword": "",
+         "draft_showcase": "", "draft_model": "", "draft_at": "", "pushed_at": "",
+         "queries": ["jabra kulaklık", "jabra evolve"],
+         "impressions": 1075.0, "clicks": 0.0},
+        # ⚠️ Gösterimi SIFIR olan marka: gerçekte 265 kaydın 211'i böyle. Liste bunları
+        # en alta atıyor ve gösterim rozeti hiç çizilmiyor — denenmesi gereken hâl bu.
+        {"kind": "brand", "remote_id": 1801, "slug": "vivotek", "name": "Vivotek",
+         "page_title": "", "meta_description": "", "target_keyword": "Vivotek",
+         "showcase_content": None,
+         "draft_page_title": "", "draft_meta_description": "", "draft_target_keyword": "",
+         "draft_showcase": "", "draft_model": "", "draft_at": "", "pushed_at": "",
+         "queries": [], "impressions": 0.0, "clicks": 0.0},
+
+        # 🔴 Blog: `showcase_content` alanı IdeaSoft blog uçlarında HİÇ YOK (None) ve
+        # ekran "bu tipte tanıtım metni alanı yok" diyor. Meta'sı zaten dolu — blog
+        # tarafında iş meta yazmak değil, ölçüldü: 250 kaydın 242'sinde başlık var.
+        {"kind": "blog", "remote_id": 225, "slug": "lenovo-bilgisayarlarda-bios-tusu",
+         "name": "Lenovo BIOS ve Boot Tuşu Hangisi?",
+         "page_title": "Lenovo BIOS ve Boot Tuşu Hangisi?",
+         "meta_description": "Lenovo bilgisayarlarda BIOS ve boot menüsüne hangi tuşla girilir.",
+         "target_keyword": "Lenovo BIOS ve Boot Tuşu Hangisi?", "showcase_content": None,
+         "draft_page_title": "", "draft_meta_description": "", "draft_target_keyword": "",
+         "draft_showcase": "", "draft_model": "", "draft_at": "", "pushed_at": "",
+         "queries": ["lenovo bios tuşu", "lenovo boot menü", "lenovo bios nasıl girilir"],
+         "impressions": 25759.0, "clicks": 105.0},
+        # Taslağı olan kayıt: liste rozeti ve "yeniden üret" hâli denenebilsin.
+        {"kind": "blog", "remote_id": 182, "slug": "ssd-nedir", "name": "SSD Nedir?",
+         "page_title": "SSD Nedir?", "meta_description": "",
+         "target_keyword": "SSD Nedir?", "showcase_content": None,
+         "draft_page_title": "SSD Nedir? Türleri, Hızları ve Seçim Rehberi",
+         "draft_meta_description": "SSD nedir, hangi türleri var ve iş bilgisayarınız için "
+                                   "hangisini seçmelisiniz? SATA, NVMe ve M.2 farkları.",
+         "draft_target_keyword": "ssd nedir", "draft_showcase": "",
+         "draft_model": "gemini-2.5-flash", "draft_at": "2026-08-14T09:12:00", "pushed_at": "",
+         "queries": ["ssd nedir", "ssd ne işe yarar", "nvme ssd farkı"],
+         "impressions": 951.0, "clicks": 1.0},
     ]
 
     # ===== İçerik açığı (Faz İ) =====
@@ -664,8 +717,17 @@ def main():
         # (2026-08-12 canlı okuma): pageTitle · metaDescription · targetKeyword ·
         # showcaseContent. Kategori örneği bilerek "üst metin YOK" hâlinde — ölçülen
         # gerçek durum bu (görünen 47 kategorinin 26'sında boş).
+        # `?sayfayok=1` → envanter hiç çekilmemiş: liste boş durumu denenebilsin.
+        # ⚠️ Bu kanca GENEL işleyicide, `?setup=1` bloğunun İÇİNDE değil — o tuzağa
+        # bu projede iki kez düşüldü ve stub sessizce hiç çalışmadı.
         "    if (cmd === 'list_store_pages')\n"
-        "      return Promise.resolve((window.__SP__ || []).filter(p => p.kind === args.kind));\n"
+        "      return Promise.resolve(new URLSearchParams(location.search).has('sayfayok')\n"
+        # ⚠️ Sıralama BURADA da yapılıyor: arka uç gösterime göre sıralıyor
+        # (`list_store_pages`). Stub fikstür sırasını döndürseydi ekran gerçekte
+        # olmadığı gibi görünürdü — ilk denemede tam bu oldu, QPORT (327) en üstte
+        # Teamviewer'ın (1.361) üzerinde çıktı.
+        "        ? [] : (window.__SP__ || []).filter(p => p.kind === args.kind)\n"
+        "            .slice().sort((a, b) => b.impressions - a.impressions));\n"
         "    if (cmd === 'get_store_page')\n"
         "      return Promise.resolve((window.__SP__ || []).find(\n"
         "        p => p.kind === args.kind && p.remote_id === args.id));\n"

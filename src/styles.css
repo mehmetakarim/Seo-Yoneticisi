@@ -456,3 +456,53 @@ textarea, input, button { font-family: inherit; }
   background: rgba(255, 255, 255, 0.22);
   color: #fff;
 }
+
+/* ---------------------------------------------------------------------------
+   Liste SATIRININ ortak parçaları — Ürünler · Kişiler · Katalog ekranları.
+
+   🔴 Buraya taşınma sebebi ölçüldü (2026-08-14), varsayılmadı: krom paylaşılmıştı ama
+   satırın kendisi kopyalanmıştı ve iki ekran arasında şimdiden ayrışmıştı —
+   ad ağırlığı 600/560 · boş ekran dolgusu 60px/44px · seçili satır birinde çerçeveli
+   diğerinde değil. Üçüncü liste ekranı yazılmadan toplandı; kopyalasaydık beş olurdu.
+
+   ⚠️ `.row` geometrisi BİLEREK dışarıda: ürün satırı görselli yuvarlak kart, kişi ve
+   katalog satırı çizgiyle ayrılmış düz satır. Bu bir karar, sapma değil — o yüzden
+   birleştirilmiyor.
+
+   ⚠️ Hepsi `.list-panel` altında: `.row` ve `.empty` uygulamada sekiz bileşende daha
+   geçiyor (teknik tablo, sihirbaz, teklif satırı…) ve global bir kural onlara sızardı.
+   --------------------------------------------------------------------------- */
+.list-panel .row-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--c-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+}
+/* İkinci satır: SKU, firma, slug — hepsi aynı rolde (ana adı tanımlayan kimlik). */
+.list-panel .row-sub,
+.list-panel .row-sku {
+  font-size: 11.5px;
+  color: var(--c-faint);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Seçili satır: tint + iç çerçeve. Çerçeve gerekli — koyu temada tint tek başına zayıf
+   kalıyor ve "hangi satırdayım" sorusu ekrana bakarak cevaplanamıyor. */
+.list-panel .row.sel,
+.list-panel .row.sel:hover {
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+/* ⚠️ Dolgu 44px (60 değil): panel 300–392px genişliğinde ve üstünde arama + süzgeç şeridi
+   var; 60px boş satırı görünür alanın dışına itiyordu. */
+.list-panel .empty {
+  padding: 44px 24px;
+  text-align: center;
+  color: var(--c-faint);
+  font-size: 13px;
+}

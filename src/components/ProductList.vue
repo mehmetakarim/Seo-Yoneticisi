@@ -127,7 +127,10 @@ function okBadge(b: string) {
 
 <style scoped>
 /* ⚠️ Liste kroması (.list-panel/.search/.filters) `styles.css`e taşındı —
-   Faz C'de kişi listesi de aynısını kullanıyor, iki kopya zamanla saparadı. */
+   Faz C'de kişi listesi de aynısını kullanıyor, iki kopya zamanla saparadı.
+   ⚠️ Satırın ortak parçaları da (.row-name/.row-sku/.empty/.row.sel) oraya taşındı:
+   ölçüldü, buradaki kopyalar kişi listesindekilerden çoktan ayrışmıştı (2026-08-14).
+   Burada kalan `.row`: ürün satırı görselli yuvarlak kart — bilinçli olarak farklı. */
 .rows {
   flex: 1;
   overflow-y: auto;
@@ -145,13 +148,6 @@ function okBadge(b: string) {
 }
 .row:hover {
   background: var(--c-hover);
-}
-.row.sel {
-  background: var(--accent-tint);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-.row.sel:hover {
-  background: var(--accent-tint);
 }
 .thumb {
   width: 42px;
@@ -176,20 +172,6 @@ function okBadge(b: string) {
 .row-main {
   flex: 1;
   min-width: 0;
-}
-.row-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--c-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: -0.01em;
-}
-.row-sku {
-  font-size: 11.5px;
-  color: var(--c-faint);
-  margin-top: 2px;
 }
 .pill {
   flex: none;
@@ -262,12 +244,6 @@ function okBadge(b: string) {
   height: 7px;
   border-radius: 50%;
   border: 1.6px solid currentColor;
-}
-.empty {
-  text-align: center;
-  padding: 60px 24px;
-  color: var(--c-faint);
-  font-size: 13px;
 }
 .shortcuts {
   flex: none;

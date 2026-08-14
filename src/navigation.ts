@@ -49,6 +49,38 @@ export const NAV = [
 
   { key: "products", label: "Ürünler", icon: "box", title: "Ürünler", group: "Katalog" },
 
+  // Faz İ2: ürün-dışı sayfalar da kataloğun parçası. Üçü de AYNI bileşenle çiziliyor
+  // (`CatalogPage`), yalnızca anahtar değişiyor — üç kopya ekran yazmanın sonucu bu
+  // projede beş kez ölçüldü: kopyalanan geometri sapıyor.
+  // ⚠️ Sıra hacme göre değil, iş çıkarma sırasına göre: kategori az ve etkisi büyük,
+  // marka çok ama %20'si Google'da görünüyor, blog en dolu ama meta'sı zaten yazılı.
+  {
+    key: "categories",
+    label: "Kategoriler",
+    icon: "gitBranch",
+    title: "Kategoriler",
+    sub: "Kategori sayfalarının başlık, açıklama ve tanıtım metni",
+    group: "Katalog",
+  },
+  {
+    key: "brands",
+    label: "Markalar",
+    icon: "tag",
+    title: "Markalar",
+    sub: "Marka sayfalarının başlık, açıklama ve tanıtım metni",
+    group: "Katalog",
+  },
+  {
+    key: "blogs",
+    // ⚠️ "Blog" değil "İçerikler": IdeaSoft'ta kayıt tipi blog ama kullanıcı için bunlar
+    // tek tek yazılar. Panelde de "İçerik" deniyor (`TIP_AD`), iki ad kullanmıyoruz.
+    label: "İçerikler",
+    icon: "type",
+    title: "İçerikler",
+    sub: "Blog yazılarının başlık ve açıklaması — tanıtım metni alanı blogda yok",
+    group: "Katalog",
+  },
+
   // Katalog'dan HEMEN SONRA: ne sattığınız → kime sattığınız. Site vitrin, asıl satış
   // mail/telefon üzerinden yürüyor ve o taraf bugüne kadar uygulamanın dışındaydı.
   {

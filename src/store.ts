@@ -29,10 +29,21 @@ import type {
   ContactProduct,
   Quote,
   QuoteSummary,
+  StorePageDetail,
 } from "./types";
 import type { Page } from "./navigation";
+import { PAGE_BY_KIND } from "./catalog";
 
 type Theme = "light" | "dark";
+
+/**
+ * Katalog listesi süzgeci.
+ *
+ * ⚠️ "görünen" ölçülmüş bir ayrım, kozmetik değil: markaların yalnızca %20'si Google'da
+ * görünüyor (ölçüldü 2026-08-14, 265 kayıttan 54). Görünmeyen bir sayfanın meta'sını
+ * düzeltmek ölçülebilir sonuç üretmiyor — süzgeç bu farkı görünür kılıyor.
+ */
+export type StorePageFilter = "hepsi" | "eksik" | "gorunen" | "taslak";
 
 interface Toast {
   id: number;
@@ -150,6 +161,20 @@ interface State {
   quote: Quote | null;
   /** Kazanma/kaybetme özeti — kayıp nedenleri raporlanabilsin diye (fazın bitiş şartı). */
   quoteSummary: QuoteSummary | null;
+  /* --- Faz İ2: katalog sayfaları (kategori · marka · içerik) ---
+     ⚠️ Tip başına AYRI durum tutulmuyor: ekran `:key` ile yeniden kuruluyor ve açılışta
+     kendi listesini yüklüyor. Üç kopya durum, üç kopya sıfırlama hatası demekti.
+     ⚠️ Ad öneki `storePage` — `catalogBusy` YUKARIDA başka bir şey (EOL halef araması).
+     Aynı adı ikinci bir anlamda kullanmak derleyiciyi de yanılttı (çakışma yakalandı). */
+  storePages: StorePageDetail[];
+  storePagesBusy: boolean;
+  storePageSearch: string;
+  storePageFilter: StorePageFilter;
+  /** Seçili sayfanın tam kaydı; seçim kimliği bunun `remote_id`'si. */
+  storePage: StorePageDetail | null;
+  /** İçerik açığından gelindiğinde açılacak sayfa — ekran kurulunca tüketiliyor. */
+  storePagePending: { kind: string; id: number } | null;
+
   /** Ölçüm omurgası (Faz Ö) — sonuç özeti ve satır rozetleri. */
   outcomeSummary: OutcomeSummary | null;
   outcomeBadges: Record<string, OutcomeBadge>;
@@ -239,6 +264,13 @@ export const useStore = defineStore("app", {
     sessionCanStart: false,
     eolDecisions: {},
     redirectPicking: "",
+    storePages: [],
+    storePagesBusy: false,
+    storePageSearch: "",
+    storePageFilter: "hepsi",
+    storePage: null,
+    storePagePending: null,
+
     outcomeSummary: null,
     outcomeBadges: {},
     seedBusy: false,
@@ -1221,6 +1253,64 @@ export const useStore = defineStore("app", {
       }
       this.focus = { page, id };
       this.page = page as Page;
+    },
+
+    // --- Faz İ2: katalog sayfaları (kategori · marka · içerik) ---
+
+    /**
+     * Bir tipin tüm sayfalarını yükler. Sıralama arka uçta, **gösterime göre**.
+     *
+     * ⚠️ Seçim korunuyor ama tazeleniyor: gönderim sonrası liste yeniden yüklendiğinde
+     * seçili satır kaybolursa operatör yerini kaybeder.
+     */
+    async loadStorePages(kind: string) {
+      this.storePagesBusy = true;
+      try {
+        this.storePages = await api.listStorePages(kind);
+        const secili = this.storePage?.remote_id;
+        if (secili != null) {
+          this.storePage =
+            this.storePages.find((r) => r.remote_id === secili) ?? null;
+        }
+      } catch (e) {
+        this.toast(String(e), "error");
+      } finally {
+        this.storePagesBusy = false;
+      }
+    },
+
+    /**
+     * Satır seçimi. Listedeki kayıt zaten tam `StorePageDetail` — yeniden çekmiyoruz.
+     *
+     * ⚠️ Liste satırı ile detay AYNI nesne olmalı: ayrı kopya tutulsaydı taslak
+     * kaydedildikten sonra listedeki rozet eski hâlde kalırdı.
+     */
+    selectStorePage(id: number) {
+      this.storePage = this.storePages.find((r) => r.remote_id === id) ?? null;
+    },
+
+    /** Detay tazelendi (üretim/kayıt/gönderim) → listedeki satırı da yerinde güncelle. */
+    patchStorePage(d: StorePageDetail) {
+      this.storePage = d;
+      const i = this.storePages.findIndex((r) => r.remote_id === d.remote_id);
+      if (i >= 0) this.storePages[i] = d;
+    },
+
+    /**
+     * Başka bir ekrandan bir katalog sayfasına gider (İçerik açığı → "düzenle").
+     *
+     * ⚠️ Seçim doğrudan yapılamıyor: hedef ekran henüz kurulmadı ve listesi boş.
+     * `storePagePending` bırakılıyor, ekran kurulunca tüketiyor — kuyruk maddelerindeki
+     * `focus` mekanizmasının aynısı.
+     */
+    openStorePage(kind: string, id: number) {
+      const hedef = PAGE_BY_KIND[kind];
+      if (!hedef) return;
+      this.storePagePending = { kind, id };
+      this.storePage = null;
+      this.storePageSearch = "";
+      this.storePageFilter = "hepsi";
+      this.page = hedef;
     },
 
     // --- Teklif (Faz T) ---

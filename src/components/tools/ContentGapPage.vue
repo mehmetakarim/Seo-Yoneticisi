@@ -20,7 +20,6 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../../store";
 import ToolShell from "./ToolShell.vue";
 import SeoTable, { type TableCol, type TableRow } from "./SeoTable.vue";
-import StorePageModal from "./StorePageModal.vue";
 import type { ContentGap, GapKind, PageKind, StorePageDetail } from "../../types";
 
 const store = useStore();
@@ -163,14 +162,11 @@ const rows = computed<TableRow[]>(() =>
   })),
 );
 
-// ===== Sayfa iyileştirme paneli =====
+// ===== Sayfa iyileştirmeye yönlendirme =====
 // Envanterden slug → (tip, id) eşlemesi: satırdaki adresin hangi mağaza kaydı olduğunu
-// bilmeden panel açılamaz. ⚠️ Envanter çekilmemişse eşleme boş kalır ve satırda yalnızca
-// "aç" eylemi görünür — panel açıp boş ekran göstermektense eylemi hiç sunmamak doğru.
+// bilmeden düzenleme ekranı açılamaz. ⚠️ Envanter çekilmemişse eşleme boş kalır ve satırda
+// yalnızca "aç" eylemi görünür — boş bir ekrana göndermektense eylemi hiç sunmamak doğru.
 const envanter = ref<Map<string, StorePageDetail>>(new Map());
-const panelAcik = ref(false);
-const panelTip = ref("");
-const panelId = ref<number | null>(null);
 
 async function envanteriYukle() {
   const m = new Map<string, StorePageDetail>();
@@ -200,20 +196,18 @@ function kayitOf(g: ContentGap): StorePageDetail | undefined {
   return envanter.value.get(sonParca(g.page));
 }
 
+/**
+ * "Düzenle" → sayfanın KENDİ ekranı (Faz İ2).
+ *
+ * ⚠️ Eskiden burada modal açılıyordu. Kullanıcı kararı (2026-08-13): kategori/marka/blog
+ * da ürün gibi kendi ekranına gitsin — aynı iş iki farklı ağırlıkta sunulmasın. Modal
+ * kaldırıldı; iki yerde çizilen aynı panel zamanla ayrışırdı.
+ */
 function iyilestir(id: string) {
   const g = veri.value.find((x) => x.query + x.page === id);
   const k = g && kayitOf(g);
   if (!k) return;
-  panelTip.value = k.kind;
-  panelId.value = k.remote_id;
-  panelAcik.value = true;
-}
-
-async function panelKapandi() {
-  panelAcik.value = false;
-  // Gönderim yapıldıysa envanterdeki meta değişti ve yeni bir olay yazıldı.
-  await envanteriYukle();
-  await store.loadOutcomes();
+  store.openStorePage(k.kind, k.remote_id);
 }
 
 const toplamKacan = computed(() =>
@@ -285,13 +279,6 @@ async function ac(id: string) {
       :rows="rows"
       :focus-id="focusId"
       @action="(p) => (p.key === 'edit' ? iyilestir(p.id) : ac(p.id))"
-    />
-
-    <StorePageModal
-      :open="panelAcik"
-      :kind="panelTip"
-      :page-id="panelId"
-      @close="panelKapandi"
     />
 
     <button v-if="suzulmus.length > limit" class="more" @click="limit += 30">
