@@ -13,6 +13,15 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.21.0
+- Yeni: **Kategoriler · Markalar · İçerikler** ekranları. Katalog grubunda, Ürünler'in altında: kategori, marka ve blog sayfalarınız artık ürünler gibi kendi ekranlarında listeleniyor ve düzenleniyor
+- Liste **Google'da en çok görünen sayfa üstte** olacak şekilde sıralı. Görünmeyen bir sayfanın başlığını düzeltmek ölçülebilir sonuç üretmiyor — üstteki satırlar iş çıkaracak olanlar
+- Süzgeçler: eksik alanı olanlar · Google'da görünenler · taslağı hazır olanlar. Her satırda gösterim sayısı ve durum rozeti var
+- İçerik açığı ekranındaki **"Sayfayı iyileştir"** artık pencere açmıyor: ilgili ekrana götürüp o sayfayı seçiyor
+- ⚠️ Blog yazılarında **tanıtım metni alanı yok** (IdeaSoft'ta bulunmuyor); ekran bunu söylüyor ve yalnızca başlık ile açıklama gönderiliyor. Yazının gövdesi IdeaSoft panelinden düzenlenir
+- ⚠️ Bu sürüm var olan sayfaları **iyileştiriyor**; yeni kategori/marka/yazı oluşturma henüz yok
+- Düzeltme: liste satırlarının görünümü Ürünler ve Kişiler ekranları arasında ayrışmıştı — seçili satır birinde çerçeveliyken diğerinde değildi, adlar farklı kalınlıktaydı. Üç ekranda da aynı oldu
+
 ## v0.20.0
 - Yeni: **açılışta bakım kontrolü.** Uygulama her açıldığında ürün feed'inizin, GSC analizinizin ve sayfa envanterinizin ne kadar taze olduğunu, yapay zekâ ve IdeaSoft bağlantılarınızın çalışıp çalışmadığını kendisi kontrol ediyor
 - Bayat ya da bozuk olan satırın yanında **düğmesi** var: senkronu, analizi ya da envanter çekmeyi oradan başlatıyorsunuz — dört ayrı ekranı gezmeye gerek yok

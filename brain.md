@@ -3,7 +3,7 @@
 > Bu dosya projenin kalıcı hafızasıdır. Oturum (session) değişse bile buraya bakarak
 > nerede kaldığımızı anlar ve devam ederiz. **Her anlamlı ilerlemede güncelle.**
 
-**Son güncelleme:** 2026-08-14 (v0.20.0 — bakım kontrolü + sayfa tipi süzgeci, 0c4)
+**Son güncelleme:** 2026-08-14 (v0.21.0 — Faz İ2: katalog ekranları, 0c5)
 **Aktif faz:** **v0.17.0 yayında — yol haritasının SEKİZ fazı da bitti.** Sıra:
 **B** (ortak tablo, v0.9.0) · **Ö** (ölçüm omurgası, v0.10.0) · **A** (asistan bağlam seçimi,
 v0.11.0) · **K** (Bugün + iş kuyruğu, v0.12.0) · **S** (odak seansı, v0.13.0) ·
@@ -19,7 +19,8 @@ v0.19.0 = Faz İ: içerik açığı + mağaza sayfası iyileştirme (0b8, 0b9, 0
 v0.19.1 = içerik gönderimlerinin sonucu ölçülebilir oldu (0c1) ·
 v0.19.2 = sessiz şema uyuşmazlığı: sorgu satırları hiç yazılmıyordu (0c2) ·
 **v0.19.3 = paragraflar sayfada birleşiyordu (0c3)** ·
-**v0.20.0 = bakım kontrolü + sayfa tipi süzgeci (0c4)**
+v0.20.0 = bakım kontrolü + sayfa tipi süzgeci (0c4) ·
+**v0.21.0 = Faz İ2: Marka · Kategori · İçerik ekranları (0c5)**
 **Yön ve fazlar `yol-haritasi.md`'de** (2026-08-07). Burası **ne olduğunun** kaydı,
 orası **nereye gittiğimizin**. ⚠️ Faz tanımları burada ÇOĞALTILMAZ; ölçüm sonuçları da yol
 haritasına yazılmaz — aynı bilgi iki yerde durursa zamanla ayrışır.
@@ -66,24 +67,18 @@ aktarımlarından çıkan ölçümle doğdu (0b8): uygulama ürün dışı 5.700
 gösterimi hiç görmüyordu.
 Ara yayınlar: v0.14.1 kuyruk uçuş süzgeci · v0.17.1 PDF/hiza/geri alma · v0.17.2 slug-SKU.
 
-🔴 **SIRADAKİ İŞ — MADDE 4: Marka / Kategori / İçerik ekranları (başlanmadı).**
-Kullanıcının 2026-08-13 tarihli dört maddesinin sonuncusu; 1 rapordu, 2 ve 3 bitti (0c4).
-İstenen: *"Marka, Kategori, Blog sorguları için modal açmak yerine … kendi ekranlarına
-göndermek. Yani Katalog grubunun altına ürünler ekranı olduğu gibi marka, kategori, blog
-ekranları da olmalı."*
-- **Kapsam kararı (kullanıcı, 2026-08-13):** önce **listeleme + iyileştirme**, **oluşturma
-  (POST) sonra.** ⚠️ IdeaSoft'ta POST hiç test edilmedi; GET/PUT doğrulandı (0c0).
-- **Tasarım niyeti:** üç ayrı ekran **yazılmayacak** — tek bileşen, `kind`'a göre
-  parametreli, navigasyona üç kayıt. Gerekçe kopya sapması (bu projede beş kez yaşandı).
-  Ürünler ekranının deseni (sol liste + sağ detay) korunmalı.
-- **Hazır olan:** `list_store_pages` + `get_store_page` komutları ve `StorePageDetail`
-  tipi zaten var (Faz İ), doğrudan kullanılabilir. Sıralama gösterime göre.
-- Bittiğinde İçerik açığı ekranındaki `edit` eylemi modal yerine bu ekrana gitmeli ve
-  `StorePageModal.vue` kaldırılmalı — yoksa aynı iş iki yerde çizilir.
+✅ **Kullanıcının 2026-08-13 tarihli DÖRT MADDESİ de kapandı.** 1 rapordu · 2 ve 3
+v0.20.0 (0c4) · 4 v0.21.0 (0c5, Faz İ2: katalog ekranları).
 
-✅ **Yayın borcu kapandı: v0.20.0** (2026-08-14, kullanıcı kararı — madde 4'ü beklemeden).
-⚠️ Madde 4 bitince yeni etiket atılacak; **iki etiketi arka arkaya atma** kuralı geçerli
-("Yayın" bölümünde, v0.8.1 bu yüzden kaybolmuştu).
+🔴 **SIRADAKİ KOD İŞİ — Faz İ2'nin ikinci yarısı: sayfa OLUŞTURMA (başlanmadı).**
+Kullanıcı kapsamı bilerek ikiye böldü: *"Önce listeleme+iyileştirme, oluşturma sonra."*
+- ⚠️ **IdeaSoft'ta POST hiç test edilmedi.** GET/PUT canlı doğrulandı (0c0), POST
+  edilmedi — ilk iş bir taslak kayıtla ucu denemek olmalı, ekran yazmak değil.
+- ⚠️ İçerik açığındaki **"sayfa yok" kovası** bugün kuyruğa girmiyor, çünkü eylemi yok
+  (0c0). Oluşturma gelirse o kova eylemli hâle gelir — kuyruk kararı da o zaman
+  yeniden bakılmalı.
+- Ölçülmüş talep: içerik açığında "sayfa yok" satırları var; kaçı gerçekten yeni sayfayı
+  hak ediyor, **ölçülmedi**. Oluşturma ekranından önce bu ölçülmeli.
 
 **Operatör işi — içerik pilotu (kullanıcıda).** Faz İ'nin makinesi hazır ve v0.19.1 ile
 sonucu **ölçülebilir** hâle geldi (0c1: v0.19.0'da ölçülemiyordu). Pilot fiilen başladı:
@@ -1697,6 +1692,53 @@ değişti ve ikisi de bu maddeyi çürütüyor.
    ⚠️ **Zaten gönderilmiş iki sayfa birleşik metinle duruyor.** Düzeltme geriye dönük
    çalışmıyor (mağazadaki HTML'i uygulama bilmiyor); o iki sayfa yeniden üretilip
    gönderilmeli.
+
+0c5. ✅ **FAZ İ2 — KATALOG EKRANLARI (v0.21.0, 2026-08-14).**
+   Kullanıcının dört maddesinin sonuncusu. Kapsam kararı: **önce listeleme + iyileştirme,
+   oluşturma sonra.** Katalog grubunda üç yeni ekran: Kategoriler · Markalar · İçerikler.
+
+   **Tek bileşen, üç kayıt.** `CatalogPage/List/Detail`; tip prop'la değil `store.page`den
+   çözülüyor, çünkü `App.vue` sayfaları `<component :is>` ile çiziyor ve prop geçirmiyor.
+   `StorePageModal` **kaldırıldı** — gövdesi `CatalogDetail`e taşındı; aynı panel iki yerde
+   çizilseydi biri saparadı. İçerik açığındaki "düzenle" artık ekrana yönlendiriyor.
+
+   🔴 **İnşadan ÖNCE ölçüldü ve iki şey yanlış çıktı** (kullanıcı "kontrol et, emin olalım"
+   dedi; iyi ki denmiş):
+
+   1. **Satır geometrisi ZATEN sapmıştı.** Krom (`.list-panel/.search/.filters`) Faz C'de
+      paylaşıma alınmıştı ama satırın kendisi kopyalanmıştı ve iki ekran ayrışmıştı:
+      `.row-name` ağırlığı üründe 600 / kişide 560 · `.empty` dolgusu 60px / 44px ·
+      `.row.sel` üründe iç çerçeveli, kişide değil (aynı uygulamada seçili satır iki
+      görünümde). Üçüncü ekranı kopyalasaydım beş kopya olurdu. Ortak parçalar
+      `styles.css`e alındı; `.row` geometrisi BİLEREK dışarıda (ürün görselli kart,
+      diğerleri çizgili satır) ve hepsi `.list-panel` altında — `.row`/`.empty` uygulamada
+      sekiz bileşende daha geçiyor, global kural onlara sızardı.
+      *Ders: "krom paylaşıldı" ile "satır paylaşıldı" aynı şey değil; ikincisi ölçülmeden
+      bilinmiyordu.*
+
+   2. 🔴 **`App.vue`da `:key` yoktu.** `<component :is="PAGES[store.page]">` — üç anahtar
+      aynı bileşene çıktığı için Vue örneği yeniden KURMAZ: Marka'dan Kategori'ye geçince
+      önceki seçim, arama metni ve liste olduğu gibi kalırdı. `:key="store.page"` eklendi,
+      harness'ta doğrulandı (geçişten sonra seçim 0, arama boş, doğru liste).
+
+   **Ölçülen veri, ekran kararlarını belirledi** (kullanıcının veritabanı, 2026-08-14):
+   kategori 56 kayıt / 33'ü görünen (%59) · marka 265 / 54 (%20), 190'ının başlığı boş ·
+   blog 250 / 110 (%44). Buradan üç karar: sıralama **gösterime göre** (görünmeyen sayfanın
+   meta'sını düzeltmek ölçülemez) · gösterim rozeti yalnızca görünenlerde (211 markada
+   "0 gösterim" yazmak asıl işi görünmez yapardı) · "Google'da görünen" ayrı süzgeç.
+   ⚠️ Blogda `target_keyword` DOLU görünüyor ama sahte: IdeaSoft alanı yazının başlığıyla
+   dolduruyor. "Tamam" sayılmamalı.
+   🔴 Blogda `showcase_content` alanı **hiç yok** — ekran boş kutu göstermek yerine nedenini
+   yazıyor; arka uç zaten `None` gönderiyor (uç 400 verebilir).
+
+   **Ölçülen maliyet:** `list_store_pages` 265 marka için **734 ms** (`query_rows` 5.243
+   satır, `page` sütununda indeks yok → satır başına LIKE taraması). Kabul edildi; tek
+   gruplu sorguyla düşürülebilir, gerekirse.
+
+   ⚠️ **Kendi harness'ımda taklit üretimden ayrıştı** (yine): stub listeyi sıralamıyordu,
+   ekran QPORT'u (327) Teamviewer'ın (1.361) üstünde gösterdi. Arka uç sıralıyor, taklit
+   sıralamıyordu. Düzeltildi; fikstüre gerçek veritabanından satırlar konuldu (sıfır
+   gösterimli marka, taslaklı blog) ki ölçülen dağılım korunsun.
 
 0c4. ✅ **BAKIM KONTROLÜ + SAYFA TİPİ SÜZGECİ (v0.20.0, 2026-08-14).**
    Commit'ler `2f3bfe1` (süzgeç) ve `75d6198` (bakım kontrolü).

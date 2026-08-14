@@ -17,7 +17,7 @@ D v0.14.0 · C v0.15.0 · T v0.16.0+v0.17.0), **Faz G'nin kod gerektiren kalemle
 altı araç ekranının hepsi ürün-merkezliydi ve GSC çağrısı bile ürün yoluyla filtreleniyordu.
 Yol haritası bir yerde eksikti ve eksikliği ölçüm gösterdi; kayıt `brain.md` 0b8/0c0'da.
 
-Kalan başlıklar: **Faz İ2 — katalog ekranları** (sıradaki kod işi, bölüm 4'te) ·
+Kalan başlıklar: **sayfa oluşturma** (Faz İ2'nin ikinci yarısı, sıradaki kod işi) ·
 **içerik pilotu** (hangi sayfalarla devam edileceği kullanıcı kararı) ·
 **P** koşullu bekliyor (ikinci mağaza gelene kadar) · **kod imzalama** maliyet kararı ·
 ve takvimdeki iş: **Ekim başı, sonuç eşiği kalibrasyonu** (kullanıcı kararı 2026-08-13 —
@@ -392,7 +392,7 @@ konmuyor — gerekçe `brain.md` 0c0'da.
 
 ---
 
-### Faz İ2 — Katalog ekranları (marka · kategori · içerik) ⏳ SIRADAKİ
+### Faz İ2 — Katalog ekranları (marka · kategori · içerik) ✅ (v0.21.0)
 
 **Amaç.** Marka, kategori ve blog sayfalarının da ürünler gibi **kendi ekranı** olsun:
 fırsat ve yükselmeye yakın listelerinden bir sorguya tıklandığında modal değil, o sayfanın
@@ -407,15 +407,17 @@ mevcut hâl / taslak karşılaştırması · üret–gözden geçir–gönder ak
 yeniden kullanılıyor, yeni backend gerekmiyor).
 
 ⚠️ **Kapsam dışı — kullanıcı kararı (2026-08-13): önce listeleme + iyileştirme, OLUŞTURMA
-sonra.** Yeni marka/kategori/blog yaratma ayrı bir adım; IdeaSoft'ta POST hiç test edilmedi
-(GET/PUT doğrulandı).
+sonra.** Yeni marka/kategori/blog yaratma ayrı bir adım ve **sıradaki kod işi**; IdeaSoft'ta
+POST hiç test edilmedi (GET/PUT doğrulandı). ⚠️ Ekran yazmadan önce iki şey: POST ucunu bir
+taslak kayıtla denemek, ve "sayfa yok" satırlarının kaçının gerçekten yeni sayfayı hak
+ettiğini ÖLÇMEK.
 
 ⚠️ **Üç ekran değil, tipe göre parametreli TEK bileşen.** Kopyalanan yapı bu projede beş
 kez saptı; gerekçe `brain.md` 0c4'te.
 
-**Bitti sayılır.** Üç ekran navigasyonda · sorgudan tıklayınca ilgili ekran açılıyor ·
-içerik açığındaki "düzenle" eylemi modal yerine ekrana gidiyor · `StorePageModal.vue`
-kaldırıldı (aynı iş iki yerde çizilmiyor).
+**Bitti sayılır.** ✅ Üç ekran navigasyonda · içerik açığındaki "düzenle" eylemi modal
+yerine ekrana gidip satırı seçiyor · `StorePageModal.vue` kaldırıldı (aynı iş iki yerde
+çizilmiyor) · liste gösterime göre sıralı. Ölçümler ve iki düzeltme `brain.md` 0c5'te.
 
 ---
 
