@@ -13,6 +13,13 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.22.1
+- **Ekip paneli.** Her çalışma ekranından ekip üyelerinizi ve çevrimiçi durumlarını görün.
+- **Birebir mesajlaşma.** Bir ekip üyesini seçerek konuşmayı açın. Mesaj geçmişine yalnızca konuşmanın katılımcıları erişebilir.
+- **Paneli sabitleyin.** Sayfa içeriği sağdaki panele yer açar. Ekran değiştirirken açık konuşmanız görünür kalır.
+- Ekranlar ve konuşmalar kısa bir kayma animasyonuyla açılır. Uygulama işletim sistemindeki azaltılmış hareket tercihine uyar.
+- Dar pencerelerde katalog formları, kişi işlemleri ve teklif düzenleyicisi ayrılan alana uyum sağlar.
+
 ## v0.22.0
 - **Ortak çalışma alanı.** Ürünleri, SEO taslaklarını, mağaza sayfalarını, kişileri ve teklifleri kendi ekranlarından ekipçe yönetin.
 - **Ekip hesabınızla ilk açılışta giriş yapın.** E-posta ve parola yeterli. Geçerli oturum cihazda güvenli saklanır ve sonraki açılışta çalışma alanınız yüklenir.

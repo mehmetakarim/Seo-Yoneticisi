@@ -405,6 +405,8 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
   min-width: 0;
   overflow-y: auto;
   padding: 20px 24px 40px;
+  container-type: inline-size;
+  container-name: contact-detail;
 }
 .head {
   display: flex;
@@ -424,6 +426,11 @@ h2 {
   display: flex;
   gap: 8px;
   flex: none;
+}
+@container contact-detail (max-width: 420px) {
+  .head { flex-wrap: wrap; }
+  .head h2 { min-width: 0; overflow-wrap: anywhere; }
+  .head-btns { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; margin-inline-start: auto; }
 }
 .primary,
 .ghost {
@@ -506,6 +513,10 @@ textarea {
 .adim-alan input:first-child {
   flex: none;
   width: 150px;
+}
+@container contact-detail (max-width: 360px) {
+  .adim-alan { flex-direction: column; }
+  .adim-alan input:first-child { width: 100%; }
 }
 .etiket {
   margin-top: 16px;

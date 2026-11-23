@@ -53,6 +53,7 @@ const P: Record<string, string> = {
   split: '<path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/>',
   archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
   message: '<path d="M12 20a8 8 0 1 0-6.9-3.95L4 21l4.95-1.1A8 8 0 0 0 12 20Z"/>',
+  pin: '<path d="M16 9V4H8v5c0 2-1 3-3 4v3h14v-3c-2-1-3-2-3-4Z"/><path d="M12 16v6"/>',
 };
 </script>
 

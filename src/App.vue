@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch, type Component } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch, type Component } from "vue";
 import { useStore } from "./store";
 import { markTeamDisconnected, probeTeamConnection, resetTeamConnectionStatus, resolveTeamWorkspace, restoreTeamSession, teamAccessIssue, teamClient, teamConnectionRetry, teamProject, teamReachable, teamRestoring, teamSession, teamUser, teamWorkspace } from "./teamConnection";
 import { contactSync, flushTeamContacts, teamContacts } from "./teamContacts";
@@ -12,7 +12,7 @@ import { flushTeamIdeasoftReceipts } from "./teamIdeasoft";
 import { flushTeamStorePages } from "./teamStorePages";
 import { flushTeamToday, teamTodayMode, teamTodayScope, teamTodaySync } from "./teamToday";
 import { KIND_BY_PAGE } from "./catalog";
-import { subOf, titleOf, TOOL_PAGES, type Page } from "./navigation";
+import { NAV, subOf, titleOf, TOOL_PAGES, type Page } from "./navigation";
 import Sidebar from "./components/Sidebar.vue";
 import ProductsPage from "./components/ProductsPage.vue";
 import ContactsPage from "./components/contacts/ContactsPage.vue";
@@ -38,18 +38,33 @@ import UpdateModal from "./components/UpdateModal.vue";
 import SetupWizard from "./components/SetupWizard.vue";
 import StartupCheck from "./components/StartupCheck.vue";
 import TeamSignIn from "./components/TeamSignIn.vue";
+import TeamChatPanel from "./components/TeamChatPanel.vue";
+import TeamPage from "./components/TeamPage.vue";
 import Icon from "./components/Icon.vue";
 
 const store = useStore();
 const startupReady = ref(false);
 const workspaceOpen = computed(() => startupReady.value && !!teamUser.value && !!teamWorkspace.value && !teamAccessIssue.value);
 watch(workspaceOpen, (open) => { if (open) void store.init(); });
+const teamPanelOpen = ref(false);
+const teamPanelPinned = ref(false);
+const teamPanelButton = ref<HTMLButtonElement | null>(null);
+
+function setTeamPanelOpen(open: boolean) {
+  teamPanelOpen.value = open;
+  if (!open) teamPanelButton.value?.focus();
+}
 /**
  * O an gösterilen sayfanın örneği. Kabuk sayfanın ne olduğunu bilmez; yalnızca
  * `focusSearch` gibi bir yeteneği varsa kullanır (ör. ⌘F). Yeni sayfalar da
  * isterlerse aynı adı dışa açarak kısayoldan yararlanabilir.
  */
 const pageRef = ref<{ focusSearch?: () => void } | null>(null);
+const pageSlidesBack = ref(false);
+
+function removePreviousPage(_page: Element, done: () => void) {
+  done();
+}
 
 /** navigation.ts'teki kayda karşılık gelen bileşenler. Yeni sayfa → buraya bir satır. */
 const PAGES: Record<Page, Component> = {
@@ -69,7 +84,7 @@ const PAGES: Record<Page, Component> = {
   contentgap: ContentGapPage,
   assistant: AssistantPage,
   settings: SettingsPage,
-  team: defineAsyncComponent(() => import("./components/TeamPage.vue")),
+  team: TeamPage,
 };
 
 const isProducts = computed(() => store.page === "products");
@@ -99,7 +114,9 @@ function fmtSync(): string {
 
 function onKey(e: KeyboardEvent) {
   if (!workspaceOpen.value) return;
-  const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+  const target = e.target instanceof HTMLElement ? e.target : null;
+  if (target?.closest("#team-chat-panel")) return;
+  const tag = target?.tagName.toLowerCase();
   const typing = tag === "input" || tag === "textarea";
 
   // ⌘/Ctrl + F → arama
@@ -138,8 +155,9 @@ function onKey(e: KeyboardEvent) {
  */
 watch(
   () => store.page,
-  (p) => {
-    if (TOOL_PAGES.includes(p)) store.lastToolPage = p;
+  (page, previous) => {
+    if (TOOL_PAGES.includes(page)) store.lastToolPage = page;
+    pageSlidesBack.value = NAV.findIndex((item) => item.key === page) < NAV.findIndex((item) => item.key === previous);
   },
   { immediate: true },
 );
@@ -191,6 +209,7 @@ watch([teamClient, teamTodayScope, () => teamSession.value?.user.id], ([client, 
 });
 
 watch([teamProject, teamUser, teamWorkspace], () => {
+  teamPanelOpen.value = false;
   store.resetContactsSource();
   store.resetQuoteSource();
   store.resetProductsSource();
@@ -336,37 +355,58 @@ onUnmounted(() => {
           <div class="pg-title">{{ pageTitle }}</div>
           <div class="pg-sub">{{ pageSub }}</div>
         </div>
-        <div v-if="isProducts" class="topbar-right">
-          <div class="sync-info">
-            <span v-if="!teamUser || !teamWorkspace" class="last">Son güncelleme: {{ fmtSync() }}</span>
-            <div v-if="store.allRows.length" class="progress" :title="`${store.counts.tamamlandi} ürün tamamlandı`">
-              <div class="pbar">
-                <div class="pfill" :style="{ width: donePct + '%' }"></div>
+        <div class="topbar-right">
+          <template v-if="isProducts">
+            <div class="sync-info">
+              <span v-if="!teamUser || !teamWorkspace" class="last">Son güncelleme: {{ fmtSync() }}</span>
+              <div v-if="store.allRows.length" class="progress" :title="`${store.counts.tamamlandi} ürün tamamlandı`">
+                <div class="pbar">
+                  <div class="pfill" :style="{ width: donePct + '%' }"></div>
+                </div>
+                <span class="ptext">{{ store.counts.tamamlandi }}/{{ store.allRows.length }} tamamlandı</span>
               </div>
-              <span class="ptext">{{ store.counts.tamamlandi }}/{{ store.allRows.length }} tamamlandı</span>
             </div>
-          </div>
-          <button class="sync" :disabled="store.syncing" @click="store.sync()">
-            <Icon name="refresh" :size="16" :class="{ spin: store.syncing }" />
-            <span>{{ store.syncing ? "Güncelleniyor…" : teamUser && teamWorkspace ? "Kataloğu Yenile" : "Manuel Güncelle" }}</span>
+            <button class="sync" :disabled="store.syncing" @click="store.sync()">
+              <Icon name="refresh" :size="16" :class="{ spin: store.syncing }" />
+              <span>{{ store.syncing ? "Güncelleniyor…" : teamUser && teamWorkspace ? "Kataloğu Yenile" : "Manuel Güncelle" }}</span>
+            </button>
+          </template>
+          <button
+            ref="teamPanelButton"
+            class="team-panel-trigger"
+            type="button"
+            aria-label="Ekip paneli"
+            aria-controls="team-chat-panel"
+            :aria-expanded="teamPanelOpen"
+            @click="setTeamPanelOpen(!teamPanelOpen)"
+          >
+            <Icon name="users" :size="16" aria-hidden="true" />
+            <span>Ekip</span>
           </button>
         </div>
       </header>
-
-      <!-- Odak seansı çubuğu: sayfanın ÜSTÜNDE, kabukta. İş başka ekranlarda yapıldığı için
-           ekran değişse de kaybolmamalı (Faz S). Seans yoksa hiç çizilmez. -->
-      <FocusBar />
 
       <UpdateModal />
       <SetupWizard />
       <StartupCheck />
       <FocusSummaryModal />
 
-      <!-- 🔴 `:key` ZORUNLU: üç katalog anahtarı AYNI bileşene çıkıyor ve anahtarsız
-           hâlde Vue örneği yeniden kurmaz — Marka'dan Kategori'ye geçince önceki seçim,
-           arama metni ve liste olduğu gibi kalırdı. Diğer ekranlar için de zararsız:
-           sayfa değişince zaten yeni bileşen kuruluyordu. -->
-      <component :is="PAGES[store.page]" :key="store.page" ref="pageRef" />
+      <div class="workspace" :class="{ 'workspace-pinned': teamPanelOpen && teamPanelPinned }">
+        <div class="workspace-content">
+          <!-- Odak seansı ekran değiştiğinde de görünür kalır. -->
+          <FocusBar />
+
+          <div class="workspace-viewport">
+            <Transition name="surface-slide" @leave="removePreviousPage">
+              <!-- Katalog ekranları aynı bileşeni kullandığı için geçişte seçim ve arama sıfırlanmalı. -->
+              <div :key="store.page" class="workspace-page" :class="{ 'workspace-page-back': pageSlidesBack }">
+                <component :is="PAGES[store.page]" ref="pageRef" />
+              </div>
+            </Transition>
+          </div>
+        </div>
+        <TeamChatPanel v-model:pinned="teamPanelPinned" :open="teamPanelOpen" @update:open="setTeamPanelOpen" />
+      </div>
     </main>
 
     <div class="toasts">
@@ -393,6 +433,32 @@ onUnmounted(() => {
   flex-direction: column;
   min-width: 0;
 }
+.workspace {
+  --team-chat-width: min(100%, clamp(284px, 24vw, 380px));
+  position: relative;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 0px;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  transition: grid-template-columns var(--slide-duration) var(--slide-easing);
+}
+.workspace-content, .workspace-viewport, .workspace-page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.workspace-viewport, .workspace-page { flex: 1; }
+.workspace-viewport { overflow: clip; }
+.workspace-page-back { --slide-enter-offset: calc(-1 * var(--slide-distance)); }
+.workspace-page.surface-slide-enter-active:focus-within {
+  transition: none;
+  transform: none;
+  opacity: 1;
+}
+.workspace-pinned { grid-template-columns: minmax(0, 1fr) var(--team-chat-width); }
+.workspace-pinned :deep(.list-panel) { width: clamp(220px, 34%, 392px); }
 .topbar {
   flex: none;
   height: 64px;
@@ -418,6 +484,30 @@ onUnmounted(() => {
   align-items: center;
   gap: 16px;
 }
+.team-panel-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 590;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.team-panel-trigger:hover { background: var(--c-hover); }
+.team-panel-trigger[aria-expanded="true"] {
+  border-color: transparent;
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.team-panel-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sync-info {
   display: flex;
   flex-direction: column;

@@ -530,7 +530,9 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
       <button class="ghost sil-teklif" @click="store.deleteQuote(q.id)">Teklifi sil</button>
     </div>
 
-    <QuoteDocModal :open="belgeAcik" :quote-id="q.id" @close="belgeAcik = false" />
+    <Teleport to="body">
+      <QuoteDocModal :open="belgeAcik" :quote-id="q.id" @close="belgeAcik = false" />
+    </Teleport>
   </section>
 
   <section v-else class="bos-sec">
@@ -545,6 +547,8 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
   min-width: 0;
   overflow-y: auto;
   padding: 20px 24px 40px;
+  container-type: inline-size;
+  container-name: quote-editor;
 }
 .head {
   display: flex;
@@ -685,6 +689,7 @@ textarea {
    Sabit yerleşimde genişlikleri aşağıdaki `col`lar belirliyor; fazlalık ilk sütuna gidiyor. */
 table {
   width: 100%;
+  min-width: 692px; /* Kalem 200px, diğer sütunlar toplam 492px. */
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
@@ -820,6 +825,10 @@ tbody tr:last-child td {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   margin-top: 12px;
+}
+@container quote-editor (max-width: 560px) {
+  .head { flex-direction: column; align-items: stretch; overflow-wrap: anywhere; }
+  .ekle { grid-template-columns: minmax(0, 1fr); }
 }
 .ek-alan {
   position: relative;

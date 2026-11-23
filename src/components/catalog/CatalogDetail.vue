@@ -408,6 +408,8 @@ const yayinTarihi = new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeS
   overflow-y: auto;
   min-width: 0;
   background: var(--c-bg);
+  container-type: inline-size;
+  container-name: catalog-detail;
 }
 .ic {
   max-width: 860px;
@@ -521,11 +523,15 @@ h1 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
-/* Dar pencerede iki sütun 300px'in altına iniyor ve metin okunmaz oluyor → alt alta. */
-@media (max-width: 1100px) {
+/* Ayrıntı alanı daraldığında her düzenleme sütununa yeterli yer bırak. */
+@container catalog-detail (max-width: 680px) {
   .satir {
     grid-template-columns: 1fr;
   }
+}
+@container catalog-detail (max-width: 520px) {
+  .ic { padding-inline: 18px; }
+  .bas-ad h1 { min-width: 0; overflow-wrap: anywhere; }
 }
 .s-bas {
   display: flex;
