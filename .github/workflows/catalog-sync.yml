@@ -1,0 +1,63 @@
+name: Ortak katalog eşitlemesi
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Katalog işlemi
+        type: choice
+        required: true
+        default: preview
+        options:
+          - verify
+          - preview
+          - publish
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalog-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: >-
+      github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch &&
+      (github.event_name == 'workflow_dispatch' || vars.CATALOG_PUBLISH_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: catalog-sync
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Katalog aracını test et
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'verify'
+        run: |
+          rustc --version
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p seo-core \
+            --bin team_catalog_sync --target-dir "$RUNNER_TEMP/catalog-sync-target"
+      - name: Katalog aracını derle
+        if: github.event_name == 'schedule' || inputs.mode != 'verify'
+        run: |
+          cargo build --locked --manifest-path src-tauri/Cargo.toml -p seo-core \
+            --bin team_catalog_sync --target-dir "$RUNNER_TEMP/catalog-sync-target"
+      - name: Feed’i doğrula
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'preview'
+        env:
+          CATALOG_FEED_URL: ${{ secrets.CATALOG_FEED_URL }}
+          CATALOG_MIN_PRODUCTS: ${{ vars.CATALOG_MIN_PRODUCTS }}
+        run: '"$RUNNER_TEMP/catalog-sync-target/debug/team_catalog_sync"'
+      - name: Ortak kataloğu yayımla
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'publish')
+        env:
+          CATALOG_FEED_URL: ${{ secrets.CATALOG_FEED_URL }}
+          CATALOG_MIN_PRODUCTS: ${{ vars.CATALOG_MIN_PRODUCTS }}
+          CATALOG_SUPABASE_URL: ${{ vars.CATALOG_SUPABASE_URL }}
+          CATALOG_SUPABASE_PUBLISHABLE_KEY: ${{ vars.CATALOG_SUPABASE_PUBLISHABLE_KEY }}
+          CATALOG_PUBLISHER_TOKEN: ${{ secrets.CATALOG_PUBLISHER_TOKEN }}
+        run: '"$RUNNER_TEMP/catalog-sync-target/debug/team_catalog_sync" --apply'
