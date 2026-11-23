@@ -8,8 +8,10 @@
  *
  * Kroma (`.list-panel`, `.search`, `.filters`) `styles.css`ten.
  */
-import { computed, onMounted } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { useStore } from "../../store";
+import { teamClient, teamSession, teamUser, teamWorkspace } from "../../teamConnection";
+import { teamQuoteCanEdit, teamQuoteQueue, teamQuoteSaving, teamQuotesOffline } from "../../teamQuotes";
 import Icon from "../Icon.vue";
 
 const store = useStore();
@@ -17,6 +19,13 @@ const store = useStore();
 defineExpose({ focusSearch: () => {} });
 
 onMounted(() => void store.loadQuotes());
+watch([teamClient, teamSession, teamWorkspace], ([client, session, workspace], _, onCleanup) => {
+  if (!client || !session || !workspace) return;
+  const channel = client.channel(`quotes:${workspace}`).on("postgres_changes", {
+    event: "*", schema: "public", table: "team_quotes", filter: `workspace_id=eq.${workspace}`,
+  }, () => { void store.loadQuotes(); }).subscribe();
+  onCleanup(() => { void client.removeChannel(channel); });
+}, { immediate: true });
 
 const DURUMLAR = [
   { key: "", label: "Tümü" },
@@ -61,9 +70,15 @@ const ozet = computed(() => store.quoteSummary);
           {{ para(acikToplam, store.quotes.find((q) => q.status === "sent")?.currency ?? "USD") }}
         </span>
       </div>
-      <button class="eylem birincil" title="Yeni teklif" @click="store.createQuote(null, 'USD')">
+      <button class="eylem birincil" title="Yeni teklif" :disabled="!!teamUser && (!teamQuoteCanEdit || teamQuoteSaving)" @click="store.createQuote(null, 'USD')">
         <Icon name="plus" :size="15" :stroke-width="2.4" />
       </button>
+    </div>
+
+    <div v-if="teamUser && (teamQuotesOffline || teamQuoteQueue.pending || teamQuoteQueue.conflicts)" class="ozet" role="status">
+      <span v-if="teamQuotesOffline" class="o-sat">Çevrimdışı · Bu cihazdaki son kayıtlar</span>
+      <span v-if="teamQuoteQueue.pending" class="o-sat">{{ teamQuoteQueue.pending }} işlem eşitlenmeyi bekliyor</span>
+      <span v-if="teamQuoteQueue.conflicts" class="o-sat o-kay">{{ teamQuoteQueue.conflicts }} işlem eşitlenemedi</span>
     </div>
 
     <div class="filters">

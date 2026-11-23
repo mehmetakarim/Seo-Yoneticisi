@@ -11,6 +11,7 @@
 import { computed, ref, watch } from "vue";
 import { useStore } from "../../store";
 import { api } from "../../api";
+import { contactSync, teamContactConflict, teamContactProgress } from "../../teamContacts";
 import type { CatalogMatch, Quote } from "../../types";
 import Icon from "../Icon.vue";
 
@@ -78,11 +79,41 @@ watch(
 
 const yeni = computed(() => !store.contact);
 const kaydedilebilir = computed(() => f.value.name.trim().length > 0);
+const savingContact = ref(false);
+const conflict = ref<Awaited<ReturnType<typeof teamContactConflict>>>(null);
+const hasConflict = ref(false);
+watch([() => store.contact, () => contactSync.value.conflicts], async ([person]) => {
+  const id = person?.id;
+  conflict.value = null;
+  hasConflict.value = false;
+  if (typeof id !== "string") return;
+  const progress = await teamContactProgress(id).catch(() => "synced");
+  if (store.contact === person) hasConflict.value = progress === "conflict";
+}, { immediate: true });
+
+async function inspectConflict() {
+  const id = store.contact?.id;
+  if (typeof id !== "string") return;
+  try {
+    const info = await teamContactConflict(id);
+    if (store.contact?.id === id) conflict.value = info;
+  } catch (error) {
+    store.toast(String(error), "error");
+  }
+}
+
+const conflictFields = {
+  name: "Ad", company: "Firma", email: "E-posta", phone: "Telefon", channel: "Kanal",
+  note: "Not", next_step_at: "Takip tarihi", next_step_note: "Takip notu",
+} as const;
 
 async function kaydet() {
-  if (!kaydedilebilir.value) return;
-  await store.saveContact({
+  if (!kaydedilebilir.value || savingContact.value || hasConflict.value) return;
+  savingContact.value = true;
+  try {
+    await store.saveContact({
     id: store.contact?.id ?? null,
+    revision: store.contact?.revision,
     name: f.value.name,
     company: f.value.company,
     email: f.value.email,
@@ -91,7 +122,10 @@ async function kaydet() {
     note: f.value.note,
     nextStepAt: f.value.nextStepAt || null,
     nextStepNote: f.value.nextStepNote,
-  });
+    });
+  } finally {
+    savingContact.value = false;
+  }
 }
 
 // --- İlgi etiketleri (Faz C2) ---
@@ -123,6 +157,7 @@ async function etiketCikar(t: string) {
 // ♻️ Arama EOL halef seçicisiyle aynı uçtan: satıştaki ürünlerde arıyor.
 const urunArama = ref("");
 const urunSonuc = ref<CatalogMatch[]>([]);
+const bagliUrunAdlari = computed(() => new Map(store.allRows.map(({ sku, name }) => [sku, name])));
 /** Kişinin teklifleri (Faz T2) — ürün bağıyla aynı fikir: tek kaynaktan sorgu. */
 const teklifler = ref<Quote[]>([]);
 let urunZaman: ReturnType<typeof setTimeout> | null = null;
@@ -143,7 +178,7 @@ function urunAra(v: string) {
 watch(
   () => store.contact?.id,
   async (id) => {
-    teklifler.value = id ? await api.quotesOfContact(id).catch(() => []) : [];
+    teklifler.value = id != null ? await api.quotesOfContact(id).catch(() => []) : [];
   },
   { immediate: true },
 );
@@ -152,7 +187,7 @@ const paraB = (v: number, c: string) =>
   new Intl.NumberFormat("tr-TR", { style: "currency", currency: c, maximumFractionDigits: 0 })
     .format(v);
 
-function teklifAc(id: number) {
+function teklifAc(id: Quote["id"]) {
   store.page = "quotes";
   void store.openQuote(id);
 }
@@ -196,8 +231,23 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
         >
           {{ store.contact.archived ? "Arşivden çıkar" : "Arşivle" }}
         </button>
-        <button class="primary" :disabled="!kaydedilebilir" @click="kaydet">Kaydet</button>
+        <button class="primary" :disabled="!kaydedilebilir || savingContact || hasConflict" @click="kaydet">Kaydet</button>
       </div>
+    </div>
+    <div v-if="hasConflict" class="contact-conflict" role="status">
+      <button type="button" class="secondary-action" @click="inspectConflict">Eşitleme çakışmasını incele</button>
+      <template v-if="conflict">
+        <p>{{ conflict.reason }}</p>
+        <p v-if="!conflict.remote">Sunucudaki kayıt görüntülenemiyor. Yerel düzenleme bu cihazda saklanıyor.</p>
+        <div v-else class="contact-conflict-values">
+          <div><strong>Bu cihaz</strong>
+            <p v-for="(label, key) in conflictFields" :key="key">{{ label }} · {{ conflict.local[key] || "—" }}</p>
+          </div>
+          <div><strong>Supabase</strong>
+            <p v-for="(label, key) in conflictFields" :key="key">{{ label }} · {{ conflict.remote[key] || "—" }}</p>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- ⚠️ Arşiv SİLME değil: geçmiş temaslar bir kayıt, kişi listeden çıksa da kalmalı. -->
@@ -265,7 +315,7 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
         <label class="lbl">İlgilendiği ürünler</label>
         <div v-for="p in store.contactProducts" :key="p.sku" class="urun-sat">
           <Icon name="box" :size="13" :stroke-width="1.9" />
-          <span class="urun-ad">{{ p.name }}</span>
+          <span class="urun-ad">{{ p.name === p.sku ? bagliUrunAdlari.get(p.sku) ?? p.sku : p.name }}</span>
           <button class="et-x" title="Bağı kaldır" @click="store.unlinkContactProduct(store.contact!.id, p.sku)">
             <Icon name="x" :size="11" :stroke-width="2.6" />
           </button>
@@ -340,6 +390,16 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
 </template>
 
 <style scoped>
+.contact-conflict {
+  padding: 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--warn-border);
+  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-size: 12px;
+}
+.contact-conflict-values { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow-wrap: anywhere; }
 .card {
   flex: 1;
   min-width: 0;

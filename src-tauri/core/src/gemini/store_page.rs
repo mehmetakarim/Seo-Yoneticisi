@@ -171,9 +171,14 @@ pub fn violations(g: &GeneratedStorePage) -> u32 {
     n
 }
 
+enum StorePageTransport<'a> {
+    Direct(&'a str),
+    Workspace(&'a WorkspaceGemini),
+}
+
 async fn call_model(
     client: &reqwest::Client,
-    api_key: &str,
+    transport: &StorePageTransport<'_>,
     model: &str,
     prompt: &str,
     kind: &str,
@@ -188,7 +193,10 @@ async fn call_model(
             "temperature": 0.6
         }
     });
-    let inner = post_generate(client, api_key, model, &body, chain).await?;
+    let inner = match transport {
+        StorePageTransport::Direct(key) => post_generate(client, key, model, &body, chain).await,
+        StorePageTransport::Workspace(connection) => post_workspace_generate(client, connection, model, &body, chain).await,
+    }?;
     serde_json::from_str::<GeneratedStorePage>(&inner)
         .map_err(|e| (false, format!("Üretilen JSON okunamadı: {e}")))
 }
@@ -207,8 +215,25 @@ pub async fn generate_store_page(
     if key.is_empty() {
         return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
     }
+    generate_with(StorePageTransport::Direct(key), ctx, chain).await
+}
+
+pub async fn generate_team_store_page(
+    connection: &WorkspaceGemini,
+    ctx: &StorePageContext<'_>,
+    chain: &ChainCtx<'_>,
+) -> Result<Produced<GeneratedStorePage>, String> {
+    generate_with(StorePageTransport::Workspace(connection), ctx, chain).await
+}
+
+async fn generate_with(
+    transport: StorePageTransport<'_>,
+    ctx: &StorePageContext<'_>,
+    chain: &ChainCtx<'_>,
+) -> Result<Produced<GeneratedStorePage>, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
 
@@ -216,7 +241,7 @@ pub async fn generate_store_page(
     let mut last_err = String::from("Bilinmeyen hata");
 
     for model in &chain.models {
-        match call_model(&client, key, model, &prompt, ctx.kind, chain).await {
+        match call_model(&client, &transport, model, &prompt, ctx.kind, chain).await {
             Ok(ilk) => {
                 let best = if violations(&ilk) == 0 {
                     ilk
@@ -226,7 +251,7 @@ pub async fn generate_store_page(
                          Başlık {TITLE_MIN}-{TITLE_MAX}, açıklama {DESC_MIN}-{DESC_MAX} \
                          karakter olacak ve hedef kelime başlıkta geçecek."
                     );
-                    match call_model(&client, key, model, &düzelt, ctx.kind, chain).await {
+                    match call_model(&client, &transport, model, &düzelt, ctx.kind, chain).await {
                         Ok(ikinci) if violations(&ikinci) <= violations(&ilk) => ikinci,
                         _ => ilk,
                     }

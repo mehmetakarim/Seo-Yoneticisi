@@ -8,7 +8,10 @@
 //! yazıyor (`analyzed_at`), kendiliğinden yenilemiyor.
 
 use super::*;
+use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use seo_core::contacts::DueContact;
 use seo_core::queue::{self, Bucket, Candidate, ItemRef, QueueItem};
+use std::collections::{HashMap, HashSet};
 
 /// Ön yüze giden kuyruk + kullanıcının kuyruğu yorumlaması için gereken bağlam.
 #[derive(Serialize)]
@@ -39,6 +42,56 @@ pub struct BucketCount {
     pub bucket: Bucket,
     pub label: String,
     pub candidates: usize,
+}
+
+#[derive(Default, serde::Deserialize)]
+#[serde(default)]
+pub struct SharedTodayInputs {
+    report: Option<OpportunityReport>,
+    products: Vec<ProductState>,
+    events: Vec<SharedTodayEvent>,
+    pages: Vec<SharedTodayPage>,
+    contacts: Vec<SharedTodayContact>,
+    decisions: Vec<SharedTodayDecision>,
+    focus_scope: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct SharedTodayEvent {
+    sku: Option<String>,
+    url: Option<String>,
+    at: String,
+    kind: String,
+    reaches_store: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct SharedTodayPage {
+    kind: String,
+    slug: String,
+    remote_id: i64,
+    status: i64,
+}
+
+#[derive(serde::Deserialize)]
+struct SharedTodayContact {
+    id: String,
+    name: String,
+    company: String,
+    next_step_at: Option<String>,
+    next_step_note: String,
+    last_contact_at: Option<String>,
+    archived: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct SharedTodayDecision {
+    kind: String,
+    reference: String,
+    action: String,
+    until_day: Option<String>,
+    occurred_at: String,
+    analyzed_at: Option<String>,
 }
 
 /// Kuyruktan çıkarılmış maddeler: `(kind, ref)` → gizli mi?
@@ -213,10 +266,11 @@ fn ref_from(kind: &str, r: String) -> ItemRef {
 }
 
 /// Ürün başına feed/gönderim durumu — acil kovasının kaynağı.
+#[derive(serde::Deserialize)]
 struct ProductState {
     sku: String,
     name: String,
-    feed_changed: String,
+    feed_changed: Option<String>,
     pushed_at: Option<String>,
     meta_done: bool,
     details_done: bool,
@@ -224,7 +278,7 @@ struct ProductState {
 
 fn product_states(conn: &Connection) -> Vec<ProductState> {
     let mut stmt = match conn.prepare(
-        "SELECT p.sku, p.name, COALESCE(p.feed_changed,''), s.ideasoft_pushed_at,
+        "SELECT p.sku, p.name, p.feed_changed, s.ideasoft_pushed_at,
                 COALESCE(s.meta_status,''), COALESCE(s.details_status,'')
          FROM products p LEFT JOIN seo_status s ON s.sku = p.sku",
     ) {
@@ -247,26 +301,87 @@ fn product_states(conn: &Connection) -> Vec<ProductState> {
 
 /// Gün farkı — `at` "YYYY-AA-GGTss:dd:ss" biçiminde.
 fn days_since(at: &str) -> i64 {
-    let d = at.get(..10).and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
-    match d {
-        Some(d) => (chrono::Local::now().date_naive() - d).num_days(),
-        None => 0,
+    calendar_date(at).map(|day| (Local::now().date_naive() - day).num_days()).unwrap_or(0)
+}
+
+fn calendar_date(value: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(value.get(..10)?, "%Y-%m-%d").ok()
+}
+
+fn utc_to_local(value: &str) -> Option<NaiveDateTime> {
+    let input = value.replace(' ', "T");
+    if let Ok(stamp) = DateTime::parse_from_rfc3339(&input) {
+        return Some(stamp.with_timezone(&Local).naive_local());
     }
+    let stamp = NaiveDateTime::parse_from_str(&input, "%Y-%m-%dT%H:%M:%S%.f").ok()?;
+    Some(Utc.from_utc_datetime(&stamp).with_timezone(&Local).naive_local())
 }
 
 /// Beş kovanın adaylarını kurar.
 ///
 /// Her adayın `reason`ı **gerçek bir metrikten** türüyor (yol haritasının şartı): uydurma
 /// bir "iyileştirilmeli" cümlesi yok, hepsinde sayı var.
+struct CandidateData<'a> {
+    products: &'a [ProductState],
+    events: &'a [(ItemRef, String)],
+    decided_pages: HashSet<String>,
+    active_slugs: HashSet<String>,
+    contacts: Vec<(String, DueContact)>,
+    shared: Option<&'a SharedTodayInputs>,
+}
+
+fn local_contact_work(conn: &Connection, analyzed_at: &str) -> Vec<(String, DueContact)> {
+    let mut contacts = super::due_contacts(conn);
+    contacts.extend(super::silent_contacts(conn));
+    // Dönüş tamamlandığında sonraki adım silinir. Günün işareti görünür kalır.
+    let existing: HashSet<i64> = contacts.iter().map(|contact| contact.id).collect();
+    let completed_ids: Vec<i64> = completed(conn, analyzed_at)
+        .into_iter()
+        .filter(|(kind, _)| kind == "contact")
+        .filter_map(|(_, reference)| reference.parse().ok())
+        .filter(|id| !existing.contains(id))
+        .collect();
+    contacts.extend(super::contacts_by_ids(conn, &completed_ids));
+    contacts.into_iter().map(|contact| (contact.id.to_string(), contact)).collect()
+}
+
 fn candidates(
     conn: &Connection,
     report: &OpportunityReport,
-    in_flight: &std::collections::HashSet<ItemRef>,
+    in_flight: &HashSet<ItemRef>,
+) -> Vec<Candidate> {
+    let active_slugs = conn
+        .prepare("SELECT lower(slug) FROM store_pages WHERE status = 1")
+        .and_then(|mut st| {
+            st.query_map([], |row| row.get::<_, String>(0))
+                .map(|rows| rows.filter_map(Result::ok).collect())
+        })
+        .unwrap_or_default();
+    build_candidates(conn, report, in_flight, CandidateData {
+        products: &product_states(conn),
+        events: &store_events(conn),
+        decided_pages: decided_pages(conn),
+        active_slugs,
+        contacts: local_contact_work(conn, &report.analyzed_at),
+        shared: None,
+    })
+}
+
+fn build_candidates(
+    conn: &Connection,
+    report: &OpportunityReport,
+    in_flight: &HashSet<ItemRef>,
+    input: CandidateData<'_>,
 ) -> Vec<Candidate> {
     let mut out = Vec::new();
     // 🔑 Faz S'in ürünü: kova başına ÖLÇÜLMÜŞ süre. Yeterli örnek yoksa (kova başına 5)
     // aşağıdaki elle yazılmış tahminler kullanılmaya devam ediyor.
-    let olculen = super::calibration(conn);
+    let olculen = match input.shared {
+        Some(shared) => shared.focus_scope.as_deref()
+            .map(|scope| super::focus::calibration_for_scope(conn, scope))
+            .unwrap_or_default(),
+        None => super::calibration(conn),
+    };
     // Ölçülmüş süre varsa onu, yoksa elle yazılan tahmini döndürür.
     let sure = |b: Bucket, tahmin: u32| -> (u32, bool) {
         match olculen.get(&format!("{b:?}").to_lowercase()) {
@@ -274,7 +389,9 @@ fn candidates(
             None => (tahmin, false),
         }
     };
-    let states = product_states(conn);
+    let states = input.products;
+    let active_products: HashSet<_> = states.iter().map(|product| product.sku.as_str()).collect();
+    let product_visible = |sku: &str| input.shared.is_none() || active_products.contains(sku);
     // 🔑 Mağazaya ULAŞMIŞ sayılan ürünler: gerçek gönderim (`ideasoft_pushed_at`) **veya**
     // kullanıcının "yapıldı" beyanı (`manual_done`, reaches_store = 1). İkincisi olmadan,
     // içeriği elle mağazaya yapıştıran kullanıcının işi hiç bitmiyordu — madde her gün
@@ -282,10 +399,9 @@ fn candidates(
     // ⚠️ Yalnızca ÜRÜN olayları: bu küme acil kovasında "bu ürün hiç gönderilmiş mi?"
     // sorusunu cevaplıyor. Sayfa olayları buraya karışsaydı bir kategori sayfasının
     // gönderimi, adı benzeyen bir ürünü "gönderilmiş" sayabilirdi.
-    let magazaya_ulasan: std::collections::HashSet<String> = store_events(conn)
-        .into_iter()
+    let magazaya_ulasan: HashSet<&str> = input.events.iter()
         .filter_map(|(k, _)| match k {
-            ItemRef::Product(s) => Some(s),
+            ItemRef::Product(s) => Some(s.as_str()),
             _ => None,
         })
         .collect();
@@ -297,17 +413,19 @@ fn candidates(
         .collect();
 
     // --- 1) ACİL: canlıda yanlış içerik ---
-    for p in &states {
+    for p in states {
+        let reference = ItemRef::Product(p.sku.clone());
         // ⚠️ Yalnızca METİN alanı değişmişse ve içerik mağazaya gitmişse acil. Görsel
         // değişikliği üretilmiş metni geçersiz kılmıyor (ölçüm: 70 bayrağın 61'i görsel).
-        if p.pushed_at.is_some() && queue::is_urgent_change(&p.feed_changed) {
+        let changed = p.feed_changed.as_deref().unwrap_or_default();
+        if p.pushed_at.is_some() && queue::is_urgent_change(changed) {
             out.push(Candidate {
-                reference: ItemRef::Product(p.sku.clone()),
+                reference: reference.clone(),
                 bucket: Bucket::Urgent,
                 title: p.name.clone(),
                 reason: format!(
                     "mağazaya gönderildikten sonra feed değişti ({}) — canlıdaki metin bayat",
-                    p.feed_changed
+                    changed
                 ),
                 clicks: *clicks_of.get(p.sku.as_str()).unwrap_or(&0.0),
                 page: "products".into(),
@@ -318,11 +436,14 @@ fn candidates(
         }
         // İş yerelde bitmiş ama mağazaya hiç ulaşmamış → Faz Ö'nün merkezi kuralına göre
         // bu iş Google için HİÇ yapılmamış sayılır ve ölçülemez.
+        // Ekip kararının olayı önbelleğe henüz gelmemiş olabilir.
+        let awaiting_event = input.shared.is_some() && in_flight.contains(&reference);
         if p.meta_done && p.details_done && p.pushed_at.is_none()
-            && !magazaya_ulasan.contains(&p.sku)
+            && !magazaya_ulasan.contains(p.sku.as_str())
+            && !awaiting_event
         {
             out.push(Candidate {
-                reference: ItemRef::Product(p.sku.clone()),
+                reference,
                 bucket: Bucket::Urgent,
                 title: p.name.clone(),
                 reason: "içerik hazır ama mağazaya hiç gönderilmemiş — Google bunu görmüyor".into(),
@@ -336,7 +457,7 @@ fn candidates(
     }
 
     // --- 2) YÜKSEK KALDIRAÇ: GSC fırsatları ---
-    for o in &report.opportunities {
+    for o in report.opportunities.iter().filter(|item| product_visible(&item.sku)) {
         out.push(Candidate {
             reference: ItemRef::Product(o.sku.clone()),
             bucket: Bucket::Leverage,
@@ -360,8 +481,7 @@ fn candidates(
     // ⚠️ Kararı verilmiş sayfalar dışarıda (Faz D): 301'i panelde tanımladıysanız ya da
     // sayfayı bilinçli tutuyorsanız bu artık bir iş değil. Uygulama 301'i doğrulayamıyor,
     // tek kanıt sizin kararınız.
-    let kararli = decided_pages(conn);
-    for e in report.eol.iter().filter(|e| !kararli.contains(&e.slug)) {
+    for e in report.eol.iter().filter(|e| !input.decided_pages.contains(&e.slug)) {
         out.push(Candidate {
             // ⚠️ Sayfa kimliği: EOL satırlarında sku YOK, ürün maddeleriyle birleştirilemez.
             reference: ItemRef::Page(e.slug.clone()),
@@ -384,8 +504,8 @@ fn candidates(
     // 🔑 Uçuş süzgecinin diğer ucu: 28 günü DOLMAYAN madde diğer kovalarda susuyor, dolan
     // madde burada geri geliyor. Aynı sorgudan okuyorlar (bkz. `store_events`).
     let mut gorulen = std::collections::HashSet::new();
-    for (kimlik, at) in store_events(conn) {
-        let yas = days_since(&at);
+    for (kimlik, at) in input.events {
+        let yas = days_since(at);
         if yas < queue::REVIEW_AFTER_DAYS || !gorulen.insert(kimlik.clone()) {
             continue;
         }
@@ -401,21 +521,34 @@ fn candidates(
         } else {
             anahtar.clone()
         };
+        let target = if urun {
+            ("products".to_owned(), anahtar.clone())
+        } else if let Some(shared) = input.shared {
+            let Some(target) = store_page_target(&shared.pages, &anahtar) else { continue };
+            target
+        } else {
+            ("contentgap".to_owned(), anahtar.clone())
+        };
+        let reason = if !urun && input.shared.is_some() {
+            format!("{yas} gün önce mağazada işlem kaydedildi · Sonucu kontrol edin")
+        } else {
+            format!("{yas} gün önce mağazaya gönderildi — sonucuna bakılabilir")
+        };
         out.push(Candidate {
             reference: kimlik.clone(),
             bucket: Bucket::Review,
             title: ad,
-            reason: format!("{yas} gün önce mağazaya gönderildi — sonucuna bakılabilir"),
+            reason,
             clicks: 0.0,
-            page: if urun { "products".into() } else { "contentgap".into() },
-            focus_id: anahtar,
+            page: target.0,
+            focus_id: target.1,
             minutes: sure(Bucket::Review, 1).0,
             minutes_measured: sure(Bucket::Review, 1).1,
         });
     }
 
     // --- 5) BAKIM: düşüşte olanlar + yarışan sayfalar ---
-    for d in &report.decay {
+    for d in report.decay.iter().filter(|item| product_visible(&item.sku)) {
         out.push(Candidate {
             reference: ItemRef::Product(d.sku.clone()),
             bucket: Bucket::Upkeep,
@@ -455,33 +588,16 @@ fn candidates(
     // --- 6) MÜŞTERİ: sonraki adımı gelmiş kişiler (Faz C) ---
     // 🔑 Kuyruğun tek insan işi ve tek "bozulabilir" işi: dönülmezse iş rakibe gider, oysa
     // bir sayfa bir gün beklemekle hiçbir şey kaybetmez. Skoru bu yüzden gecikme sürüyor.
-    let mut kisiler = super::due_contacts(conn);
-    // Sessizlik eşiği (Faz C2) — varsayılan KAPALI, açıksa sonraki adımı olmayan soğumuş
-    // kişileri getiriyor. ⚠️ `due_contacts` ile aynı kimlikler gelemez: biri "next_step_at
-    // dolu", öteki "next_step_at boş" diyor, kesişimleri boş.
-    kisiler.extend(super::silent_contacts(conn));
-    // ⚠️ Bu analizde "yapıldı" denen kişiler listeye GERİ konuyor: dönüş yapılınca sonraki
-    // adım temizleniyor ve kişi adaylıktan tamamen düşerdi — yerine 11. madde gelir, 08-08'de
-    // düzeltilen "gün hiç bitmiyor" hatası CRM tarafında yeniden doğardı.
-    let mevcut: std::collections::HashSet<i64> = kisiler.iter().map(|k| k.id).collect();
-    let yapilan_kisiler: Vec<i64> = completed(conn, &report.analyzed_at)
-        .into_iter()
-        .filter(|(kind, _)| kind == "contact")
-        .filter_map(|(_, r)| r.parse::<i64>().ok())
-        .filter(|id| !mevcut.contains(id))
-        .collect();
-    kisiler.extend(super::contacts_by_ids(conn, &yapilan_kisiler));
-
-    for k in kisiler {
+    for (id, k) in input.contacts {
         out.push(Candidate {
-            reference: ItemRef::Contact(k.id.to_string()),
+            reference: ItemRef::Contact(id.clone()),
             bucket: Bucket::Contact,
             title: k.title(),
             reason: k.reason(),
             // ⚠️ `clicks` alanı bu kovada GECİKME GÜNÜ taşıyor (bkz. `queue::score`).
             clicks: k.overdue_days as f64,
             page: "contacts".into(),
-            focus_id: k.id.to_string(),
+            focus_id: id,
             minutes: sure(Bucket::Contact, 5).0,
             minutes_measured: sure(Bucket::Contact, 5).1,
         });
@@ -493,17 +609,9 @@ fn candidates(
     // kuyruğa GİRMİYOR — uygulama yeni sayfa açamıyor ve eylemsiz madde, kullanıcıyı
     // "Yapıldı" demekten başka bir şey yapamayacağı bir işe yönlendirir (`Leak`'te bu
     // bedel yaşandı, ağırlığı o yüzden 0,6).
-    let envanter_slug: std::collections::HashSet<String> = conn
-        .prepare("SELECT lower(slug) FROM store_pages WHERE status = 1")
-        .and_then(|mut st| {
-            st.query_map([], |r| r.get::<_, String>(0))
-                .map(|it| it.filter_map(|x| x.ok()).collect())
-        })
-        .unwrap_or_default();
-
     for g in &report.content_gaps {
         let slug = seo_core::page_kind::last_segment(&g.page).unwrap_or_default();
-        if slug.is_empty() || !envanter_slug.contains(&slug) {
+        if slug.is_empty() || !input.active_slugs.contains(&slug) {
             continue;
         }
         out.push(Candidate {
@@ -535,9 +643,141 @@ fn candidates(
 
 /// Bugünün kuyruğu. **Hesaplanıyor, saklanmıyor** — bkz. `seo_core::queue` modül başlığı.
 #[tauri::command]
-pub fn get_today_queue(state: State<'_, AppState>) -> Result<TodayQueue, String> {
+pub fn get_today_queue(state: State<'_, AppState>, shared: Option<SharedTodayInputs>) -> Result<TodayQueue, String> {
     let conn = state.conn.lock().unwrap();
-    build_today_queue(&conn)
+    match shared {
+        Some(input) => Ok(build_shared_today_queue(&conn, &input)),
+        None => build_today_queue(&conn),
+    }
+}
+
+fn store_page_target(pages: &[SharedTodayPage], slug: &str) -> Option<(String, String)> {
+    let mut matches = pages.iter().filter(|page| page.status == 1 && page.slug.to_lowercase() == slug);
+    let page = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    let screen = match page.kind.as_str() {
+        "category" => "categories",
+        "brand" => "brands",
+        "blog" => "blogs",
+        _ => return None,
+    };
+    Some((screen.into(), page.remote_id.to_string()))
+}
+
+type DecisionKeys = HashSet<ItemRef>;
+
+fn shared_decisions(input: &SharedTodayInputs, analyzed_at: &str, now: NaiveDateTime)
+    -> (DecisionKeys, DecisionKeys, DecisionKeys) {
+    let mut hidden = HashSet::new();
+    let mut done = HashSet::new();
+    let mut in_flight = HashSet::new();
+    let today = now.date();
+    for decision in &input.decisions {
+        let reference = ref_from(&decision.kind, decision.reference.clone());
+        match decision.action.as_str() {
+            "dismiss" => { hidden.insert(reference); }
+            "snooze" if decision.until_day.as_deref().and_then(calendar_date).is_some_and(|until| until > today) => {
+                hidden.insert(reference);
+            }
+            "done" => {
+                let Some(at) = utc_to_local(&decision.occurred_at) else { continue };
+                if at.date() == today && decision.analyzed_at.as_deref().unwrap_or_default() == analyzed_at {
+                    done.insert(reference);
+                } else if at > now - Duration::days(queue::REVIEW_AFTER_DAYS) {
+                    in_flight.insert(reference);
+                }
+            }
+            _ => {}
+        }
+    }
+    (hidden, done, in_flight)
+}
+
+fn shared_contact_work(
+    conn: &Connection,
+    contacts: &[SharedTodayContact],
+    done: &DecisionKeys,
+    today: NaiveDate,
+) -> Vec<(String, DueContact)> {
+    let silence_limit = super::setting_i64(conn, "contact_silence_days", 0);
+    contacts.iter().filter(|contact| !contact.archived).filter_map(|contact| {
+        let days = |date: NaiveDate| (today - date).num_days();
+        let next_step = contact.next_step_at.as_deref().and_then(calendar_date);
+        let overdue = next_step.map(days);
+        let silence = contact.last_contact_at.as_deref().and_then(utc_to_local)
+            .map(|stamp| days(stamp.date())).filter(|days| *days >= silence_limit && silence_limit > 0);
+        let marked = done.contains(&ItemRef::Contact(contact.id.clone()));
+        let (overdue_days, silent_days) = match (overdue, silence) {
+            (Some(days), _) if days >= 0 || marked => (days.max(0), 0),
+            (None, Some(days)) => (0, days),
+            _ if marked => (0, 0),
+            _ => return None,
+        };
+        let due = DueContact {
+            id: 0, // UUID ekip kimliği dışarıda taşınır. DueContact yalnızca metinleri biçimler.
+            name: contact.name.clone(),
+            company: contact.company.clone(),
+            note: if silent_days == 0 { contact.next_step_note.clone() } else { String::new() },
+            overdue_days,
+            silent_days,
+        };
+        Some((contact.id.clone(), due))
+    }).collect()
+}
+
+fn shared_store_events(
+    input: &SharedTodayInputs,
+    done: &DecisionKeys,
+    today: NaiveDate,
+) -> Vec<(ItemRef, String)> {
+    let products: HashSet<_> = input.products.iter().map(|product| product.sku.as_str()).collect();
+    let mut latest = HashMap::<ItemRef, NaiveDateTime>::new();
+    for event in input.events.iter().filter(|event| event.reaches_store) {
+        let Some(at) = utc_to_local(&event.at) else { continue };
+        let reference = match &event.sku {
+            Some(sku) if products.contains(sku.as_str()) => ItemRef::Product(sku.clone()),
+            Some(_) => continue,
+            None => {
+                let Some(slug) = event.url.as_deref().and_then(page_kind::last_segment) else { continue };
+                if store_page_target(&input.pages, &slug).is_none() {
+                    continue;
+                }
+                ItemRef::Page(slug)
+            }
+        };
+        // Aynı aksiyonun yazdığı olay, bugün tamamlanan maddeyi kuyruktan erken düşürmesin.
+        if event.kind == "manual_done" && at.date() == today && done.contains(&reference) {
+            continue;
+        }
+        latest.entry(reference).and_modify(|previous| *previous = (*previous).max(at)).or_insert(at);
+    }
+    let mut events: Vec<_> = latest.into_iter().map(|(reference, at)| (reference, at.to_string())).collect();
+    events.sort_by_cached_key(|(reference, _)| ref_key(reference));
+    events
+}
+
+pub(super) fn build_shared_today_queue(conn: &Connection, shared: &SharedTodayInputs) -> TodayQueue {
+    let now = Local::now().naive_local();
+    let empty_report = OpportunityReport::default();
+    let report = shared.report.as_ref().unwrap_or(&empty_report);
+    let (hidden, done, mut in_flight) = shared_decisions(shared, &report.analyzed_at, now);
+    let events = shared_store_events(shared, &done, now.date());
+    in_flight.extend(events.iter()
+        .filter(|(reference, at)| days_since(at) < queue::REVIEW_AFTER_DAYS && !done.contains(reference))
+        .map(|(reference, _)| reference.clone()));
+    let candidates_data = CandidateData {
+        products: &shared.products,
+        events: &events,
+        decided_pages: HashSet::new(),
+        active_slugs: shared.pages.iter().filter(|page| page.status == 1).map(|page| page.slug.to_lowercase()).collect(),
+        contacts: shared_contact_work(conn, &shared.contacts, &done, now.date()),
+        shared: Some(shared),
+    };
+    let all = build_candidates(conn, report, &in_flight, candidates_data);
+    let oldest = events.iter().map(|(_, at)| at.as_str()).min();
+    assemble_today_queue(&report.analyzed_at, all, in_flight.len(), hidden, done, oldest)
 }
 
 /// Kuyruğu kurar — **bağlantıyı kilitlemeden**.
@@ -554,6 +794,30 @@ pub fn build_today_queue(conn: &Connection) -> Result<TodayQueue, String> {
 
     let ucus = in_flight(conn, &report.analyzed_at);
     let all = candidates(conn, &report, &ucus);
+    let oldest: Option<String> = conn.query_row(
+        "SELECT MIN(at) FROM work_events WHERE reaches_store = 1",
+        [],
+        |row| row.get(0),
+    ).ok().flatten();
+    let keys = |decisions: Vec<(String, String)>| decisions.into_iter().map(|(kind, r)| ref_from(&kind, r)).collect();
+    Ok(assemble_today_queue(
+        &report.analyzed_at,
+        all,
+        ucus.len(),
+        keys(hidden(conn)),
+        keys(completed(conn, &report.analyzed_at)),
+        oldest.as_deref(),
+    ))
+}
+
+fn assemble_today_queue(
+    analyzed_at: &str,
+    all: Vec<Candidate>,
+    in_flight: usize,
+    hidden: DecisionKeys,
+    done: DecisionKeys,
+    oldest_store_event: Option<&str>,
+) -> TodayQueue {
     let mut bucket_counts: Vec<BucketCount> = Vec::new();
     for b in [
         Bucket::Urgent,
@@ -573,52 +837,32 @@ pub fn build_today_queue(conn: &Connection) -> Result<TodayQueue, String> {
 
     // ⚠️ İKİ AYRI liste: gizlenenler kuyruktan çıkar, "yapıldı" olanlar YERİNDE KALIR.
     // Anında düşürmek günü bitmez kılıyordu (saha geri bildirimi) — bkz. `completed`.
-    let gizli = hidden(conn);
-    let yapilan = completed(conn, &report.analyzed_at);
-    let kalan: Vec<Candidate> = all
-        .into_iter()
-        .filter(|c| {
-            let (k, r) = ref_key(&c.reference);
-            !gizli.iter().any(|(gk, gr)| gk == k && *gr == r)
-        })
-        .collect();
+    let kalan: Vec<Candidate> = all.into_iter().filter(|c| !hidden.contains(&c.reference)).collect();
 
     // Sonuç kontrolü kovası boşsa en erken ne zaman dolacak? En yeni gönderimden değil,
     // EN ESKİ ölçülmemiş gönderimden hesaplanıyor — ilk dolacak olan o.
     let review_ready_at = if bucket_counts.iter().any(|b| b.bucket == Bucket::Review && b.candidates > 0) {
         String::new()
     } else {
-        conn.query_row(
-            "SELECT MIN(at) FROM work_events WHERE reaches_store = 1",
-            [],
-            |r| r.get::<_, Option<String>>(0),
-        )
-        .ok()
-        .flatten()
-        .and_then(|at| {
-            at.get(..10)
-                .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-        })
-        .map(|d| (d + chrono::Duration::days(queue::REVIEW_AFTER_DAYS)).to_string())
-        .unwrap_or_default()
+        oldest_store_event.and_then(calendar_date)
+            .map(|day| (day + Duration::days(queue::REVIEW_AFTER_DAYS)).to_string()).unwrap_or_default()
     };
 
     let mut items = queue::pick(kalan);
     for it in &mut items {
-        let (k, r) = ref_key(&it.reference);
-        it.done = yapilan.iter().any(|(dk, dr)| dk == k && *dr == r);
+        it.done = done.contains(&it.reference);
     }
     let done_count = items.iter().filter(|i| i.done).count();
 
-    Ok(TodayQueue {
+    TodayQueue {
         items,
-        analyzed_at: report.analyzed_at.clone(),
-        hidden: gizli.len(),
-        in_flight: ucus.len(),
+        analyzed_at: analyzed_at.into(),
+        hidden: hidden.len(),
+        in_flight,
         done_count,
         bucket_counts,
         review_ready_at,
-    })
+    }
 }
 
 /// Maddeyi kuyruktan çıkarır. `until` yoksa kalıcı gizleme, varsa o tarihe kadar erteleme.
@@ -667,6 +911,7 @@ pub fn complete_queue_item(
     state: State<'_, AppState>,
     kind: String,
     reference: String,
+    record_store_change: Option<bool>,
 ) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
     let analyzed_at: String = db::get_setting(&conn, "opportunity_json")?
@@ -683,7 +928,9 @@ pub fn complete_queue_item(
     .map_err(|e| format!("Madde işaretlenemedi: {e}"))?;
 
     if kind == "product" {
-        super::log_event(&conn, &reference, "manual_done", true);
+        if record_store_change.unwrap_or(true) {
+            super::log_event(&conn, &reference, "manual_done", true);
+        }
         // 🔴 Feed bayrağı da kapanıyor (saha hatası, 2026-08-10). Acil kovası canlı veriden
         // besleniyor ve uçuş süzgecinden MUAF — haklı olarak: feed yarın yine değişirse madde
         // yeniden çıkmalı. Ama "yapıldı" bayrağı temizlemeyince madde her gün geri geliyordu.
@@ -743,6 +990,91 @@ pub fn restore_queue_items(state: State<'_, AppState>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_team_without_data_is_not_filled_from_legacy_sqlite() {
+        let conn = Connection::open_in_memory().unwrap();
+        db::init(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO products (sku, name) VALUES ('LEGACY','Yerel ürün')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO seo_status (sku, meta_status, details_status) VALUES ('LEGACY','done','done')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO queue_dismissals (kind, ref, at) VALUES ('page','old-page',?1)",
+            [now_str()],
+        ).unwrap();
+        let standalone = build_today_queue(&conn).unwrap();
+        assert_eq!((standalone.items.len(), standalone.hidden), (1, 1));
+
+        let shared = build_shared_today_queue(&conn, &SharedTodayInputs::default());
+        assert!(shared.items.is_empty());
+        assert_eq!((shared.hidden, shared.done_count, shared.in_flight), (0, 0, 0));
+    }
+
+    #[test]
+    fn team_queue_uses_uuid_followups_shared_decisions_and_catalog_review_links() {
+        let conn = Connection::open_in_memory().unwrap();
+        db::init(&conn).unwrap();
+        let now = Utc::now();
+        let today = now.with_timezone(&Local).date_naive();
+        let review_at = (now - Duration::days(queue::REVIEW_AFTER_DAYS + 1)).to_rfc3339();
+        let report = "2026-11-21T10:20:30";
+        let due_id = "00000000-0000-0000-0000-000000000111";
+        let done_id = "00000000-0000-0000-0000-000000000222";
+        let future_id = "00000000-0000-0000-0000-000000000333";
+        let scoped = serde_json::from_value(json!({
+            "report": { "analyzed_at": report, "eol": [
+                { "slug": "snoozed", "url": "https://example.com/urun/snoozed", "clicks": 100, "impressions": 1000, "position": 2 },
+                { "slug": "restored", "url": "https://example.com/urun/restored", "clicks": 100, "impressions": 1000, "position": 2 }
+            ] },
+            "products": [
+                { "sku": "PUBLISHED", "name": "Ürün", "meta_done": true, "details_done": true },
+                { "sku": "OFFLINE_DONE", "name": "Çevrimdışı tamamlandı", "meta_done": true, "details_done": true }
+            ],
+            "events": [
+                { "sku": "PUBLISHED", "url": "https://example.com/urun/urun", "at": now.to_rfc3339(), "kind": "manual_done", "reaches_store": true },
+                { "url": "https://example.com/kategori/kuyruk", "at": review_at, "kind": "store_page_publish", "reaches_store": true },
+                { "url": "https://example.com/kategori/ambiguous", "at": review_at, "kind": "store_page_publish", "reaches_store": true },
+                { "sku": "REMOVED", "url": "https://example.com/urun/removed", "at": review_at, "kind": "ideasoft_push", "reaches_store": true }
+            ],
+            "pages": [
+                { "kind": "category", "slug": "kuyruk", "remote_id": 123, "status": 1 },
+                { "kind": "category", "slug": "ambiguous", "remote_id": 124, "status": 1 },
+                { "kind": "brand", "slug": "ambiguous", "remote_id": 125, "status": 1 }
+            ],
+            "contacts": [
+                { "id": due_id, "name": "Dönülecek", "company": "Firma", "next_step_at": today.to_string(), "next_step_note": "Teklif", "archived": false },
+                { "id": done_id, "name": "Tamamlandı", "company": "", "next_step_note": "", "archived": false },
+                { "id": future_id, "name": "İleride", "company": "", "next_step_at": (today + Duration::days(1)).to_string(), "next_step_note": "", "archived": false }
+            ],
+            "decisions": [
+                { "kind": "product", "reference": "PUBLISHED", "action": "done", "occurred_at": now.to_rfc3339(), "analyzed_at": report },
+                { "kind": "product", "reference": "OFFLINE_DONE", "action": "done", "occurred_at": (now - Duration::days(1)).to_rfc3339(), "analyzed_at": report },
+                { "kind": "contact", "reference": done_id, "action": "done", "occurred_at": now.naive_utc().to_string(), "analyzed_at": report },
+                { "kind": "page", "reference": "snoozed", "action": "snooze", "occurred_at": now.to_rfc3339(), "until_day": (today + Duration::days(1)).to_string() },
+                { "kind": "page", "reference": "restored", "action": "restore", "occurred_at": now.to_rfc3339() }
+            ]
+        })).unwrap();
+
+        let queue = build_shared_today_queue(&conn, &scoped);
+        let item = |key| queue.items.iter().find(|item| item.reference.key() == key);
+        assert_eq!((queue.hidden, queue.done_count), (1, 2));
+        assert_eq!(item(due_id).unwrap().focus_id, due_id);
+        assert!(item(done_id).unwrap().done);
+        assert!(item("PUBLISHED").unwrap().done);
+        let review = item("kuyruk").unwrap();
+        assert_eq!(review.bucket, Bucket::Review);
+        assert_eq!((review.page.as_str(), review.focus_id.as_str()), ("categories", "123"));
+        assert!(item("restored").is_some());
+        for omitted in [future_id, "snoozed", "REMOVED", "ambiguous", "OFFLINE_DONE"] {
+            assert!(item(omitted).is_none(), "{omitted}");
+        }
+    }
 
     /// Üç çıkarma biçiminin **ayrıştığını** sabitler.
     ///

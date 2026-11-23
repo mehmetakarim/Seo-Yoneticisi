@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { computed, ref, watch } from "vue";
 import { useStore } from "../store";
 import { groupedNav } from "../navigation";
+import { teamAccessIssue, teamCheckedAt, teamReachable, teamRestoring, teamServiceStatus, teamUser, teamWorkspace } from "../teamConnection";
 import Icon from "./Icon.vue";
 
 /**
@@ -11,11 +13,37 @@ import Icon from "./Icon.vue";
 const groups = groupedNav();
 
 const store = useStore();
+const openGroup = ref<(typeof groups)[number]["group"] | null>(null);
+
+watch(
+  () => store.page,
+  (page) => {
+    openGroup.value = groups.find(({ items }) => items.some((item) => item.key === page))?.group ?? null;
+  },
+  { immediate: true },
+);
 
 function fmtSync(): string {
   if (!store.lastSync) return "henüz senkron yok";
   return store.lastSync.run_at.replace("T", " ").slice(0, 16);
 }
+
+const connection = computed(() => {
+  if (!teamUser.value) return teamRestoring.value
+    ? { tone: "checking", label: "Ekip oturumu kontrol ediliyor", detail: "" }
+    : { tone: "local", label: "Yerel kayıtlar", detail: `Son katalog senkronu · ${fmtSync()}` };
+  if (!teamWorkspace.value) return { tone: "checking", label: "Çalışma alanı bekleniyor", detail: "" };
+  const detail = teamCheckedAt.value
+    ? `Son kontrol · ${teamCheckedAt.value.toLocaleTimeString("tr-TR")}`
+    : "";
+  if (teamAccessIssue.value) return { tone: "offline", label: "Supabase erişim hatası", detail };
+  if (teamServiceStatus.value !== null) return {
+    tone: "offline", label: `Supabase servis hatası (${teamServiceStatus.value})`, detail: "Yerel kayıtlar kullanılıyor",
+  };
+  if (teamReachable.value === false) return { tone: "offline", label: "Çevrimdışı · Yerel kayıtlar", detail };
+  if (teamReachable.value === true) return { tone: "online", label: "Çevrimiçi · Supabase", detail };
+  return { tone: "checking", label: "Supabase kontrol ediliyor", detail };
+});
 </script>
 
 <template>
@@ -30,19 +58,33 @@ function fmtSync(): string {
       </div>
     </div>
 
-    <nav class="nav om-scroll">
-      <div v-for="g in groups" :key="g.group" class="nav-group">
-        <div v-if="g.group" class="nav-cap">{{ g.group }}</div>
-        <div
-          v-for="item in g.items"
-          :key="item.key"
-          class="nav-item"
-          :class="{ active: store.page === item.key }"
-          :data-nav="item.key"
-          @click="store.page = item.key"
+    <nav class="nav om-scroll" aria-label="Ana menü">
+      <div v-for="(g, index) in groups" :key="g.group ?? ''" class="nav-group">
+        <button
+          v-if="g.group"
+          type="button"
+          class="nav-cap"
+          :aria-expanded="openGroup === g.group"
+          :aria-controls="'nav-group-' + index"
+          @click="openGroup = openGroup === g.group ? null : g.group"
         >
-          <Icon :name="item.icon" :size="16" :stroke-width="1.9" />
-          <span>{{ item.label }}</span>
+          {{ g.group }}
+          <span class="nav-chevron" aria-hidden="true"></span>
+        </button>
+        <div v-show="!g.group || openGroup === g.group" :id="'nav-group-' + index">
+          <button
+            v-for="item in g.items"
+            :key="item.key"
+            type="button"
+            class="nav-item"
+            :class="{ active: store.page === item.key }"
+            :aria-current="store.page === item.key ? 'page' : undefined"
+            :data-nav="item.key"
+            @click="store.page = item.key"
+          >
+            <Icon :name="item.icon" :size="16" :stroke-width="1.9" />
+            <span>{{ item.label }}</span>
+          </button>
         </div>
       </div>
     </nav>
@@ -62,11 +104,11 @@ function fmtSync(): string {
       </button>
     </div>
 
-    <div class="sync-status">
-      <span class="dot"></span>
+    <div class="sync-status" :data-tone="connection.tone">
+      <span class="dot" aria-hidden="true"></span>
       <div>
-        <div class="s1">Senkron aktif</div>
-        <div class="s2">Son: {{ fmtSync() }}</div>
+        <div class="s1" role="status">{{ connection.label }}</div>
+        <div v-if="connection.detail" class="s2">{{ connection.detail }}</div>
       </div>
     </div>
   </aside>
@@ -117,16 +159,40 @@ function fmtSync(): string {
   min-height: 0;
 }
 .nav-group + .nav-group {
-  margin-top: 16px;
+  margin-top: 6px;
 }
 /* Grup başlığı: küçük, soluk, harf aralığı açık — okunmak için değil, ayırmak için. */
 .nav-cap {
-  padding: 0 10px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 10px;
   font-size: 10.5px;
   font-weight: 640;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--c-faint);
+  color: var(--c-mid);
+}
+.nav-cap, .nav-item {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.nav-cap:hover {
+  background: var(--c-hover);
+}
+.nav-chevron {
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+.nav-cap[aria-expanded="true"] .nav-chevron {
+  transform: rotate(45deg);
 }
 .nav-item {
   display: flex;
@@ -195,9 +261,19 @@ function fmtSync(): string {
 .dot {
   width: 8px;
   height: 8px;
+  flex: none;
   border-radius: 50%;
+  background: var(--c-faint);
+}
+.sync-status[data-tone="online"] .dot {
   background: #2fa84f;
   box-shadow: 0 0 0 3px rgba(47, 168, 79, 0.15);
+}
+.sync-status[data-tone="offline"] .dot {
+  background: var(--warn-text);
+}
+.sync-status[data-tone="checking"] .dot {
+  background: var(--accent);
 }
 .s1 {
   font-size: 12px;

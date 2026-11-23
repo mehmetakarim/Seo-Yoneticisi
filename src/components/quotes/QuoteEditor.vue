@@ -12,12 +12,33 @@
 import { computed, ref, watch } from "vue";
 import { api } from "../../api";
 import { useStore } from "../../store";
-import type { CatalogMatch, Quote, QuoteItem } from "../../types";
+import { teamUser, teamWorkspace } from "../../teamConnection";
+import { searchTeamCatalog } from "../../teamCatalog";
+import { teamQuoteCanEdit, teamQuoteConflicts, teamQuotesOffline, teamQuoteSaving } from "../../teamQuotes";
+import type { CatalogMatch, Contact, ContactId, Quote, QuoteItem } from "../../types";
 import Icon from "../Icon.vue";
 import QuoteDocModal from "./QuoteDocModal.vue";
 
 const store = useStore();
+const quoteContacts = ref<Contact[]>([]);
+watch([teamUser, teamWorkspace], async ([user, workspace], _, onCleanup) => {
+  let canceled = false;
+  onCleanup(() => { canceled = true; });
+  quoteContacts.value = [];
+  if (user && !workspace) return;
+  try {
+    const contacts = user ? await api.listContacts("", false, "", "") : await api.listLocalContacts();
+    if (!canceled) quoteContacts.value = contacts;
+  } catch (error) {
+    store.toast(String(error), "error");
+  }
+}, { immediate: true });
 const q = computed(() => store.quote);
+const central = computed(() => typeof q.value?.id === "string");
+const conflict = computed(() => q.value && central.value && teamQuoteConflicts.value.has(q.value.id));
+const locked = computed(() => central.value && (!teamQuoteCanEdit.value || q.value?.status !== "draft" || !!conflict.value));
+const statusLocked = computed(() => central.value && (teamQuotesOffline.value || !teamQuoteCanEdit.value
+  || !!conflict.value || teamQuoteSaving.value));
 
 /**
  * ⚠️ Bu üç ref aşağıdaki `watch`tan ÖNCE tanımlı olmak ZORUNDA: `immediate: true` olan
@@ -30,6 +51,7 @@ const q = computed(() => store.quote);
  */
 const urunArama = ref("");
 const urunSonuc = ref<CatalogMatch[]>([]);
+const urunAramaHatasi = ref("");
 
 /** Başlık düzenleme kopyası — kaydetmeden store değişmesin. */
 const f = ref(formdan(null));
@@ -47,10 +69,13 @@ function formdan(v: Quote | null) {
 
 watch(
   () => store.quote,
-  (v) => {
-    f.value = formdan(v);
+  (v, previous) => {
+    if (v?.id !== previous?.id || JSON.stringify(formdan(v)) !== JSON.stringify(formdan(previous ?? null))) {
+      f.value = formdan(v);
+    }
     urunArama.value = "";
     urunSonuc.value = [];
+    urunAramaHatasi.value = "";
   },
   { immediate: true },
 );
@@ -93,6 +118,7 @@ function kaydet() {
   void store.saveQuote({
     id: v.id,
     contactId: f.value.contactId,
+    contactName: quoteContacts.value.find((contact) => contact.id === f.value.contactId)?.name,
     currency: f.value.currency,
     fxRate: Number.isFinite(kur) && kur > 0 ? kur : null,
     fxDate: Number.isFinite(kur) && kur > 0 ? new Date().toISOString().slice(0, 10) : null,
@@ -107,13 +133,24 @@ let zaman: ReturnType<typeof setTimeout> | null = null;
 
 function urunAra(v: string) {
   urunArama.value = v;
+  urunAramaHatasi.value = "";
   if (zaman) clearTimeout(zaman);
   if (v.trim().length < 3) {
     urunSonuc.value = [];
     return;
   }
+  const id = q.value?.id;
+  const current = () => v === urunArama.value && id === q.value?.id;
   zaman = setTimeout(async () => {
-    urunSonuc.value = await api.searchLiveProducts(v).catch(() => []);
+    try {
+      const results = typeof id === "string" ? await searchTeamCatalog(v) : await api.searchLiveProducts(v);
+      if (current()) urunSonuc.value = results;
+    } catch (error) {
+      if (current()) {
+        urunSonuc.value = [];
+        urunAramaHatasi.value = String(error);
+      }
+    }
   }, 220);
 }
 
@@ -141,7 +178,7 @@ async function elleEkle() {
  * Yalnızca **son** değişiklik tutuluyor: derin bir geçmiş yığını teklif düzenleyicide
  * abartı olurdu; ihtiyaç "yanlış tuşa bastım" anını kurtarmak.
  */
-const geriAlYedegi = ref<Record<number, Pick<QuoteItem, "name" | "qty" | "unit_price" | "tax_rate">>>({});
+const geriAlYedegi = ref<Record<QuoteItem["id"], Pick<QuoteItem, "name" | "qty" | "unit_price" | "tax_rate">>>({});
 
 /** Satır alanı düzenlendiğinde kaydet — her tuşta değil, odak çıkışında. */
 function satirKaydet(it: QuoteItem, alan: Partial<QuoteItem>) {
@@ -191,14 +228,14 @@ const kapatmaNedeni = ref("");
 async function gonderildi() {
   const v = q.value;
   if (!v) return;
-  await store.setQuoteStatus("sent");
+  if (!(await store.setQuoteStatus("sent"))) return;
   if (!v.contact_id) return;
 
   const gun = 7;
   const t = new Date();
   t.setDate(t.getDate() + gun);
   const tarih = t.toISOString().slice(0, 10);
-  const kisi = store.contacts.find((c) => c.id === v.contact_id);
+  const kisi = quoteContacts.value.find((c) => c.id === v.contact_id);
   if (kisi?.next_step_at) {
     // Zaten bir sözü var: üstüne yazmıyoruz, yalnızca hatırlatıyoruz.
     store.toast(`Gönderildi. ${kisi.name} için zaten ${kisi.next_step_at.slice(0, 10)} tarihli bir adım var.`, "ok");
@@ -207,13 +244,27 @@ async function gonderildi() {
   takipOnerisi.value = { contactId: v.contact_id, tarih, ad: kisi?.name ?? "" };
 }
 
-const takipOnerisi = ref<{ contactId: number; tarih: string; ad: string } | null>(null);
+const takipOnerisi = ref<{ contactId: ContactId; tarih: string; ad: string } | null>(null);
 
 async function takipKur() {
   const t = takipOnerisi.value;
   const v = q.value;
   if (!t || !v) return;
-  await store.addContactEvent(t.contactId, "note", `${v.no} takibi`, t.tarih, `${v.no} teklifini hatırlat`);
+  if (typeof t.contactId === "string") {
+    try {
+      const contact = await api.getContact(t.contactId);
+      if (contact.next_step_at) {
+        store.toast(`${contact.name} için zaten bir sonraki adım var.`, "ok");
+      } else {
+        await store.addContactEvent(t.contactId, "note", `${v.no} takibi`, t.tarih, `${v.no} teklifini hatırlat`, contact.revision);
+      }
+    } catch (error) {
+      store.toast(String(error), "error");
+      return;
+    }
+  } else {
+    await store.addContactEvent(t.contactId, "note", `${v.no} takibi`, t.tarih, `${v.no} teklifini hatırlat`);
+  }
   takipOnerisi.value = null;
 }
 const DURUM_EYLEM: Record<string, { to: string; label: string; neden?: boolean }[]> = {
@@ -244,13 +295,14 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
         <button class="ghost" @click="belgeAcik = true">
           <Icon name="eye" :size="14" :stroke-width="2" /> Belge
         </button>
-        <button v-if="q.status === 'draft'" class="ghost" @click="gonderildi">
+        <button v-if="q.status === 'draft'" class="ghost" :disabled="statusLocked || kirli" @click="gonderildi">
           Gönderildi olarak işaretle
         </button>
         <button
           v-for="e in eylemler"
           :key="e.to"
           class="ghost"
+          :disabled="statusLocked"
           @click="store.setQuoteStatus(e.to, e.neden ? kapatmaNedeni : '')"
         >
           {{ e.label }}
@@ -258,11 +310,14 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
         <!-- Vazgeç yalnızca değişiklik VARKEN görünüyor: hep duran bir düğme, hiçbir şey
              yapmadığı anlarda gürültüdür. -->
         <button v-if="kirli" class="ghost" @click="vazgec">Vazgeç</button>
-        <button class="primary" :disabled="!kirli" @click="kaydet">Kaydet</button>
+        <button v-if="!locked" class="primary" :disabled="!kirli || (central && teamQuoteSaving)" @click="kaydet">Kaydet</button>
       </div>
     </div>
 
-    <p v-if="kirli" class="hint kirli-not">
+    <p v-if="conflict" class="hint kirli-not" role="status">
+      Bu teklifin yerel değişiklikleri saklandı. Eşitleme çakışması nedeniyle düzenlemeye ara verildi.
+    </p>
+    <p v-if="kirli && !locked" class="hint kirli-not">
       <Icon name="info" :size="13" />
       Başlık alanlarında kaydedilmemiş değişiklik var. <b>Satır değişiklikleri anında
       kaydediliyor</b>, "Vazgeç" onları geri almaz.
@@ -290,25 +345,28 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
     <div class="grid">
       <label>
         Müşteri
-        <select v-model.number="f.contactId" class="fx">
+        <select v-model="f.contactId" class="fx" :disabled="locked">
           <option :value="null">— seçilmedi —</option>
-          <option v-for="c in store.contacts" :key="c.id" :value="c.id">
+          <option v-if="central && q.contact_id && !quoteContacts.some((c) => c.id === q?.contact_id)" :value="q.contact_id">
+            {{ q.contact_name }}
+          </option>
+          <option v-for="c in quoteContacts" :key="c.id" :value="c.id">
             {{ c.name }}<template v-if="c.company"> · {{ c.company }}</template>
           </option>
         </select>
       </label>
       <label>
         Para birimi
-        <select v-model="f.currency" class="fx">
+        <select v-model="f.currency" class="fx" :disabled="locked">
           <option value="USD">USD</option>
           <option value="TRY">TRY</option>
         </select>
       </label>
       <label>
         USD/TRY kuru
-        <input v-model="f.fxRate" class="fx" placeholder="ör. 47,59" />
+        <input v-model="f.fxRate" class="fx" :readonly="locked" placeholder="ör. 47,59" />
       </label>
-      <label>Geçerlilik <input v-model="f.validUntil" class="fx" type="date" /></label>
+      <label>Geçerlilik <input v-model="f.validUntil" class="fx" type="date" :readonly="locked" /></label>
     </div>
 
     <!-- Kur yalnızca bu durumda gerekiyor; her zaman uyarı göstermek gürültü olurdu. -->
@@ -347,6 +405,7 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
             <td>
               <input
                 class="hucre"
+                :readonly="locked"
                 :value="it.name"
                 @change="satirKaydet(it, { name: ($event.target as HTMLInputElement).value })"
               />
@@ -355,6 +414,7 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
             <td class="sag">
               <input
                 class="hucre num"
+                :readonly="locked"
                 type="number"
                 min="0"
                 step="1"
@@ -365,6 +425,7 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
             <td class="sag">
               <input
                 class="hucre num"
+                :readonly="locked"
                 type="number"
                 min="0"
                 step="0.01"
@@ -375,6 +436,7 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
             <td class="sag">
               <input
                 class="hucre num"
+                :readonly="locked"
                 type="number"
                 min="0"
                 step="1"
@@ -390,7 +452,7 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
               </span>
               <span v-else class="marj yok">—</span>
             </td>
-            <td class="eylem-h">
+            <td v-if="!locked" class="eylem-h">
               <!-- Geri alma yalnızca o satırda değişiklik yapıldıysa görünüyor; yer
                    ayrılmış durumda ki düğme belirince satırlar kaymasın. -->
               <button
@@ -406,23 +468,25 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
                 <Icon name="x" :size="12" :stroke-width="2.4" />
               </button>
             </td>
+            <td v-else></td>
           </tr>
           <tr v-if="!q.items.length">
-            <td colspan="7" class="bos">Aşağıdan katalogdan ürün ekleyin veya elle satır yazın.</td>
+            <td colspan="7" class="bos">{{ locked ? "Teklifte kalem yok." : "Aşağıdan katalogdan ürün ekleyin veya elle satır yazın." }}</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <!-- Satır ekleme -->
-    <div class="ekle">
+    <div v-if="!locked" class="ekle">
       <div class="ek-alan">
         <input
           class="fx"
           :value="urunArama"
-          placeholder="Katalogdan ürün ara (en az 3 harf)"
+          :placeholder="central ? 'Ortak katalogda ürün ara' : 'Katalogdan ürün ara (en az 3 harf)'"
           @input="urunAra(($event.target as HTMLInputElement).value)"
         />
+        <p v-if="urunAramaHatasi" class="hint" role="status">{{ urunAramaHatasi }}</p>
         <div v-if="urunSonuc.length" class="sonuc om-scroll">
           <button v-for="m in urunSonuc" :key="m.slug" class="s-sat" @click="katalogdanEkle(m)">
             {{ m.name }}
@@ -460,9 +524,9 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
       Marj %10'un altında. Katalogda 31 ürün bu aralıkta — fiyatı bilerek mi verdiniz?
     </p>
 
-    <label class="tam">Not <textarea v-model="f.note" class="fx" rows="2"></textarea></label>
+    <label class="tam">Not <textarea v-model="f.note" class="fx" rows="2" :readonly="locked"></textarea></label>
 
-    <div class="alt">
+    <div v-if="typeof q.id === 'number'" class="alt">
       <button class="ghost sil-teklif" @click="store.deleteQuote(q.id)">Teklifi sil</button>
     </div>
 

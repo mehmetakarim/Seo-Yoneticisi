@@ -3673,7 +3673,7 @@ dependencies = [
 
 [[package]]
 name = "seo-core"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "chrono",
  "futures-util",
@@ -3691,7 +3691,7 @@ dependencies = [
 
 [[package]]
 name = "seo-yoneticisi"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "chrono",
  "objc2",
@@ -3699,6 +3699,7 @@ dependencies = [
  "objc2-foundation",
  "reqwest 0.12.28",
  "rusqlite",
+ "security-framework",
  "seo-core",
  "serde",
  "serde_json",
@@ -3710,6 +3711,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tokio",
+ "windows",
 ]
 
 [[package]]

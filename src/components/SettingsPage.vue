@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import TeamBackupModal from "./TeamBackupModal.vue";
+import SeoBackupPreview from "./SeoBackupPreview.vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "../api";
+import { syncTeamStoreInventory } from "../teamStorePages";
+import { canRotateTeamIdeasoftToken, rotateTeamIdeasoftToken, testTeamIdeasoft } from "../teamIdeasoft";
+import { configureTeamGemini, previewTeamGeminiMeta, teamGeminiRole, testTeamGemini } from "../teamGemini";
+import { teamAccessIssue, teamProject, teamReachable, teamSession, teamUser, teamWorkspace } from "../teamConnection";
+import { teamTodayMode, teamTodayScope } from "../teamToday";
 import { useStore } from "../store";
 import { BUCKET_LABEL } from "../buckets";
 import type { CalibrationRow, GeminiKullanim, SilenceState } from "../types";
@@ -11,6 +18,109 @@ import Icon from "./Icon.vue";
 import HealthPanel from "./HealthPanel.vue";
 
 const store = useStore();
+const healthPanel = ref<InstanceType<typeof HealthPanel> | null>(null);
+const sharedIntegrationScope = computed(() => JSON.stringify([teamProject.value, teamUser.value, teamWorkspace.value]));
+const sharedGeminiReady = computed(() => !!teamSession.value && !!teamWorkspace.value &&
+  teamReachable.value === true && !teamAccessIssue.value);
+const sharedGeminiRole = ref<Awaited<ReturnType<typeof teamGeminiRole>>>(null);
+const sharedGeminiCanTest = computed(() => sharedGeminiRole.value === "owner" || sharedGeminiRole.value === "editor");
+const sharedGeminiKey = ref("");
+type SharedGeminiAction = "test" | "save" | "reuse" | "preview";
+const sharedGeminiBusy = ref<SharedGeminiAction | null>(null);
+const sharedGeminiHint = ref("");
+const sharedGeminiOk = ref(false);
+const sharedGeminiPreview = ref<Awaited<ReturnType<typeof previewTeamGeminiMeta>> | null>(null);
+
+watch([sharedIntegrationScope, sharedGeminiReady], async ([scope, ready], previous, onCleanup) => {
+  if (scope !== previous?.[0]) {
+    sharedGeminiRole.value = null;
+    sharedGeminiKey.value = "";
+    sharedGeminiHint.value = "";
+    sharedGeminiOk.value = false;
+    sharedGeminiPreview.value = null;
+  }
+  if (!ready) return;
+  let current = true;
+  onCleanup(() => { current = false; });
+  const role = await teamGeminiRole().catch(() => null);
+  if (current) sharedGeminiRole.value = role;
+}, { immediate: true });
+
+async function checkSharedGemini(action: SharedGeminiAction) {
+  const saving = action === "save" || action === "reuse";
+  if (sharedGeminiBusy.value || !sharedGeminiReady.value || !sharedGeminiCanTest.value ||
+      (saving && sharedGeminiRole.value !== "owner")) return;
+  const scope = sharedIntegrationScope.value;
+  sharedGeminiBusy.value = action;
+  sharedGeminiHint.value = "";
+  sharedGeminiOk.value = false;
+  sharedGeminiPreview.value = null;
+  try {
+    if (action === "preview") {
+      const preview = await previewTeamGeminiMeta();
+      if (scope === sharedIntegrationScope.value) sharedGeminiPreview.value = preview;
+      return;
+    }
+    const key = action === "reuse" ? store.settings?.gemini_api_key ?? "" : sharedGeminiKey.value;
+    const result = saving ? await configureTeamGemini(key) : await testTeamGemini();
+    if (scope !== sharedIntegrationScope.value) return;
+    sharedGeminiHint.value = result;
+    sharedGeminiOk.value = true;
+    if (saving) {
+      sharedGeminiKey.value = "";
+      void healthPanel.value?.kontrolEt();
+    }
+  } catch (error) {
+    if (scope === sharedIntegrationScope.value) {
+      sharedGeminiHint.value = error instanceof Error ? error.message
+        : typeof error === "string" ? error : "Ortak Gemini işlemi tamamlanamadı.";
+    }
+  } finally {
+    sharedGeminiBusy.value = null;
+  }
+}
+const sharedIdeasoftBusy = ref(false);
+const sharedIdeasoftHint = ref("");
+const sharedIdeasoftOk = ref(false);
+const ideaSecretsUrl = computed(() => {
+  const match = /^https:\/\/([a-z0-9]+)\.supabase\.co\/?$/.exec(teamProject.value);
+  return match ? `https://supabase.com/dashboard/project/${match[1]}/functions/secrets` : "";
+});
+
+watch(sharedIntegrationScope, () => {
+  sharedIdeasoftHint.value = "";
+  sharedIdeasoftOk.value = false;
+});
+
+async function openIdeaSecrets() {
+  if (!ideaSecretsUrl.value) return;
+  try {
+    await openUrl(ideaSecretsUrl.value);
+  } catch {
+    store.toast("Supabase Secrets ekranı açılamadı.", "error");
+  }
+}
+
+async function checkSharedIdeasoft() {
+  if (sharedIdeasoftBusy.value) return;
+  const scope = sharedIntegrationScope.value;
+  sharedIdeasoftBusy.value = true;
+  sharedIdeasoftHint.value = "";
+  sharedIdeasoftOk.value = false;
+  try {
+    const result = await testTeamIdeasoft();
+    if (scope === sharedIntegrationScope.value) {
+      sharedIdeasoftHint.value = result;
+      sharedIdeasoftOk.value = true;
+    }
+  } catch (error) {
+    if (scope === sharedIntegrationScope.value) {
+      sharedIdeasoftHint.value = error instanceof Error ? error.message : "Ortak bağlantı doğrulanamadı.";
+    }
+  } finally {
+    sharedIdeasoftBusy.value = false;
+  }
+}
 
 // --- Odak seansı (Faz S) ---
 const seansDk = ref(25);
@@ -81,6 +191,10 @@ const ideasoftToken = ref("");
 const showIsToken = ref(false);
 const isHint = ref("");
 const isOk = ref(false);
+const isBusy = ref(false);
+const editedIdeaToken = ref(false);
+watch([ideasoftDomain, ideasoftToken], () => { isHint.value = ""; });
+watch(sharedIntegrationScope, () => { editedIdeaToken.value = false; });
 const gscEmail = ref("");
 const showKey = ref(false);
 const showCapKey = ref(false);
@@ -94,6 +208,8 @@ const gscHint = ref("");
 const gscOk = ref(false);
 const showGuide = ref(false);
 const importHint = ref(".db veya .json dosyası seçin");
+const showTeamBackup = ref(false);
+const showSeoBackup = ref(false);
 
 onMounted(async () => {
   if (!store.settings) store.settings = await api.getSettings();
@@ -115,7 +231,8 @@ onMounted(async () => {
   await store.loadSession();
   seansDk.value = store.session?.planned_minutes ?? 25;
   molaDk.value = store.session?.break_minutes ?? 5;
-  kalibrasyon.value = await api.getFocusCalibration().catch(() => []);
+  const focusScope = teamTodayScope();
+  kalibrasyon.value = !teamTodayMode() || focusScope ? await api.getFocusCalibration(focusScope).catch(() => []) : [];
   const td = await api.getQuoteDefaults().catch(() => null);
   if (td) {
     teklifKdv.value = td.tax_rate;
@@ -160,10 +277,12 @@ async function envanterCek() {
   envYukleniyor.value = true;
   envHint.value = "";
   try {
-    const r = await api.syncStorePages();
+    const r = await syncTeamStoreInventory();
     envanter.value = r.by_kind;
     envHataMi.value = false;
-    envHint.value = `${r.total} kayıt alındı.`;
+    envHint.value = "shared_pending" in r && r.shared_pending
+      ? `${r.total} kayıt alındı. Yerel kuyrukta korunuyor, Supabase'e eşitlenmesi bekleniyor.`
+      : `${r.total} kayıt alındı.`;
   } catch (e) {
     envHataMi.value = true;
     envHint.value = String(e);
@@ -298,7 +417,7 @@ async function zincirleriKaydet() {
   }
 }
 
-async function persist() {
+async function persist(): Promise<boolean> {
   try {
     await api.saveSettings(
       feedUrl.value,
@@ -306,12 +425,12 @@ async function persist() {
       capsolverKey.value,
       seoCountry.value,
       gscSiteUrl.value,
-      ideasoftDomain.value,
-      ideasoftToken.value,
     );
     store.settings = await api.getSettings();
+    return true;
   } catch (e) {
     store.toast(String(e), "error");
+    return false;
   }
 }
 
@@ -439,15 +558,54 @@ async function openGuideLink(url?: string) {
 }
 
 async function testIdeasoft() {
-  isHint.value = "Test ediliyor…";
+  if (isBusy.value || sharedIdeasoftBusy.value) return;
+  const domain = ideasoftDomain.value;
+  const token = ideasoftToken.value;
+  const scope = sharedIntegrationScope.value;
+  const workspace = teamWorkspace.value;
+  const allowedToReplace = editedIdeaToken.value;
+  const current = () => domain === ideasoftDomain.value && token === ideasoftToken.value && scope === sharedIntegrationScope.value;
+  isBusy.value = true;
+  isHint.value = "";
   isOk.value = false;
   try {
-    await persist();
+    const result = await api.testAndSaveIdeasoftConnection(domain, token);
+    if (!current()) return;
+    if (store.settings) {
+      store.settings.ideasoft_domain = domain.trim();
+      store.settings.ideasoft_token = token.trim();
+      store.settings.ideasoft_active = true;
+    }
+    isHint.value = result;
     isOk.value = true;
-    isHint.value = await api.testIdeasoft();
+    if (!workspace) return;
+    const canRotate = await canRotateTeamIdeasoftToken();
+    if (!current()) return;
+    if (!canRotate) {
+      isHint.value = "Cihaz bağlantısı doğrulandı. Ortak token’ı çalışma alanı sahibi güncelleyebilir.";
+      return;
+    }
+    const rotated = await rotateTeamIdeasoftToken(domain, token, allowedToReplace);
+    if (!current()) return;
+    editedIdeaToken.value = false;
+    sharedIdeasoftOk.value = true;
+    sharedIdeasoftHint.value = rotated ? "Ortak IdeaSoft token’ı güncellendi." : "Ortak IdeaSoft bağlantısı doğrulandı.";
+    isHint.value = rotated ? "Cihaz bağlantısı doğrulandı ve ortak token güncellendi." : "Cihaz ve ortak IdeaSoft bağlantıları doğrulandı.";
+    void healthPanel.value?.kontrolEt();
   } catch (e) {
-    isOk.value = false;
-    isHint.value = String(e);
+    if (current()) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (isOk.value) {
+        sharedIdeasoftOk.value = false;
+        sharedIdeasoftHint.value = message;
+        isHint.value = "Cihaz bağlantısı doğrulandı. " + message;
+        isOk.value = false;
+      } else {
+        isHint.value = message;
+      }
+    }
+  } finally {
+    isBusy.value = false;
   }
 }
 
@@ -567,7 +725,7 @@ async function doImport() {
           </div>
         </div>
         <div class="card-body">
-          <HealthPanel />
+          <HealthPanel ref="healthPanel" />
         </div>
       </div>
 
@@ -579,26 +737,80 @@ async function doImport() {
             Kaynaklar
           </div>
           <div class="ch-sub">
-            Feed ve yapay zeka bağlantı bilgileriniz. Bu değerler yerel SQLite
-            veritabanında saklanır.
+            {{ teamWorkspace ? "Ortak Gemini bağlantısını ve bu cihazın kaynaklarını yönetin." :
+              "Bu cihazda kullanılan feed ve entegrasyon ayarlarını yönetin." }}
           </div>
         </div>
         <div class="card-body">
           <div>
-            <label class="lbl">XML Feed URL</label>
+            <label class="lbl" for="device-feed-url">{{ teamWorkspace ? "Bu cihazın XML feed adresi" : "XML feed adresi" }}</label>
             <div class="input-row">
-              <input class="fx inp" v-model="feedUrl" @change="persist" placeholder="https://siteniz.com/feed/urunler.xml" />
+              <input id="device-feed-url" class="fx inp" v-model="feedUrl" @change="persist" placeholder="https://siteniz.com/feed/urunler.xml" />
               <button class="ghost" @click="testXml">Test et</button>
             </div>
             <div class="fhint" :style="{ color: xmlHint ? (xmlOk ? 'var(--green)' : 'var(--red)') : 'var(--c-faint)' }">
               {{ xmlHint }}
             </div>
           </div>
+          <section v-if="teamWorkspace" class="shared-connection" aria-labelledby="shared-gemini-title">
+            <h3 id="shared-gemini-title">Ortak Gemini bağlantısı</h3>
+            <p class="zhint">Ürün ve mağaza sayfası taslaklarında ekibin kullandığı bağlantı.</p>
+            <form v-if="sharedGeminiRole === 'owner'" class="shared-gemini-form" @submit.prevent="checkSharedGemini('save')">
+              <label class="lbl" for="shared-gemini-key">Yeni Gemini API anahtarı</label>
+              <div class="input-row">
+                <input
+                  id="shared-gemini-key"
+                  v-model="sharedGeminiKey"
+                  class="fx inp"
+                  type="password"
+                  autocomplete="off"
+                  spellcheck="false"
+                  maxlength="1024"
+                  :disabled="!sharedGeminiReady || !!sharedGeminiBusy"
+                  required
+                />
+                <button class="solid" type="submit" :disabled="!sharedGeminiReady || !!sharedGeminiBusy || !sharedGeminiKey.trim()">
+                  <Icon name="refresh" :size="15" :class="{ spin: sharedGeminiBusy === 'save' }" />
+                  {{ sharedGeminiBusy === "save" ? "Doğrulanıyor…" : "Test et ve ekibe kaydet" }}
+                </button>
+              </div>
+            </form>
+            <div class="css-row">
+              <button v-if="sharedGeminiRole === 'owner' && store.settings?.gemini_api_key.trim()" class="ghost" type="button"
+                      :disabled="!sharedGeminiReady || !!sharedGeminiBusy" @click="checkSharedGemini('reuse')">
+                <Icon name="refresh" :size="15" :class="{ spin: sharedGeminiBusy === 'reuse' }" />
+                {{ sharedGeminiBusy === "reuse" ? "Doğrulanıyor…" : "Cihazdaki anahtarı ekibe kaydet" }}
+              </button>
+              <button v-if="sharedGeminiRole !== 'viewer'" class="ghost" type="button"
+                      :disabled="!sharedGeminiReady || !sharedGeminiCanTest || !!sharedGeminiBusy" @click="checkSharedGemini('test')">
+                <Icon name="refresh" :size="15" :class="{ spin: sharedGeminiBusy === 'test' }" />
+                {{ sharedGeminiBusy === "test" ? "Kontrol ediliyor…" : "Ortak bağlantıyı test et" }}
+              </button>
+              <button v-if="sharedGeminiCanTest" class="ghost" type="button"
+                      :disabled="!sharedGeminiReady || !!sharedGeminiBusy" @click="checkSharedGemini('preview')">
+                <Icon :name="sharedGeminiBusy === 'preview' ? 'refresh' : 'sparkles'" :size="15" :class="{ spin: sharedGeminiBusy === 'preview' }" />
+                {{ sharedGeminiBusy === "preview" ? "Taslak üretiliyor…" : "Örnek taslak üret" }}
+              </button>
+              <span v-if="!sharedGeminiReady" class="fhint">Supabase bağlantısı bekleniyor.</span>
+              <span v-else-if="sharedGeminiRole === 'viewer'" class="fhint">Ortak bağlantıyı çalışma alanı sahibi veya düzenleyici test edebilir.</span>
+            </div>
+            <div v-if="sharedGeminiHint" class="fhint" role="status" :style="{ color: sharedGeminiOk ? 'var(--green)' : 'var(--red)' }">{{ sharedGeminiHint }}</div>
+            <div v-if="sharedGeminiPreview" class="gemini-preview" role="status">
+              <h3>Ortak Gemini önizlemesi</h3>
+              <dl>
+                <div><dt>Model</dt><dd>{{ sharedGeminiPreview.model }}</dd></div>
+                <div><dt>SEO başlığı</dt><dd>{{ sharedGeminiPreview.title }}</dd></div>
+                <div><dt>Meta açıklama</dt><dd>{{ sharedGeminiPreview.description }}</dd></div>
+              </dl>
+            </div>
+          </section>
+
           <div>
-            <label class="lbl">Gemini API Anahtarı</label>
+            <label class="lbl" for="device-gemini-key">{{ teamWorkspace ? "Bu cihazın Gemini API anahtarı" : "Gemini API anahtarı" }}</label>
             <div class="input-row">
               <div class="key-wrap">
                 <input
+                  id="device-gemini-key"
                   class="fx inp"
                   v-model="geminiKey"
                   @change="persist"
@@ -710,38 +922,55 @@ async function doImport() {
         <div class="card-head">
           <div class="ch-title">
             <Icon name="upload" :size="17" style="color:var(--accent)" />
-            IdeaSoft Bağlantısı
-            <span class="opt-tag">opsiyonel</span>
+            IdeaSoft bağlantısı
           </div>
-          <div class="ch-sub">
-            Doldurulursa kartlarda <b>“IdeaSoft'a Gönder”</b> butonu çıkar ve üretilen içerik tek tıkla
-            ürüne yazılır. Boş bırakırsanız uygulama kopyala-yapıştır akışıyla çalışmaya devam eder.
-          </div>
+          <div class="ch-sub">Mağazadaki ürün, kategori, marka ve blog kayıtlarına erişim.</div>
         </div>
         <div class="card-body">
-          <div>
-            <label class="lbl">Mağaza Adresi (admin)</label>
-            <div class="input-row">
-              <input class="fx inp" v-model="ideasoftDomain" @change="persist"
-                     placeholder="https://magazaniz.myideasoft.com" />
+          <section v-if="teamWorkspace" class="shared-connection" aria-labelledby="shared-ideasoft-title">
+            <h3 id="shared-ideasoft-title">Ortak çalışma alanı</h3>
+            <p class="zhint">Ekip işlemleri Supabase’deki ortak token’ı kullanır. Çalışma alanı sahibi yeni token’ı aşağıda test ettiğinde ekip bağlantısı da güncellenir.</p>
+            <div class="css-row">
+              <button class="solid" type="button" :disabled="sharedIdeasoftBusy || isBusy" @click="checkSharedIdeasoft">
+                <Icon name="refresh" :size="15" :class="{ spin: sharedIdeasoftBusy }" />
+                {{ sharedIdeasoftBusy ? "Kontrol ediliyor…" : "Ortak bağlantıyı test et" }}
+              </button>
+              <button v-if="ideaSecretsUrl" class="ghost" type="button" @click="openIdeaSecrets">
+                <Icon name="external" :size="14" /> Supabase kurulum ayarları
+              </button>
             </div>
-          </div>
-          <div>
-            <label class="lbl">Access Token</label>
-            <div class="input-row">
-              <div class="key-wrap">
-                <input class="fx inp" v-model="ideasoftToken" @change="persist"
-                       :type="showIsToken ? 'text' : 'password'" placeholder="IdeaSoft panelinden aldığınız access token" />
-                <button class="eye" title="Göster / Gizle" @click="showIsToken = !showIsToken">
-                  <Icon name="eye" :size="15" />
+            <div v-if="sharedIdeasoftHint" class="fhint" role="status" :style="{ color: sharedIdeasoftOk ? 'var(--green)' : 'var(--red)' }">{{ sharedIdeasoftHint }}</div>
+          </section>
+
+          <section class="local-connection" aria-labelledby="local-ideasoft-title">
+            <div>
+              <h3 id="local-ideasoft-title">Bu cihaz</h3>
+              <p v-if="teamWorkspace" class="zhint">Mağaza adresini ve yeni token’ı girip bağlantıyı test edin. Test geçerse bağlantı cihaza kaydedilir. Çalışma alanı sahibi aynı mağaza için ortak token’ı da günceller.</p>
+            </div>
+            <div>
+              <label class="lbl" for="local-ideasoft-origin">Mağaza adresi</label>
+              <div class="input-row">
+                <input id="local-ideasoft-origin" class="fx inp" v-model="ideasoftDomain" :disabled="isBusy"
+                       placeholder="https://magazaniz.myideasoft.com" />
+              </div>
+            </div>
+            <div>
+              <label class="lbl" for="local-ideasoft-token">Access Token</label>
+              <div class="input-row">
+                <div class="key-wrap">
+                  <input id="local-ideasoft-token" class="fx inp" v-model="ideasoftToken" @input="editedIdeaToken = true" :disabled="isBusy"
+                         :type="showIsToken ? 'text' : 'password'" placeholder="IdeaSoft panelindeki Access Token" />
+                  <button class="eye" type="button" :aria-label="showIsToken ? 'Token’ı gizle' : 'Token’ı göster'" @click="showIsToken = !showIsToken">
+                    <Icon name="eye" :size="15" />
+                  </button>
+                </div>
+                <button class="ghost" type="button" :disabled="isBusy || sharedIdeasoftBusy" @click="testIdeasoft">
+                  {{ isBusy ? "Kontrol ediliyor…" : "Cihaz bağlantısını test et" }}
                 </button>
               </div>
-              <button class="ghost" @click="testIdeasoft">Bağlantıyı test et</button>
+              <div v-if="isHint" class="fhint" role="status" :style="{ color: isOk ? 'var(--green)' : 'var(--red)' }">{{ isHint }}</div>
             </div>
-            <div class="fhint" :style="{ color: isHint ? (isOk ? 'var(--green)' : 'var(--red)') : 'var(--c-faint)' }">
-              {{ isHint || "Token günlük yenilenir; gönderim yetki hatası verirse buradan güncelleyin." }}
-            </div>
-          </div>
+          </section>
 
           <!-- Sayfa envanteri (Faz İ) -->
           <div>
@@ -1147,9 +1376,33 @@ async function doImport() {
             İçe aktarma mevcut veritabanının üzerine yazar. Önce dışa aktarım
             almanız önerilir.
           </div>
+          <div class="backup-row">
+            <div class="bi accent"><Icon name="database" :size="17" /></div>
+            <div class="bi-main">
+              <div class="bi-title">Ortak çalışma alanına taşı</div>
+              <div class="bi-sub">Yerel veya yedek SQLite dosyasındaki müşteri ve teklifler</div>
+            </div>
+            <button class="ghost" type="button" @click="showTeamBackup = true">Supabase’e Aktar</button>
+          </div>
+          <div class="backup-row">
+            <div class="bi accent"><Icon name="search" :size="17" /></div>
+            <div class="bi-main">
+              <div class="bi-title">SEO yedeğini karşılaştır</div>
+              <div class="bi-sub">İki cihazdaki ürün taslaklarını ve geçmişini SKU bazında incele</div>
+            </div>
+            <button class="ghost" type="button" @click="showSeoBackup = true">Karşılaştır</button>
+          </div>
         </div>
       </div>
     </div>
+
+    <TeamBackupModal
+      v-if="showTeamBackup"
+      :open="showTeamBackup"
+      @close="showTeamBackup = false"
+      @connect="showTeamBackup = false; store.page = 'team'"
+    />
+    <SeoBackupPreview v-if="showSeoBackup" @close="showSeoBackup = false" />
 
     <!-- GSC kurulum rehberi (animasyonlu modal) -->
     <Transition name="guide">
@@ -1256,6 +1509,59 @@ async function doImport() {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+.shared-connection {
+  padding: 14px;
+  border: 1px solid var(--c-border-soft);
+  border-radius: 10px;
+  background: var(--c-list);
+}
+.shared-connection h3,
+.local-connection h3 {
+  margin: 0 0 4px;
+  color: var(--c-text);
+  font-size: 13px;
+  font-weight: 640;
+}
+.shared-connection .zhint,
+.local-connection .zhint {
+  font-size: 12px;
+  color: var(--c-mid);
+}
+.shared-connection .css-row {
+  flex-wrap: wrap;
+}
+.shared-gemini-form {
+  margin: 12px 0;
+}
+.gemini-preview {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--c-card);
+  border: 1px solid var(--c-border-soft);
+  border-radius: 9px;
+}
+.gemini-preview dl {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+}
+.gemini-preview dt {
+  color: var(--c-mid);
+  font-weight: 560;
+  margin-bottom: 2px;
+}
+.gemini-preview dd {
+  margin: 0;
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+.local-connection {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--c-border-soft);
 }
 .sure-row {
   display: flex;
@@ -1644,16 +1950,6 @@ async function doImport() {
 .ver {
   font-size: 12.5px;
   color: var(--c-mid);
-}
-.opt-tag {
-  font-size: 10px;
-  font-weight: 640;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--c-soft);
-  background: var(--c-chip);
-  border-radius: 999px;
-  padding: 2px 8px;
 }
 .ghost.danger {
   color: var(--red);

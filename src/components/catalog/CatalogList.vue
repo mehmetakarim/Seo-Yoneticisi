@@ -16,10 +16,15 @@ import type { StorePageFilter } from "../../store";
 import type { StorePageDetail } from "../../types";
 import Icon from "../Icon.vue";
 
-const props = defineProps<{ kind: string }>();
+const props = defineProps<{ kind: string; createTitle: string }>();
+const emit = defineEmits<{ create: [] }>();
 const store = useStore();
 const searchInput = ref<HTMLInputElement | null>(null);
-defineExpose({ focusSearch: () => searchInput.value?.focus() });
+const createButton = ref<HTMLButtonElement | null>(null);
+defineExpose({
+  focusSearch: () => searchInput.value?.focus(),
+  focusCreate: () => createButton.value?.focus(),
+});
 
 /** Eksik = mağazada başlık ya da açıklama yok. Üretimin ilk hedefi bunlar. */
 const eksik = (r: StorePageDetail) => !r.page_title.trim() || !r.meta_description.trim();
@@ -66,6 +71,9 @@ const sayi = (n: number) => Math.round(n).toLocaleString("tr-TR");
 <template>
   <section class="list-panel">
     <div class="search-wrap">
+      <button ref="createButton" type="button" class="primary-action create" aria-haspopup="dialog" @click="emit('create')">
+        <Icon name="plus" :size="15" /> {{ props.createTitle }}
+      </button>
       <div class="search">
         <Icon name="search" :size="16" class="search-icon" />
         <input
@@ -110,7 +118,8 @@ const sayi = (n: number) => Math.round(n).toLocaleString("tr-TR");
           <span v-if="r.impressions > 0" class="gos" :title="`${sayi(r.impressions)} gösterim · ${sayi(r.clicks)} tıklama`">
             {{ sayi(r.impressions) }}
           </span>
-          <span v-if="r.draft_page_title.trim()" class="mini taslak">Taslak</span>
+          <span v-if="r.status === 0" class="mini taslak">Pasif</span>
+          <span v-else-if="r.draft_page_title.trim()" class="mini taslak">Taslak</span>
           <span v-else-if="eksik(r)" class="mini eks">Eksik</span>
         </div>
       </template>
@@ -128,6 +137,9 @@ const sayi = (n: number) => Math.round(n).toLocaleString("tr-TR");
 </template>
 
 <style scoped>
+.create {
+  margin-bottom: 8px;
+}
 /* Satırın ortak parçaları (.row-name/.row-sub/.empty/seçili satır) `styles.css`te —
    Ürünler ve Kişiler ile ortak. Burada yalnızca bu listeye özgü olanlar var. */
 .rows {

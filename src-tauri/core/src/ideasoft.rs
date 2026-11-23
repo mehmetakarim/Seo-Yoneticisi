@@ -32,7 +32,8 @@ pub struct RemoteProduct {
 }
 
 /// Uygulamadaki (gönderilecek) içerik.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
 pub struct LocalContent {
     pub page_title: String,
     pub meta_description: String,
@@ -497,6 +498,101 @@ pub fn store_page_url(domain: &str, uc: &str, id: i64) -> Result<String, String>
     Ok(format!("{}/admin-api/{uc}/{id}", base_url(domain)?))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewStorePage {
+    pub name: String,
+    pub slug: String,
+    pub page_title: String,
+    pub meta_description: String,
+    pub excerpt: String,
+    pub content: String,
+    pub publish: bool,
+}
+
+pub async fn create_store_page(
+    domain: &str,
+    token: &str,
+    kind: &str,
+    draft: NewStorePage,
+) -> Result<StorePage, String> {
+    let &(_, resource, name_field) = STORE_PAGE_KINDS.iter()
+        .find(|(key, _, _)| *key == kind).ok_or("Geçersiz katalog türü.")?;
+    let name = draft.name.trim();
+    let slug = draft.slug.trim();
+    if name.is_empty() || name.chars().count() > 255 || draft.page_title.chars().count() > 255
+        || draft.meta_description.chars().count() > 160
+    {
+        return Err("Ad, SEO başlığı veya meta açıklama sınırını kontrol edin.".into());
+    }
+    if slug.len() > 255 || !slug.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-') {
+        return Err("URL adı küçük Latin harfleri, rakam ve kısa çizgiden oluşmalı.".into());
+    }
+    let mut body = serde_json::json!({ "status": i64::from(draft.publish) });
+    body[name_field] = name.into();
+    for (field, value) in [("slug", slug), ("pageTitle", draft.page_title.trim()), ("metaDescription", draft.meta_description.trim())] {
+        if !value.is_empty() {
+            body[field] = value.into();
+        }
+    }
+    if kind == "blog" {
+        let excerpt = draft.excerpt.trim();
+        let content = wrap_paragraphs(&[draft.content]);
+        if excerpt.is_empty() || content.is_empty() || excerpt.len() > 65_535 || content.len() > 65_535 {
+            return Err("Blog özeti ve yazı metni gerekli. Metin uzunluğunu kontrol edin.".into());
+        }
+        body["excerpt"] = excerpt.into();
+        body["content"] = content.into();
+        body["blockVisibility"] = 0.into();
+        body["categories"] = serde_json::json!([]);
+    } else {
+        body["sortOrder"] = 0.into();
+        body["displayShowcaseContent"] = 0.into();
+        body["displayShowcaseFooterContent"] = 0.into();
+        if kind == "category" {
+            body["showcaseContentDisplayType"] = 1.into();
+            body["showcaseFooterContentDisplayType"] = 1.into();
+            body["hasChildren"] = 1.into();
+            body["isCombine"] = 1.into();
+        }
+    }
+
+    let base = base_url(domain)?;
+    let response = http()?.post(format!("{base}/admin-api/{resource}"))
+        .bearer_auth(token.trim())
+        .header("Accept", "application/json")
+        .json(&body)
+        .send().await
+        .map_err(|_| "IdeaSoft kaydı doğrulanamadı. Tekrar denemeden önce envanteri yenileyin.".to_string())?;
+    match response.status().as_u16() {
+        401 => return Err("IdeaSoft token süresi dolmuş. Ayarlar'dan yenileyin.".into()),
+        403 => return Err("IdeaSoft API bağlantısına bu tür için yazma izni verin.".into()),
+        _ if !response.status().is_success() => {
+            let status = response.status();
+            let detail = response.text().await.unwrap_or_default();
+            return Err(format!("IdeaSoft kaydı doğrulanamadı (HTTP {status}). {}", detail.chars().take(240).collect::<String>()));
+        }
+        _ => {}
+    }
+    let value: serde_json::Value = response.json().await.map_err(|_| {
+        "IdeaSoft isteği kabul etti. Kayıt bilgisi okunamadı. Tekrar denemeden önce envanteri yenileyin.".to_string()
+    })?;
+    let mut page = parse_store_page(value.get("data").unwrap_or(&value), kind, name_field);
+    if page.id <= 0 {
+        return Err("IdeaSoft isteği kabul etti ancak kayıt kimliği dönmedi. Envanteri yenileyin.".into());
+    }
+    if page.name.is_empty() {
+        page.name = name.to_owned();
+    }
+    if page.slug.is_empty() {
+        page.slug = slug.to_owned();
+    }
+    if value.get("data").unwrap_or(&value).get("status").is_none() {
+        page.status = i64::from(draft.publish);
+    }
+    Ok(page)
+}
+
 /// Mağaza sayfasının meta alanlarını günceller.
 ///
 /// ⚠️ **Kısmi PUT** — yalnızca dolu alanlar gönderiliyor, ürün gönderimindeki desenin
@@ -537,13 +633,24 @@ pub async fn put_store_page(
     if body.is_empty() {
         return Err("Gönderilecek dolu alan yok.".to_string());
     }
+    put_store_page_fields(url, token, &serde_json::Value::Object(body)).await
+}
 
+pub async fn publish_store_page(url: &str, token: &str) -> Result<(), String> {
+    put_store_page_fields(url, token, &serde_json::json!({ "status": 1 })).await
+}
+
+async fn put_store_page_fields(
+    url: &str,
+    token: &str,
+    body: &serde_json::Value,
+) -> Result<(), String> {
     let resp = http()?
         .put(url)
         .bearer_auth(token.trim())
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .json(&serde_json::Value::Object(body))
+        .json(body)
         .send()
         .await
         .map_err(|e| format!("IdeaSoft'a ulaşılamadı: {e}"))?;
@@ -881,7 +988,11 @@ pub async fn test_connection(domain: &str, token: &str) -> Result<String, String
         return Err("IdeaSoft token'ı ayarlı değil.".to_string());
     }
     let base = base_url(domain)?;
-    let client = http()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "IdeaSoft istemcisi başlatılamadı.".to_string())?;
     let resp = client
         .get(format!("{base}/admin-api/products"))
         .query(&[("limit", "1")])
@@ -889,12 +1000,17 @@ pub async fn test_connection(domain: &str, token: &str) -> Result<String, String
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("IdeaSoft'a ulaşılamadı: {e}"))?;
+        .map_err(|_| "IdeaSoft'a ulaşılamadı. Mağaza adresini ve bağlantınızı kontrol edin.".to_string())?;
     let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(map_status(status.as_u16(), &text));
+        return Err(match status.as_u16() {
+            status @ (401 | 403 | 429) => map_status(status, ""),
+            status => format!("IdeaSoft bağlantısı doğrulanamadı (HTTP {status})."),
+        });
     }
+    resp.json::<Vec<serde_json::Map<String, serde_json::Value>>>()
+        .await
+        .map_err(|_| "Mağaza, IdeaSoft ürün API’sinin beklenen yanıtını döndürmedi.".to_string())?;
     Ok("Bağlantı doğrulandı · mağazaya erişim var ✓".to_string())
 }
 

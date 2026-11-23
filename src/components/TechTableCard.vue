@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { api } from "../api";
 import { useStore } from "../store";
-import type { MetaBadge, TechGroup, TechVersionMeta } from "../types";
+import type { MetaBadge, ProductDetail, TechGroup, TechVersionMeta } from "../types";
 import { BADGE_LABEL } from "../validation";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
@@ -23,44 +22,79 @@ const store = useStore();
 
 const source = ref("");
 const editing = ref(false);
+const histOpen = ref(false);
+let srcTimer: number | undefined;
+let pendingSource: { detail: ProductDetail; text: string } | undefined;
+let sourceSave: Promise<boolean> | undefined;
+
+function flushSource() {
+  window.clearTimeout(srcTimer);
+  srcTimer = undefined;
+  const pending = pendingSource;
+  if (!pending) return sourceSave ?? Promise.resolve(true);
+  pendingSource = undefined;
+  const saving = (sourceSave ?? Promise.resolve(true)).then(() => store.saveTechSource(pending.detail, pending.text));
+  sourceSave = saving;
+  void saving.then(() => {
+    if (sourceSave === saving) sourceSave = undefined;
+  });
+  return saving;
+}
 
 watch(
-  () => [props.sourceText, store.selectedSku],
+  [() => store.selectedSku, () => store.detail?.team_seo_scope],
   () => {
+    void flushSource();
     source.value = props.sourceText ?? "";
     editing.value = false;
+    histOpen.value = false;
   },
   { immediate: true },
 );
+watch(() => props.sourceText, (text) => {
+  if (!pendingSource && !sourceSave) source.value = text ?? "";
+});
+onBeforeUnmount(() => { void flushSource(); });
 
 const groups = computed(() => props.specs ?? []);
 const rowCount = computed(() => groups.value.reduce((a, g) => a + g.rows.length, 0));
 const hasSpecs = computed(() => rowCount.value > 0);
+const tableLocked = computed(() => store.techStructuring || store.techTableSaving ||
+  Boolean(store.detail?.team_seo_scope && (store.generating || store.generatingDetails || store.ideasoftBusy)));
 
 const badgeStyle = computed(() => ({
   background: `var(--badge-${props.badge}-bg)`,
   color: `var(--badge-${props.badge}-c)`,
 }));
 
-// Ham metin kaydı — debounce (ProductDetail deseni)
-let srcTimer: number | undefined;
+function selectedProductGuard() {
+  const sku = store.selectedSku;
+  const detail = store.detail;
+  return () => store.selectedSku === sku && store.detail === detail;
+}
+
 function onSource(e: Event) {
-  source.value = (e.target as HTMLTextAreaElement).value;
+  const detail = store.detail;
+  if (!detail || detail.sku !== store.selectedSku) return;
+  const text = (e.target as HTMLTextAreaElement).value;
+  source.value = text;
+  if (pendingSource && pendingSource.detail !== detail) void flushSource();
+  pendingSource = { detail, text };
   window.clearTimeout(srcTimer);
-  srcTimer = window.setTimeout(() => store.saveTechSource(source.value), 600);
+  srcTimer = window.setTimeout(flushSource, 600);
 }
 
 async function structure() {
-  window.clearTimeout(srcTimer);
-  await store.saveTechSource(source.value);
-  await store.structureTech();
+  const stillSelected = selectedProductGuard();
+  const text = source.value;
+  if (await flushSource() && stillSelected()) await store.structureTech(text);
 }
 
 const copied = ref(false);
 async function copyHtml() {
   if (!store.selectedSku) return;
   try {
-    const html = await api.techTableHtml(store.selectedSku);
+    const html = await store.techHtml();
     await writeText(html);
     copied.value = true;
     setTimeout(() => (copied.value = false), 1600);
@@ -71,18 +105,28 @@ async function copyHtml() {
 
 // --- satır düzenleme ---
 function edit(gi: number, ri: number, field: "label" | "value", e: Event) {
+  const cell = e.currentTarget as HTMLElement;
+  const old = groups.value[gi]?.rows[ri]?.[field];
+  if (old === undefined || cell.innerText.trim() === old) return;
+  if (tableLocked.value) {
+    cell.innerText = old;
+    return;
+  }
   const next = groups.value.map((g) => ({ group: g.group, rows: g.rows.map((r) => ({ ...r })) }));
-  next[gi].rows[ri][field] = (e.target as HTMLElement).innerText.trim();
+  next[gi].rows[ri][field] = cell.innerText.trim();
+  cell.innerText = old;
   store.saveTechSpecs(next);
 }
 // --- sürüm geçmişi ---
-const histOpen = ref(false);
-function restore(i: number) {
-  store.restoreTechVersion(i);
+async function restore(i: number) {
+  if (tableLocked.value) return;
+  const stillSelected = selectedProductGuard();
   histOpen.value = false;
+  if (await flushSource() && stillSelected()) await store.restoreTechVersion(i);
 }
 
 function removeRow(gi: number, ri: number) {
+  if (tableLocked.value) return;
   const next = groups.value
     .map((g, i) => ({
       group: g.group,
@@ -124,6 +168,7 @@ function removeRow(gi: number, ri: number) {
         <textarea
           class="fx src"
           :value="source"
+          :disabled="tableLocked"
           @input="onSource"
           rows="7"
           placeholder="Örn. üreticinin ürün sayfasındaki teknik özellik bölümünü kopyalayıp buraya yapıştırın…"
@@ -144,17 +189,17 @@ function removeRow(gi: number, ri: number) {
           <div v-for="(r, ri) in g.rows" :key="ri" class="row">
             <div
               class="cell lab"
-              contenteditable
+              :contenteditable="!tableLocked"
               spellcheck="false"
               @blur="edit(gi, ri, 'label', $event)"
             >{{ r.label }}</div>
             <div
               class="cell val"
-              contenteditable
+              :contenteditable="!tableLocked"
               spellcheck="false"
               @blur="edit(gi, ri, 'value', $event)"
             >{{ r.value }}</div>
-            <button class="del" title="Satırı sil" @click="removeRow(gi, ri)">
+            <button class="del" title="Satırı sil" :disabled="tableLocked" @click="removeRow(gi, ri)">
               <Icon name="x" :size="12" :stroke-width="2.4" />
             </button>
           </div>
@@ -178,7 +223,7 @@ function removeRow(gi: number, ri: number) {
 
       <VersionHistory
         v-if="histOpen && history.length"
-        :items="history.map((v) => ({ at: v.at, summary: `${v.rows} satır · ${v.groups} grup` }))"
+        :items="history.map((v) => ({ at: v.at, summary: `${v.rows} satır · ${v.groups} grup`, model: v.model }))"
         noun="tablo"
         @restore="restore"
       />
@@ -187,7 +232,7 @@ function removeRow(gi: number, ri: number) {
       <button
         class="gen"
         :class="{ busy: store.techStructuring }"
-        :disabled="store.techStructuring || !source.trim()"
+        :disabled="tableLocked || !source.trim()"
         @click="structure"
       >
         <Icon
@@ -199,9 +244,9 @@ function removeRow(gi: number, ri: number) {
         {{ store.techStructuring ? "Yapılandırılıyor…" : hasSpecs ? "Yeniden Yapılandır" : "Yapılandır" }}
       </button>
         <button
-          v-if="store.settings?.ideasoft_active"
+          v-if="store.productIdeasoftAvailable"
           class="is-push"
-          :disabled="store.ideasoftBusy"
+          :disabled="tableLocked || store.ideasoftBusy"
           title="Bu kartın içeriğini IdeaSoft'a gönder"
           @click="store.openIdeasoftPreview(['tech'])"
         >
@@ -209,7 +254,7 @@ function removeRow(gi: number, ri: number) {
           IdeaSoft'a Gönder
         </button>
       <div style="flex:1"></div>
-      <button class="done" :class="{ active: techDone }" @click="store.toggleTechDone()">
+      <button class="done" :class="{ active: techDone }" :disabled="tableLocked" @click="store.toggleTechDone()">
         <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
         {{ techDone ? "Tablo tamamlandı ✓" : "Tabloyu Tamamlandı işaretle" }}
       </button>

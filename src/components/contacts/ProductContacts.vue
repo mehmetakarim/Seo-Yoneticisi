@@ -14,7 +14,7 @@
 import { ref, watch } from "vue";
 import { api } from "../../api";
 import { useStore } from "../../store";
-import type { ContactProduct } from "../../types";
+import type { ContactId, ContactProduct } from "../../types";
 import Icon from "../Icon.vue";
 
 const store = useStore();
@@ -29,7 +29,7 @@ watch(
 );
 
 /** Kişi kartına gider — kuyruktaki maddeye tıklamakla aynı davranış. */
-function ac(id: number) {
+function ac(id: ContactId) {
   store.page = "contacts";
   void store.openContact(id);
 }

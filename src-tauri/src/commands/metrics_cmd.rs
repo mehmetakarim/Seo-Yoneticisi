@@ -7,6 +7,40 @@
 
 use super::*;
 use seo_core::metrics::{self, Outcome, PageRow, Snapshot, WorkEvent};
+use std::collections::{HashMap, HashSet};
+
+#[derive(serde::Deserialize)]
+pub struct SharedOutcomeInputs {
+    snapshots: Vec<Snapshot>,
+    events: Vec<WorkEvent>,
+    page_rows: Vec<SharedPageRow>,
+}
+
+#[derive(serde::Deserialize)]
+struct SharedPageRow {
+    snapshot_id: i64,
+    #[serde(flatten)]
+    row: PageRow,
+}
+
+impl SharedOutcomeInputs {
+    fn with_outcomes<T>(mut self, sku: Option<&str>, compute: impl FnOnce(&[Snapshot], Vec<WorkEvent>, &dyn Fn(i64, &str) -> Option<PageRow>) -> T) -> T {
+        self.snapshots.sort_by(|a, b| (&a.window_start, &a.window_end).cmp(&(&b.window_start, &b.window_end)));
+        self.events.sort_by(|a, b| (&b.at, b.id).cmp(&(&a.at, a.id)));
+        let mut seen = HashSet::new();
+        let events = if let Some(sku) = sku {
+            self.events.into_iter().filter(|event| event.sku.as_deref() == Some(sku)).take(40).collect()
+        } else {
+            self.events.into_iter().filter(|event| event.reaches_store &&
+                event.sku.as_ref().or(event.url.as_ref()).is_some_and(|key| seen.insert(key.clone()))).collect()
+        };
+        let mut by_snapshot: HashMap<i64, HashMap<String, PageRow>> = HashMap::new();
+        for entry in self.page_rows {
+            by_snapshot.entry(entry.snapshot_id).or_default().insert(entry.row.url.clone(), entry.row);
+        }
+        compute(&self.snapshots, events, &|id, url| by_snapshot.get(&id)?.get(url).cloned())
+    }
+}
 
 /// Tohumlamada kaç pencere geriye gidilecek (28 günlük dilimler → ~12 ay).
 const SEED_WINDOWS: usize = 12;
@@ -127,17 +161,22 @@ pub struct OutcomeSummary {
 }
 
 #[tauri::command]
-pub fn get_outcome_summary(state: State<'_, AppState>) -> Result<OutcomeSummary, String> {
+pub fn get_outcome_summary(state: State<'_, AppState>, shared: Option<SharedOutcomeInputs>) -> Result<OutcomeSummary, String> {
+    if let Some(shared) = shared { return Ok(shared.with_outcomes(None, outcome_summary)); }
     let conn = state.conn.lock().unwrap();
     let snaps = snapshots(&conn)?;
+    let lookup = row_lookup(&conn);
+    Ok(outcome_summary(&snaps, latest_store_events(&conn)?, &lookup))
+}
+
+fn outcome_summary(snaps: &[Snapshot], events: Vec<WorkEvent>, lookup: &dyn Fn(i64, &str) -> Option<PageRow>) -> OutcomeSummary {
     let mut s = OutcomeSummary {
         snapshots: snaps.len() as i64,
         oldest_window: snaps.first().map(|x| x.window_start.clone()).unwrap_or_default(),
         ..Default::default()
     };
-    let lookup = row_lookup(&conn);
-    for ev in latest_store_events(&conn)? {
-        let o = metrics::outcome(&ev, &snaps, &lookup);
+    for ev in events {
+        let o = metrics::outcome(&ev, snaps, &lookup);
         s.measured_events += 1;
         match o.status {
             metrics::OutcomeStatus::Improved => {
@@ -153,7 +192,7 @@ pub fn get_outcome_summary(state: State<'_, AppState>) -> Result<OutcomeSummary,
             _ => s.insufficient += 1,
         }
     }
-    Ok(s)
+    s
 }
 
 /// Fırsatlar tablosundaki "Sonuç" sütunu — sku → (etiket, ton).
@@ -170,15 +209,20 @@ pub struct OutcomeBadge {
 }
 
 #[tauri::command]
-pub fn get_outcome_badges(state: State<'_, AppState>) -> Result<Vec<OutcomeBadge>, String> {
+pub fn get_outcome_badges(state: State<'_, AppState>, shared: Option<SharedOutcomeInputs>) -> Result<Vec<OutcomeBadge>, String> {
+    if let Some(shared) = shared { return Ok(shared.with_outcomes(None, outcome_badges)); }
     let conn = state.conn.lock().unwrap();
     let snaps = snapshots(&conn)?;
     let lookup = row_lookup(&conn);
+    Ok(outcome_badges(&snaps, latest_store_events(&conn)?, &lookup))
+}
+
+fn outcome_badges(snaps: &[Snapshot], events: Vec<WorkEvent>, lookup: &dyn Fn(i64, &str) -> Option<PageRow>) -> Vec<OutcomeBadge> {
     let mut out = Vec::new();
-    for ev in latest_store_events(&conn)? {
+    for ev in events {
         // ⚠️ Artık sku'suz olay ATLANMIYOR: içerik gönderimleri URL ile kimlikleniyor.
         // `metrics::outcome` zaten URL anahtarlı çalışıyordu — eksik olan yalnızca buydu.
-        let o = metrics::outcome(&ev, &snaps, &lookup);
+        let o = metrics::outcome(&ev, snaps, &lookup);
         out.push(OutcomeBadge {
             sku: ev.sku.clone().unwrap_or_default(),
             url: ev.url.clone().unwrap_or_default(),
@@ -187,24 +231,29 @@ pub fn get_outcome_badges(state: State<'_, AppState>) -> Result<Vec<OutcomeBadge
             tip: tip_of(&ev, &o),
         });
     }
-    Ok(out)
+    out
 }
 
 fn tip_of(ev: &WorkEvent, o: &Outcome) -> String {
     let tarih = ev.at.get(..10).unwrap_or("").to_string();
+    let (action, completed) = if ev.kind == "store_page_publish" {
+        ("yayını", "mağazada yayımlandı")
+    } else {
+        ("gönderimi", "mağazaya gönderildi")
+    };
     match o.status {
         metrics::OutcomeStatus::Measuring => format!(
-            "{tarih} tarihinde mağazaya gönderildi · etkinin ölçülebilmesi için en az {} gün bekleniyor",
+            "{tarih} tarihinde {completed} · etkinin ölçülebilmesi için en az {} gün bekleniyor",
             metrics::MIN_WAIT_DAYS
         ),
         metrics::OutcomeStatus::NotMeasurable => {
             "Karşılaştırılacak dönem yok — daha eski bir anlık görüntü gerekiyor".into()
         }
         metrics::OutcomeStatus::Insufficient => {
-            format!("{tarih} gönderimi · önceki dönemde gösterim çok az, sayı gürültüden ayrılamıyor")
+            format!("{tarih} {action} · önceki dönemde gösterim çok az, sayı gürültüden ayrılamıyor")
         }
         _ => format!(
-            "{tarih} gönderimi · {} → {} ({:+.0} tıklama) · {} ile {} karşılaştırıldı",
+            "{tarih} {action} · {} → {} ({:+.0} tıklama) · {} ile {} karşılaştırıldı",
             o.clicks_before.round(),
             o.clicks_after.round(),
             o.delta_clicks(),
@@ -253,7 +302,9 @@ fn kind_label(kind: &str) -> &'static str {
 pub fn get_product_timeline(
     state: State<'_, AppState>,
     sku: String,
+    shared: Option<SharedOutcomeInputs>,
 ) -> Result<ProductTimeline, String> {
+    if let Some(shared) = shared { return Ok(shared.with_outcomes(Some(&sku), product_timeline)); }
     let conn = state.conn.lock().unwrap();
     let snaps = snapshots(&conn)?;
     let lookup = row_lookup(&conn);
@@ -279,6 +330,10 @@ pub fn get_product_timeline(
         .filter_map(Result::ok)
         .collect();
 
+    Ok(product_timeline(&snaps, events, &lookup))
+}
+
+fn product_timeline(snaps: &[Snapshot], events: Vec<WorkEvent>, lookup: &dyn Fn(i64, &str) -> Option<PageRow>) -> ProductTimeline {
     let has_store_event = events.iter().any(|e| e.reaches_store);
     // Sonuç yalnızca EN YENİ mağaza olayında gösteriliyor: eskisinin etkisi yenisi
     // tarafından ezilmiş olur, her satıra rozet basmak çift sayım izlenimi verir.
@@ -288,7 +343,7 @@ pub fn get_product_timeline(
         .iter()
         .map(|e| {
             let goster = e.reaches_store && Some(e.id) == newest_store;
-            let o = goster.then(|| metrics::outcome(e, &snaps, &lookup));
+            let o = goster.then(|| metrics::outcome(e, snaps, &lookup));
             TimelineItem {
                 at: e.at.clone(),
                 kind: e.kind.clone(),
@@ -300,7 +355,193 @@ pub fn get_product_timeline(
         })
         .collect();
 
-    Ok(ProductTimeline { items, has_store_event })
+    ProductTimeline { items, has_store_event }
+}
+
+#[test]
+fn shared_history_uses_latest_store_event_and_keeps_product_timeline() {
+    let events = vec![
+        WorkEvent { id: 2, at: "2026-11-02T12:00:00".into(), sku: Some("A".into()), reaches_store: true, ..Default::default() },
+        WorkEvent { id: 1, at: "2026-11-01T12:00:00".into(), sku: Some("A".into()), reaches_store: true, ..Default::default() },
+        WorkEvent { id: 3, at: "2026-11-03T12:00:00".into(), sku: Some("B".into()), ..Default::default() },
+    ];
+    let input = |events| SharedOutcomeInputs { snapshots: vec![], events, page_rows: vec![] };
+    let summary = input(events.clone()).with_outcomes(None, outcome_summary);
+    assert_eq!(summary.measured_events, 1);
+    let timeline = input(events).with_outcomes(Some("A"), product_timeline);
+    assert!(timeline.has_store_event);
+    assert_eq!(timeline.items.len(), 2);
+    assert_eq!(timeline.items[0].at, "2026-11-02T12:00:00");
+    assert!(timeline.items[0].outcome_label.is_some());
+    assert!(timeline.items[1].outcome_label.is_none());
+}
+
+#[derive(Serialize)]
+pub struct QueryComparison {
+    event_day: String,
+    before: Option<QueryPeriod>,
+    after: Option<QueryPeriod>,
+}
+
+#[derive(Serialize)]
+struct QueryPeriod {
+    start: String,
+    end: String,
+    days: usize,
+    clicks: f64,
+    impressions: f64,
+    position: Option<f64>,
+    ctr: Option<f64>,
+}
+
+fn summarize_query_period(
+    rows: &[seo_core::seo_data::gsc::DailyQueryRow],
+    start: chrono::NaiveDate,
+    end: chrono::NaiveDate,
+) -> QueryPeriod {
+    let start = start.to_string();
+    let end = end.to_string();
+    let (mut days, mut clicks, mut impressions, mut weighted_position) = (0, 0.0, 0.0, 0.0);
+    for row in rows.iter().filter(|row| row.day >= start && row.day <= end && row.impressions > 0.0) {
+        days += 1;
+        clicks += row.clicks;
+        impressions += row.impressions;
+        weighted_position += row.position * row.impressions;
+    }
+    QueryPeriod {
+        start,
+        end,
+        days,
+        clicks,
+        impressions,
+        position: (impressions > 0.0).then(|| weighted_position / impressions),
+        ctr: (impressions > 0.0).then(|| clicks / impressions),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn query_period_weights_position_and_excludes_other_days() {
+    use seo_core::seo_data::gsc::DailyQueryRow;
+
+    let rows = [
+        DailyQueryRow { day: "2026-11-01".into(), clicks: 2.0, impressions: 10.0, position: 2.0 },
+        DailyQueryRow { day: "2026-11-07".into(), clicks: 8.0, impressions: 90.0, position: 12.0 },
+        DailyQueryRow { day: "2026-11-08".into(), clicks: 10.0, impressions: 100.0, position: 1.0 },
+    ];
+    let day = |n| chrono::NaiveDate::from_ymd_opt(2026, 11, n).unwrap();
+    let before = summarize_query_period(&rows, day(1), day(7));
+    assert_eq!(before.days, 2);
+    assert_eq!(before.clicks, 10.0);
+    assert_eq!(before.position, Some(11.0));
+    assert_eq!(before.ctr, Some(0.1));
+    let empty = summarize_query_period(&rows, day(9), day(15));
+    assert_eq!(empty.days, 0);
+    assert_eq!(empty.position, None);
+    assert_eq!(empty.ctr, None);
+}
+
+#[tauri::command]
+pub async fn compare_product_query(
+    state: State<'_, AppState>,
+    sku: String,
+    query: String,
+) -> Result<QueryComparison, String> {
+    use chrono::{Days, NaiveDate};
+    use rusqlite::OptionalExtension;
+    use seo_core::seo_data::gsc;
+
+    let query = query.trim();
+    if query.is_empty() {
+        return Err("Ölçülecek sorguyu girin.".into());
+    }
+    let (credentials, property, event_at, page) = {
+        let conn = state.conn.lock().unwrap();
+        let event: Option<(String, Option<String>)> = conn.query_row(
+            "SELECT at, url FROM work_events WHERE sku = ?1 AND reaches_store = 1
+             ORDER BY at DESC, id DESC LIMIT 1",
+            [&sku],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional().map_err(|e| e.to_string())?;
+        let (event_at, page) = event
+            .ok_or("Bu ürün için mağazaya yansıyan işlem kaydı yok.")?;
+        let page = page.filter(|url| !url.trim().is_empty()).ok_or("İşlem kaydında sayfa adresi yok.")?;
+        (
+            db::get_setting(&conn, "gsc_service_account_json")?.unwrap_or_default(),
+            db::get_setting(&conn, "gsc_site_url")?.unwrap_or_default().trim().to_owned(),
+            event_at,
+            page,
+        )
+    };
+    let event_day = event_at.get(..10)
+        .and_then(|day| NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+        .ok_or("İşlemin tarihi okunamadı.")?;
+    let start = event_day - Days::new(7);
+    let end = event_day + Days::new(7);
+    // GSC'nin son günleri kesinleştirmesine zaman tanı.
+    if chrono::Utc::now().date_naive() < end + Days::new(4) {
+        return Ok(QueryComparison { event_day: event_day.to_string(), before: None, after: None });
+    }
+    if credentials.trim().is_empty() || property.is_empty() {
+        return Err("Ölçüm için Ayarlar'dan Google Search Console bağlantısını kurun.".into());
+    }
+
+    let day_key = event_day.to_string();
+    let key = [property.as_str(), page.as_str(), query, day_key.as_str()];
+    let cached: Option<String> = {
+        let conn = state.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT daily_rows FROM gsc_query_comparisons
+             WHERE property = ?1 AND page = ?2 AND query = ?3 AND event_day = ?4",
+            key,
+            |row| row.get(0),
+        ).optional().map_err(|e| e.to_string())?
+    };
+    let rows = if let Some(cached) = cached {
+        serde_json::from_str(&cached).map_err(|e| e.to_string())?
+    } else {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build().map_err(|e| e.to_string())?;
+        let rows = gsc::daily_query_rows(&client, &credentials, &property, &page, query, start, end).await?;
+        if !rows.is_empty() {
+            let encoded = serde_json::to_string(&rows).map_err(|e| e.to_string())?;
+            state.conn.lock().unwrap().execute(
+                "INSERT OR IGNORE INTO gsc_query_comparisons (property, page, query, event_day, daily_rows)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![property, page, query, day_key, encoded],
+            ).map_err(|e| e.to_string())?;
+        }
+        rows
+    };
+
+    Ok(summarize_comparison(event_day, &rows))
+}
+
+fn summarize_comparison(
+    event_day: chrono::NaiveDate,
+    rows: &[seo_core::seo_data::gsc::DailyQueryRow],
+) -> QueryComparison {
+    use chrono::Days;
+    QueryComparison {
+        event_day: event_day.to_string(),
+        before: Some(summarize_query_period(rows, event_day - Days::new(7), event_day - Days::new(1))),
+        after: Some(summarize_query_period(rows, event_day + Days::new(1), event_day + Days::new(7))),
+    }
+}
+
+#[tauri::command]
+pub fn summarize_team_query(
+    event_day: String,
+    rows: Vec<seo_core::seo_data::gsc::DailyQueryRow>,
+) -> Result<QueryComparison, String> {
+    let day = chrono::NaiveDate::parse_from_str(&event_day, "%Y-%m-%d")
+        .map_err(|_| "Ortak işlemin tarihi okunamadı.")?;
+    let window = chrono::Days::new(7);
+    if day.checked_sub_days(window).is_none() || day.checked_add_days(window).is_none() {
+        return Err("Ortak işlemin tarihi okunamadı.".into());
+    }
+    Ok(summarize_comparison(day, &rows))
 }
 
 /// Tohumlama + geriye dönük olay dolumu sonucu.
@@ -321,7 +562,10 @@ pub struct SeedResult {
 /// **Idempotent:** var olan pencere atlanıyor, var olan olay tekrar yazılmıyor. Kullanıcı
 /// yeniden çalıştırırsa veri ikiye katlanmaz.
 #[tauri::command]
-pub async fn seed_metric_history(state: State<'_, AppState>) -> Result<SeedResult, String> {
+pub async fn seed_metric_history(state: State<'_, AppState>, measurement_scope: Option<String>) -> Result<SeedResult, String> {
+    if measurement_scope.is_some() {
+        return Err("Ekip geçmişini ortak GSC üzerinden alın.".into());
+    }
     let (gsc_json, gsc_site) = {
         let conn = state.conn.lock().unwrap();
         (
@@ -377,26 +621,51 @@ fn write_snapshot(
 ) -> Result<i64, String> {
     let tutulan: Vec<&seo_core::seo_data::PageStat> =
         stats.iter().filter(|s| metrics::kept(s.clicks, s.impressions)).collect();
-    let clicks: f64 = tutulan.iter().map(|s| s.clicks).sum();
-    let imps: f64 = tutulan.iter().map(|s| s.impressions).sum();
-
-    conn.execute(
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let captured_at = now_str();
+    let inserted = tx.execute(
         "INSERT INTO metric_snapshots (captured_at, window_start, window_end, rows, clicks, impressions)
-         VALUES (?1,?2,?3,?4,?5,?6)",
-        params![now_str(), start, end, tutulan.len() as i64, clicks, imps],
+         VALUES (?1,?2,?3,0,0,0) ON CONFLICT(window_start, window_end) DO NOTHING",
+        params![captured_at, start, end],
     )
     .map_err(|e| format!("Anlık görüntü yazılamadı: {e}"))?;
-    let sid = conn.last_insert_rowid();
+    if inserted == 0 { return Ok(0); }
+    let sid = tx.last_insert_rowid();
 
     for s in &tutulan {
         // `sku` eşleşiyorsa yazılıyor: ürün bazlı sorgular böylece tek indeksle çalışıyor.
-        let _ = conn.execute(
+        tx.execute(
             "INSERT OR IGNORE INTO metric_page_rows (snapshot_id, url, sku, clicks, impressions, position)
              VALUES (?1, ?2, (SELECT sku FROM products WHERE url = ?2), ?3, ?4, ?5)",
             params![sid, s.page, s.clicks, s.impressions, s.position],
-        );
+        ).map_err(|e| e.to_string())?;
     }
-    Ok(tutulan.len() as i64)
+    let (row_count, clicks, imps): (i64, f64, f64) = tx.query_row(
+        "SELECT count(*), coalesce(sum(clicks),0), coalesce(sum(impressions),0) FROM metric_page_rows WHERE snapshot_id=?1",
+        [sid], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(|e| e.to_string())?;
+    tx.execute("UPDATE metric_snapshots SET rows=?2, clicks=?3, impressions=?4 WHERE id=?1", params![sid, row_count, clicks, imps])
+        .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(row_count)
+}
+
+#[tauri::command]
+pub fn team_metric_outbox(state: State<'_, AppState>, scope: String, acknowledge: Option<i64>) -> Result<serde_json::Value, String> {
+    use rusqlite::OptionalExtension;
+    let conn = state.conn.lock().unwrap();
+    if let Some(id) = acknowledge {
+        conn.execute("DELETE FROM team_metric_outbox WHERE scope=?1 AND id=?2", params![scope,id]).map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::Null);
+    }
+    let row: Option<(i64, String, String)> = conn.query_row(
+        "SELECT id, snapshot, page_rows FROM team_metric_outbox WHERE scope=?1 ORDER BY id LIMIT 1",
+        [scope], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).optional().map_err(|e| e.to_string())?;
+    let Some((id, snapshot, rows)) = row else { return Ok(serde_json::Value::Null); };
+    let snapshot: serde_json::Value = serde_json::from_str(&snapshot).map_err(|e| e.to_string())?;
+    let rows: serde_json::Value = serde_json::from_str(&rows).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "id": id, "snapshot": snapshot, "page_rows": rows }))
 }
 
 /// `ideasoft_pushed_at` alanından geriye dönük gönderim olayı üretir.
@@ -431,15 +700,10 @@ pub async fn snapshot_if_due(
     gsc_site: &str,
     client: &reqwest::Client,
 ) {
-    let son_bitis: Option<String> = {
-        let conn = state.conn.lock().unwrap();
-        conn.query_row("SELECT MAX(window_end) FROM metric_snapshots", [], |r| r.get(0))
-            .ok()
-            .flatten()
-    };
-    let bugun = chrono::Local::now().date_naive();
-    // Pencereler döşeniyor: sıradaki ancak TAMAMEN geçmişse alınıyor.
-    let Some((start, end)) = metrics::next_window(son_bitis.as_deref(), bugun) else { return };
+    let last: Option<String> = state.conn.lock().unwrap()
+        .query_row("SELECT MAX(window_end) FROM metric_snapshots", [], |r| r.get(0))
+        .ok().flatten();
+    let Some((start, end)) = metrics::next_window(last.as_deref(), chrono::Local::now().date_naive()) else { return };
     {
         let conn = state.conn.lock().unwrap();
         let var: i64 = conn
@@ -461,9 +725,132 @@ pub async fn snapshot_if_due(
     }
 }
 
+#[tauri::command]
+pub fn gsc_snapshot_window(
+    state: State<'_, AppState>,
+    measurement_scope: String,
+    shared_window_end: Option<String>,
+) -> Result<Option<(String, String)>, String> {
+    let conn = state.conn.lock().unwrap();
+    let queued_end: Option<String> = conn.query_row(
+        "SELECT MAX(json_extract(snapshot,'$.window_end')) FROM team_metric_outbox WHERE scope=?1",
+        [measurement_scope],
+        |r| r.get(0),
+    ).map_err(|e| e.to_string())?;
+    let last = queued_end.as_deref().into_iter().chain(shared_window_end.as_deref()).max();
+    Ok(metrics::next_window(last, chrono::Utc::now().date_naive()))
+}
+
+#[tauri::command]
+pub fn team_gsc_seed_windows(shared_window_end: Option<String>) -> Vec<(String, String)> {
+    seed_windows(chrono::Utc::now().date_naive(), shared_window_end.as_deref())
+}
+
+fn seed_windows(today: chrono::NaiveDate, shared_window_end: Option<&str>) -> Vec<(String, String)> {
+    use chrono::{Duration, NaiveDate};
+    let lag = Duration::days(metrics::GSC_LAG_DAYS);
+    let latest = today - lag;
+    let aligned = shared_window_end
+        .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+        .filter(|end| *end <= latest)
+        .map(|end| {
+            let window = metrics::WINDOW_DAYS + 1;
+            let advance = ((latest - end).num_days() / window) * window;
+            end + Duration::days(advance)
+        })
+        .unwrap_or(latest);
+    metrics::windows(aligned + lag, SEED_WINDOWS)
+}
+
+#[derive(serde::Deserialize)]
+pub struct SharedSnapshot {
+    pub start: String,
+    pub end: String,
+    pub rows: Vec<seo_core::seo_data::PageStat>,
+}
+
+#[tauri::command]
+pub fn queue_team_gsc_snapshot(state: State<'_, AppState>, scope: String, snapshot: SharedSnapshot) -> Result<bool, String> {
+    queue_shared_snapshot(&state, &scope, snapshot)
+}
+
+pub fn queue_shared_snapshot(state: &State<'_, AppState>, scope: &str, snapshot: SharedSnapshot) -> Result<bool, String> {
+    stage_shared_snapshot(&state.conn.lock().unwrap(), scope, snapshot)
+}
+
+fn stage_shared_snapshot(conn: &Connection, scope: &str, snapshot: SharedSnapshot) -> Result<bool, String> {
+    use chrono::{Days, Duration, NaiveDate, Utc};
+    let start = NaiveDate::parse_from_str(&snapshot.start, "%Y-%m-%d").map_err(|e| e.to_string())?;
+    let end = NaiveDate::parse_from_str(&snapshot.end, "%Y-%m-%d").map_err(|e| e.to_string())?;
+    let today = Utc::now().date_naive();
+    if scope.is_empty() || scope.len() > 512 || start.checked_add_days(Days::new(metrics::WINDOW_DAYS as u64)) != Some(end)
+        || end > today - Duration::days(metrics::GSC_LAG_DAYS) || start < today - Duration::days(540) || snapshot.rows.len() > 25_000 {
+        return Err("Geçersiz GSC ölçüm penceresi.".into());
+    }
+
+    let mut seen = HashSet::new();
+    let mut rows = Vec::new();
+    for row in &snapshot.rows {
+        if row.page.trim().is_empty() || [row.clicks, row.impressions, row.position].iter().any(|value| !value.is_finite() || *value < 0.0) {
+            return Err("Ortak GSC satırı geçersiz.".into());
+        }
+        if metrics::kept(row.clicks, row.impressions) && seen.insert(row.page.as_str()) {
+            rows.push(serde_json::json!({ "url": row.page, "clicks": row.clicks,
+                "impressions": row.impressions, "position": row.position }));
+        }
+    }
+    let head = serde_json::json!({
+        "window_start": snapshot.start,
+        "window_end": snapshot.end,
+        "captured_at": Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+        "row_count": rows.len(),
+    });
+    let inserted = conn.execute(
+        "INSERT INTO team_metric_outbox(scope, snapshot, page_rows)
+         SELECT ?1, ?2, ?3 WHERE NOT EXISTS (
+           SELECT 1 FROM team_metric_outbox WHERE scope=?1
+             AND json_extract(snapshot,'$.window_start') = ?4 AND json_extract(snapshot,'$.window_end') = ?5
+         )",
+        params![scope, head.to_string(), serde_json::Value::Array(rows).to_string(), snapshot.start, snapshot.end],
+    ).map_err(|e| e.to_string())?;
+    Ok(inserted > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn team_snapshots_dedupe_by_scope_without_writing_legacy_history() {
+        let conn = Connection::open_in_memory().unwrap();
+        db::init(&conn).unwrap();
+        let stat = seo_core::seo_data::PageStat {
+            page: "https://example.test/product".into(), clicks: 3.0, impressions: 20.0, ctr: 0.15, position: 6.0,
+        };
+        let (start, end) = metrics::windows(chrono::Utc::now().date_naive(), 1).remove(0);
+        let snapshot = || SharedSnapshot { start: start.clone(), end: end.clone(), rows: vec![stat.clone(), stat.clone()] };
+        assert!(stage_shared_snapshot(&conn, "team-a", snapshot()).unwrap());
+        assert!(!stage_shared_snapshot(&conn, "team-a", snapshot()).unwrap());
+        assert!(stage_shared_snapshot(&conn, "team-b", snapshot()).unwrap());
+        let (queued, count, clicks): (i64, i64, f64) = conn.query_row(
+            "SELECT count(*), json_array_length(page_rows), json_extract(page_rows,'$[0].clicks') FROM team_metric_outbox WHERE scope='team-a'",
+            [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).unwrap();
+        assert_eq!((queued, count, clicks), (1, 1, 3.0));
+        let local: i64 = conn.query_row("SELECT count(*) FROM metric_snapshots", [], |r| r.get(0)).unwrap();
+        assert_eq!(local, 0);
+        assert_eq!(write_snapshot(&conn, &start, &end, &[stat]).unwrap(), 1);
+    }
+
+    #[test]
+    fn seed_windows_extend_the_existing_cadence_without_overlapping() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 22).unwrap();
+        let windows = seed_windows(today, Some("2026-09-15"));
+        assert_eq!(windows.len(), SEED_WINDOWS);
+        assert_eq!(windows[0], ("2026-10-15".into(), "2026-11-12".into()));
+        assert_eq!(windows[1], ("2026-09-16".into(), "2026-10-14".into()));
+        assert_eq!(windows[2].1, "2026-09-15");
+    }
 
     /// Gerçek veritabanı KOPYASI + canlı GSC üzerinde uçtan uca ölçüm.
     ///

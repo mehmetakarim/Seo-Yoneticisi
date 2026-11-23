@@ -100,7 +100,7 @@ function genDetails() {
     <div class="info-row">
       <span class="info">
         <Icon name="code" :size="13" />
-        HTML yapısı korunur, yalnızca metin içeriği yenilenir.
+        Açıklama hazırlanırken mevcut ürün görselleri korunur.
       </span>
       <button class="copy" :class="{ ok: copied }" @click="copyHtml">
         <Icon name="copy" :size="12" />
@@ -109,7 +109,10 @@ function genDetails() {
     </div>
 
     <div class="preview om-scroll">
-      <div v-if="hasContent" class="seo-html-preview" v-html="safeHtml"></div>
+      <iframe v-if="hasContent && store.detail?.team_seo_scope" class="shared-html-preview" sandbox=""
+        title="Ortak ürün açıklaması"
+        :srcdoc="`<meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src 'none'; img-src https:; style-src 'unsafe-inline'&quot;><meta charset=&quot;utf-8&quot;><style>body{font:14px system-ui;margin:12px;color:#242424;background:#fff}</style>${detailsHtml}`"></iframe>
+      <div v-else-if="hasContent" class="seo-html-preview" v-html="safeHtml"></div>
       <div v-else class="preview-empty">
         <Icon name="clipboardList" :size="26" :stroke-width="1.6" />
         <span>Henüz açıklama içeriği yok — <b>Açıklamayı Üret</b> ile oluşturun.</span>
@@ -156,7 +159,9 @@ function genDetails() {
     </div>
 
     <div v-if="history.length" class="hist-line">
-      <a class="link" @click="histOpen = !histOpen">önceki sürümler ({{ history.length }})</a>
+      <button type="button" class="link" :aria-expanded="histOpen" @click="histOpen = !histOpen">
+        Önceki sürümler ({{ history.length }})
+      </button>
     </div>
     <VersionHistory
       v-if="histOpen && history.length"
@@ -179,7 +184,7 @@ function genDetails() {
         </button>
       </div>
       <button
-        v-if="store.settings?.ideasoft_active"
+        v-if="store.productIdeasoftAvailable"
         class="is-push"
         :disabled="store.ideasoftBusy"
         title="Bu kartın içeriğini IdeaSoft'a gönder"
@@ -189,7 +194,7 @@ function genDetails() {
         IdeaSoft'a Gönder
       </button>
       <div style="flex:1"></div>
-      <button class="done" :class="{ active: detailsDone }" @click="store.toggleDetailsDone()">
+      <button class="done" :class="{ active: detailsDone }" :disabled="store.generatingDetails" @click="store.toggleDetailsDone()">
         <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
         {{ detailsDone ? "Açıklama tamamlandı ✓" : "Açıklamayı Tamamlandı işaretle" }}
       </button>
@@ -198,13 +203,18 @@ function genDetails() {
 </template>
 
 <style scoped>
+.shared-html-preview { display: block; width: 100%; min-height: 270px; border: 0; }
 .hist-line {
   margin-top: 10px;
   font-size: 11.5px;
 }
 .link {
   color: var(--accent);
+  background: transparent;
+  border: 0;
+  padding: 0;
   cursor: pointer;
+  font: inherit;
   font-weight: 560;
 }
 

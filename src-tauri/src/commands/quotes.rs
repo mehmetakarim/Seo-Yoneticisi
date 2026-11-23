@@ -16,6 +16,7 @@
 //! hangisinin doğru olduğu belirsizleşirdi.
 
 use super::*;
+use serde::Deserialize;
 use seo_core::quote::{self, Currency, Line, Margin, TaxRow, Totals};
 use seo_core::quote_html::{self, OutLine, QuoteOut};
 
@@ -71,6 +72,32 @@ fn lines_of(items: &[QuoteItem]) -> Vec<Line> {
             cost: i.cost,
         })
         .collect()
+}
+
+#[tauri::command]
+pub fn calculate_team_quotes(
+    mut quotes: Vec<serde_json::Value>,
+) -> Result<Vec<serde_json::Value>, String> {
+    for q in &mut quotes {
+        let lines: Vec<Line> =
+            serde_json::from_value(q["items"].clone()).map_err(|e| e.to_string())?;
+        let status = quote::status_label(q["status"].as_str().unwrap_or_default());
+        let items = q["items"]
+            .as_array_mut()
+            .ok_or("Teklif satırları okunamadı.")?;
+        for (item, line) in items.iter_mut().zip(&lines) {
+            item["net"] = serde_json::json!(line.net());
+            item["margin"] = serde_json::json!(quote::line_margin(line));
+        }
+        let totals = quote::totals(&lines);
+        q["status_label"] = serde_json::json!(status);
+        q["subtotal"] = serde_json::json!(totals.subtotal);
+        q["taxes"] = serde_json::json!(totals.taxes);
+        q["tax_total"] = serde_json::json!(totals.tax_total);
+        q["grand_total"] = serde_json::json!(totals.grand_total);
+        q["margin"] = serde_json::json!(quote::quote_margin(&lines));
+    }
+    Ok(quotes)
 }
 
 fn read_items(conn: &Connection, quote_id: i64) -> Vec<QuoteItem> {
@@ -263,30 +290,73 @@ pub fn add_quote_item_from_catalog(
 ) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
     let (currency, fx): (String, Option<f64>) = conn
-        .query_row("SELECT currency, fx_rate FROM quotes WHERE id = ?1", params![quote_id], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        .query_row(
+            "SELECT currency, fx_rate FROM quotes WHERE id = ?1",
+            params![quote_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .map_err(|e| format!("Teklif bulunamadı: {e}"))?;
 
-    let (name, ccy, price1, cost, tax, price_tl): (
-        String,
-        Option<String>,
-        Option<f64>,
-        Option<f64>,
-        Option<f64>,
-        Option<f64>,
-    ) = conn
+    let (name, birim, kdv, maliyet) = catalog_quote_line(&conn, &sku, &currency, fx)?;
+    let sira: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort),0)+1 FROM quote_items WHERE quote_id = ?1",
+            params![quote_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(1);
+    conn.execute(
+        "INSERT INTO quote_items (quote_id, sku, name, qty, unit_price, tax_rate, cost, sort)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+        params![quote_id, sku, name, qty.max(1.0), birim, kdv, maliyet, sira],
+    )
+    .map_err(|e| format!("Satır eklenemedi: {e}"))?;
+    dokun(&conn, quote_id);
+    Ok(())
+}
+
+type CatalogQuoteLine = (String, f64, f64, Option<f64>);
+
+fn catalog_quote_line(
+    conn: &Connection,
+    sku: &str,
+    currency: &str,
+    fx: Option<f64>,
+) -> Result<CatalogQuoteLine, String> {
+    let product = conn
         .query_row(
             "SELECT name, currency_abbr, price1, buying_price, tax_rate, price_tl
              FROM products WHERE sku = ?1",
             params![sku],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            |r| {
+                Ok(CatalogQuoteProduct {
+                    name: r.get(0)?, currency_abbr: r.get(1)?, price1: r.get(2)?,
+                    buying_price: r.get(3)?, tax_rate: r.get(4)?, price_tl: r.get(5)?,
+                })
+            },
         )
         .map_err(|e| format!("Ürün bulunamadı: {e}"))?;
 
-    let kdv = tax.unwrap_or_else(|| super::setting_i64(&conn, "quote_tax_rate", 20) as f64);
+    price_catalog_quote_line(conn, product, currency, fx)
+}
+
+#[derive(Deserialize)]
+pub struct CatalogQuoteProduct {
+    name: String,
+    currency_abbr: Option<String>,
+    price1: Option<f64>,
+    buying_price: Option<f64>,
+    tax_rate: Option<f64>,
+    price_tl: Option<f64>,
+}
+
+fn price_catalog_quote_line(
+    conn: &Connection, product: CatalogQuoteProduct, currency: &str, fx: Option<f64>,
+) -> Result<CatalogQuoteLine, String> {
+    let CatalogQuoteProduct { name, currency_abbr: ccy, price1, buying_price: cost, tax_rate: tax, price_tl } = product;
+    let kdv = tax.unwrap_or_else(|| super::setting_i64(conn, "quote_tax_rate", 20) as f64);
     let (birim, maliyet) = quote::catalog_line(
-        Currency::parse(&currency),
+        Currency::parse(currency),
         ccy.as_deref().unwrap_or("USD"),
         price1,
         cost,
@@ -304,21 +374,23 @@ pub fn add_quote_item_from_catalog(
         )
     })?;
 
-    let sira: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(sort),0)+1 FROM quote_items WHERE quote_id = ?1",
-            params![quote_id],
-            |r| r.get(0),
-        )
-        .unwrap_or(1);
-    conn.execute(
-        "INSERT INTO quote_items (quote_id, sku, name, qty, unit_price, tax_rate, cost, sort)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-        params![quote_id, sku, name, qty.max(1.0), birim, kdv, maliyet, sira],
+    Ok((name, birim, kdv, maliyet))
+}
+
+#[tauri::command]
+pub fn prepare_team_catalog_line(
+    state: State<'_, AppState>,
+    sku: String,
+    currency: String,
+    fx: Option<f64>,
+    product: CatalogQuoteProduct,
+) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().unwrap();
+    let (name, unit_price, tax_rate, cost) = price_catalog_quote_line(&conn, product, &currency, fx)?;
+    Ok(
+        serde_json::json!({ "sku": sku, "name": name, "qty": 1, "unit_price": unit_price,
+        "tax_rate": tax_rate, "cost": cost }),
     )
-    .map_err(|e| format!("Satır eklenemedi: {e}"))?;
-    dokun(&conn, quote_id);
-    Ok(())
 }
 
 /// Elle satır (montaj, nakliye…). Maliyeti bilinmiyor → marja katılmıyor.
@@ -512,39 +584,108 @@ fn gun_ay_yil(s: &str) -> String {
 /// dikkat meselesi değil, tip meselesi — bir gün maliyet belgeye girecekse önce bu yapının
 /// değişmesi gerekir ve karar görünür olur.
 fn to_out(q: &Quote, seller: String, footer: String) -> QuoteOut {
-    QuoteOut {
+    QuoteDocumentInput {
         no: q.no.clone(),
-        date: gun_ay_yil(&q.created_at),
-        valid_until: q.valid_until.as_deref().map(gun_ay_yil).unwrap_or_default(),
+        created_at: q.created_at.clone(),
+        valid_until: q.valid_until.clone(),
         currency: q.currency.clone(),
-        seller,
-        buyer: q.contact_name.clone(),
-        // Kur teklifin üstünde yazılı: müşteri neye göre hesaplandığını görüyor, siz de
-        // altı ay sonra baktığınızda hatırlıyorsunuz.
-        fx_note: match (q.fx_rate, q.fx_date.as_deref()) {
-            (Some(k), Some(t)) => {
-                format!("1 USD = {} TL · {}", quote_html::tr_num(k), gun_ay_yil(t))
-            }
-            (Some(k), None) => format!("1 USD = {} TL", quote_html::tr_num(k)),
-            _ => String::new(),
-        },
-        lines: q
-            .items
-            .iter()
-            .map(|i| OutLine {
-                name: i.name.clone(),
-                qty: i.qty,
-                unit_price: i.unit_price,
-                tax_rate: i.tax_rate,
-                net: i.net,
-            })
-            .collect(),
-        subtotal: q.subtotal,
-        taxes: q.taxes.iter().map(|t| (t.rate, t.base, t.amount)).collect(),
-        grand_total: q.grand_total,
+        contact_name: q.contact_name.clone(),
+        fx_rate: q.fx_rate,
+        fx_date: q.fx_date.clone(),
+        items: lines_of(&q.items),
         note: q.note.clone(),
-        footer,
     }
+    .output(seller, footer)
+}
+
+fn quote_fx_note(rate: Option<f64>, date: Option<&str>) -> String {
+    match (rate, date) {
+        (Some(k), Some(t)) => {
+            format!("1 USD = {} TL · {}", quote_html::tr_num(k), gun_ay_yil(t))
+        }
+        (Some(k), None) => format!("1 USD = {} TL", quote_html::tr_num(k)),
+        _ => String::new(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct QuoteDocumentInput {
+    no: String,
+    contact_name: String,
+    currency: String,
+    fx_rate: Option<f64>,
+    fx_date: Option<String>,
+    valid_until: Option<String>,
+    note: String,
+    created_at: String,
+    items: Vec<Line>,
+}
+
+impl QuoteDocumentInput {
+    fn output(self, seller: String, footer: String) -> QuoteOut {
+        let totals = quote::totals(&self.items);
+        QuoteOut {
+            no: self.no,
+            date: gun_ay_yil(&self.created_at),
+            valid_until: self
+                .valid_until
+                .as_deref()
+                .map(gun_ay_yil)
+                .unwrap_or_default(),
+            currency: self.currency,
+            seller,
+            buyer: self.contact_name,
+            fx_note: quote_fx_note(self.fx_rate, self.fx_date.as_deref()),
+            lines: self
+                .items
+                .into_iter()
+                .map(|line| OutLine {
+                    net: line.net(),
+                    name: line.name,
+                    qty: line.qty,
+                    unit_price: line.unit_price,
+                    tax_rate: line.tax_rate,
+                })
+                .collect(),
+            subtotal: totals.subtotal,
+            taxes: totals
+                .taxes
+                .into_iter()
+                .map(|t| (t.rate, t.base, t.amount))
+                .collect(),
+            grand_total: totals.grand_total,
+            note: self.note,
+            footer,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn render_team_quote(
+    state: State<'_, AppState>,
+    quote: QuoteDocumentInput,
+) -> Result<QuoteDoc, String> {
+    let out = team_quote_out(&state.conn.lock().unwrap(), quote)?;
+    Ok(QuoteDoc {
+        html: quote_html::render(&out),
+        text: quote_html::render_text(&out),
+    })
+}
+
+#[tauri::command]
+pub fn export_team_quote_html(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    quote: QuoteDocumentInput,
+) -> Result<String, String> {
+    let out = team_quote_out(&state.conn.lock().unwrap(), quote)?;
+    open_quote_html(&app, &out.no, &quote_html::render(&out))
+}
+
+fn team_quote_out(conn: &Connection, document: QuoteDocumentInput) -> Result<QuoteOut, String> {
+    let seller = db::get_setting(conn, "quote_seller")?.unwrap_or_default();
+    let footer = db::get_setting(conn, "quote_footer")?.unwrap_or_default();
+    Ok(document.output(seller, footer))
 }
 
 /// Müşteriye giden belgeyi üretir (HTML + düz metin).
@@ -586,15 +727,29 @@ pub fn export_quote_html(
     let govde = quote_html::render(&to_out(&q, seller, footer));
     drop(conn);
 
+    open_quote_html(&app, &q.no, &govde)
+}
+
+fn open_quote_html(app: &tauri::AppHandle, number: &str, govde: &str) -> Result<String, String> {
+    let safe_number: String = number
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect();
     // Tam belge: yazdırma kenar boşlukları ve başlık burada; `render` yalnızca gövdeyi üretiyor
     // (aynı gövde mail'e de yapıştırılıyor, orada `<html>` sarmalayıcı istenmiyor).
     let tam = format!(
         "<!doctype html><html lang=\"tr\"><head><meta charset=\"utf-8\">\
          <title>Teklif {}</title><style>@page{{margin:18mm}}\
          body{{margin:24px;background:#fff}}</style></head><body>{govde}</body></html>",
-        q.no
+        safe_number
     );
-    let ad = format!("teklif-{}.html", q.no.replace(['/', '\\', ' '], "-"));
+    let ad = format!("teklif-{safe_number}.html");
     let yol = std::env::temp_dir().join(ad);
     std::fs::write(&yol, tam).map_err(|e| format!("Belge dosyası yazılamadı: {e}"))?;
 
@@ -737,6 +892,28 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    #[test]
+    fn central_quote_reuses_totals_and_keeps_cost_out_of_documents() {
+        let draft = serde_json::json!({
+            "id": "quote-id", "status": "draft", "no": "T-2026-TEST", "contact_name": "Test Buyer",
+            "currency": "TRY", "created_at": "2026-11-18T09:00:00Z", "note": "",
+            "items": [{"id": "line-id", "name": "Keyboard", "qty": 2, "unit_price": 100,
+                       "tax_rate": 20, "cost": 37.42}]
+        });
+        let calculated = calculate_team_quotes(vec![draft.clone()]).unwrap();
+        assert_eq!(calculated[0]["id"], "quote-id");
+        assert_eq!(calculated[0]["items"][0]["id"], "line-id");
+        assert_eq!(calculated[0]["grand_total"], 240.0);
+        assert!(calculated[0]["margin"].is_object());
+
+        let doc = team_quote_out(&db(), serde_json::from_value(draft).unwrap()).unwrap();
+        for output in [quote_html::render(&doc), quote_html::render_text(&doc)] {
+            assert!(output.contains("Keyboard"));
+            assert!(!output.contains("37.42"));
+            assert!(!output.contains("37,42"));
+        }
     }
 
     /// ⚠️ Numara `next_quote_no` ile üretiliyor: sabit yazsaydım ikinci teklif UNIQUE

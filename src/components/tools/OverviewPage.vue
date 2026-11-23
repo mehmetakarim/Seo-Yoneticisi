@@ -13,6 +13,7 @@
  */
 import { computed, onMounted } from "vue";
 import { useStore } from "../../store";
+import { teamGscMode } from "../../teamGsc";
 import type { Page } from "../../navigation";
 import Icon from "../Icon.vue";
 
@@ -25,7 +26,6 @@ onMounted(() => {
 });
 
 const sonuc = computed(() => store.outcomeSummary);
-/** Henüz hiç dönem yoksa kullanıcıya "geçmişi getir" düğmesi gösteriliyor. */
 const gecmisVar = computed(() => (sonuc.value?.snapshots ?? 0) > 0);
 
 const missed = computed(() =>
@@ -151,7 +151,7 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
             <div class="metrics">
               <div class="metric">
                 <span class="m-val">{{ sonuc.measured_events }}</span>
-                <span class="m-lab">gönderim izleniyor</span>
+                <span class="m-lab">{{ teamGscMode() ? "mağaza işlemi izleniyor" : "gönderim izleniyor" }}</span>
               </div>
               <span class="m-sep"></span>
               <div class="metric">
@@ -193,7 +193,7 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
           </template>
         </div>
         <button
-          v-if="!gecmisVar"
+          v-if="!gecmisVar || teamGscMode()"
           class="run"
           :disabled="store.seedBusy"
           @click="store.seedMetricHistory()"
@@ -203,7 +203,7 @@ const fmtDate = (s: string) => s.replace("T", " ").slice(0, 16);
             :size="15"
             :class="{ spin: store.seedBusy }"
           />
-          {{ store.seedBusy ? "Geçmiş getiriliyor…" : "Geçmişi getir" }}
+          {{ store.seedBusy ? "Geçmiş getiriliyor…" : gecmisVar ? "Geçmişi tamamla" : "Geçmişi getir" }}
         </button>
       </div>
     </div>

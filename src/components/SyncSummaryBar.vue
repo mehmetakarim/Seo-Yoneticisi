@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useStore } from "../store";
+import { teamUser, teamWorkspace } from "../teamConnection";
 import Icon from "./Icon.vue";
 
 const store = useStore();
@@ -19,7 +20,12 @@ const chips = computed(() => {
 </script>
 
 <template>
-  <div v-if="store.showSummary && store.lastSync" class="bar">
+  <div v-if="store.productCatalogRevision !== null" class="bar">
+    <span class="lead">Ortak katalog</span>
+    <span>{{ store.allRows.length }} ürün · Sürüm {{ store.productCatalogRevision }}</span>
+    <span class="chip">Ortak SEO taslakları</span>
+  </div>
+  <div v-else-if="(!teamUser || !teamWorkspace) && store.showSummary && store.lastSync" class="bar">
     <Icon name="check" :size="14" :stroke-width="2.4" style="color:#2fa84f" />
     <span class="lead">Feed güncellendi</span>
     <span v-for="(c, i) in chips" :key="i" class="chip">

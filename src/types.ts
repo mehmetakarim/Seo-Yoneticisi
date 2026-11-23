@@ -36,6 +36,10 @@ export interface ProductRow {
 }
 
 export interface ProductDetail {
+  catalog_only?: boolean;
+  seo_revision?: number | null;
+  team_seo_scope?: string;
+  team_catalog_revision?: number;
   sku: string;
   name: string;
   brand: string | null;
@@ -114,6 +118,7 @@ export interface IdeasoftPreview {
   id: number;
   remote: IdeasoftRemote;
   local: Record<string, unknown>;
+  confirmation?: string;
 }
 
 /** Önceki teknik tablo sürümünün özeti (en yeni başta). */
@@ -121,6 +126,7 @@ export interface TechVersionMeta {
   at: string;
   rows: number;
   groups: number;
+  model?: string;
 }
 
 export interface TechRow {
@@ -532,6 +538,7 @@ export interface TodayQueue {
 
 /** Seansta o an kilitli iş — aynı anda YALNIZCA BİR tane. */
 export interface LockedItem {
+  item_id: number;
   kind: string;
   reference: string;
   bucket: Bucket;
@@ -613,8 +620,11 @@ export interface ExportSummary {
 // ---------------------------------------------------------------------------
 
 /** Müşteri kaydı. ⚠️ Kişisel veri — asistan bağlamına GİRMİYOR (bkz. assistantSources.ts). */
+export type ContactId = number | string;
+
 export interface Contact {
-  id: number;
+  id: ContactId;
+  revision?: number;
   name: string;
   company: string;
   email: string;
@@ -637,7 +647,7 @@ export interface ContactProduct {
   sku: string;
   /** Kişi kartında ürün adı, ürün detayında kişi adı ("Ahmet Yılmaz · Kurumsal BT"). */
   name: string;
-  contact_id: number;
+  contact_id: ContactId;
   at: string;
 }
 
@@ -669,7 +679,7 @@ export interface SilenceState {
 
 /** Temas kaydı — CRM'in kendi olay günlüğü (`work_events` DEĞİL). */
 export interface ContactEvent {
-  id: number;
+  id: ContactId;
   at: string;
   /** "call" | "email" | "meeting" | "note" | "followup_done" */
   kind: string;
@@ -696,7 +706,7 @@ export interface TaxRow {
 }
 
 export interface QuoteItem {
-  id: number;
+  id: number | string;
   /** null = elle satır (montaj, nakliye). */
   sku: string | null;
   name: string;
@@ -710,9 +720,9 @@ export interface QuoteItem {
 }
 
 export interface Quote {
-  id: number;
+  id: number | string;
   no: string;
-  contact_id: number | null;
+  contact_id: ContactId | null;
   contact_name: string;
   /** "draft" | "sent" | "won" | "lost" | "expired" */
   status: string;
@@ -735,6 +745,7 @@ export interface Quote {
   grand_total: number;
   margin: Margin | null;
   version_count: number;
+  revision?: number;
 }
 
 /** Müşteriye giden belge — iki biçim birden (mail'e yapıştırma için). */
@@ -839,7 +850,22 @@ export interface StorePageSyncResult {
  * `queries` üretimin dayanağı: ekranda gösteriliyor ki operatör "bu metin nereden çıktı?"
  * sorusunu sorabilsin. Boşsa üretim zayıf bağlamla çalışmış demektir.
  */
+export interface NewStorePage {
+  name: string;
+  slug: string;
+  pageTitle: string;
+  metaDescription: string;
+  excerpt: string;
+  content: string;
+  publish: boolean;
+}
+
 export interface StorePageDetail {
+  team_scope?: string;
+  revision?: number;
+  team_conflict?: boolean;
+  team_pending?: boolean;
+  status: number;
   kind: string;
   remote_id: number;
   slug: string;
@@ -855,6 +881,7 @@ export interface StorePageDetail {
   draft_model: string;
   draft_at: string;
   pushed_at: string;
+  published_at?: string;
   queries: string[];
   impressions: number;
   clicks: number;
@@ -874,4 +901,20 @@ export interface HealthCheck {
   detail: string;
   /** Bu satırı düzeltecek eylem; boşsa yapılacak bir şey yok. */
   action: string;
+}
+export interface QueryPeriod {
+  start: string;
+  end: string;
+  days: number;
+  clicks: number;
+  impressions: number;
+  position: number | null;
+  ctr: number | null;
+}
+
+export interface QueryComparison {
+  event_day: string;
+  page?: string;
+  before: QueryPeriod | null;
+  after: QueryPeriod | null;
 }

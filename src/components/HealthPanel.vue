@@ -14,8 +14,13 @@
  * ⚠️ Tek bileşen, iki yer: kopyalasaydık biri güncellenmeyip sapardı — bu projede
  * kopyalanan tablo/geometri dört kez saptı.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { api } from "../api";
+import { syncTeamStoreInventory } from "../teamStorePages";
+import { teamAccessIssue, teamReachable, teamRestoring, teamUser, teamWorkspace } from "../teamConnection";
+import { readTeamDataHealth } from "../teamHealth";
+import { testTeamGemini } from "../teamGemini";
+import { testTeamIdeasoft } from "../teamIdeasoft";
 import { useStore } from "../store";
 import Icon from "./Icon.vue";
 import type { HealthCheck } from "../types";
@@ -24,17 +29,15 @@ const props = withDefaults(defineProps<{ compact?: boolean }>(), { compact: fals
 const emit = defineEmits<{ done: [temiz: boolean] }>();
 const store = useStore();
 
-const yerel = ref<HealthCheck[]>([]);
-const uzak = ref<HealthCheck[]>([]);
-const uzakBekliyor = ref(true);
+const dataChecks = ref<HealthCheck[]>([]);
+const connectionChecks = ref<HealthCheck[]>([]);
+const checking = ref(true);
 const calisan = ref("");
+let checkRequest = 0;
 
-const hepsi = computed(() => [...yerel.value, ...uzak.value]);
-/** İlerleme: yerel kontroller anında biter, uzak olanlar ağ bekler. */
-const ilerleme = computed(() => {
-  const toplam = 5; // 3 yerel + 2 uzak — sabit, çünkü liste sabit
-  return Math.round(((yerel.value.length + uzak.value.length) / toplam) * 100);
-});
+const inWorkspace = computed(() => Boolean(teamWorkspace.value || teamUser.value));
+const hepsi = computed(() => [...dataChecks.value, ...connectionChecks.value]);
+const ilerleme = computed(() => Math.round(hepsi.value.length / 5 * 100));
 const sorunlu = computed(() =>
   hepsi.value.filter((c) => c.state === "stale" || c.state === "error"),
 );
@@ -47,25 +50,46 @@ const TON: Record<string, { ikon: string; renk: string }> = {
   off: { ikon: "info", renk: "var(--c-faint)" },
 };
 
-async function kontrolEt() {
-  yerel.value = [];
-  uzak.value = [];
-  uzakBekliyor.value = true;
-  try {
-    yerel.value = await api.localHealth();
-  } catch (e) {
-    store.toast(String(e), "error");
-  }
-  try {
-    uzak.value = await api.remoteHealth();
-  } catch (e) {
-    store.toast(String(e), "error");
-  } finally {
-    uzakBekliyor.value = false;
-    emit("done", sorunlu.value.length === 0);
-  }
+async function sharedConnectionChecks(): Promise<HealthCheck[]> {
+  const providers = [
+    { key: "gemini", label: "Ortak Gemini", test: testTeamGemini },
+    { key: "ideasoft", label: "Ortak IdeaSoft", test: testTeamIdeasoft },
+  ];
+  return Promise.all(providers.map(async ({ key, label, test }) => {
+    if (teamReachable.value !== true || !navigator.onLine || teamAccessIssue.value) {
+      return { key, label, state: "off", detail: "Bağlantı kurulunca denetlenecek", action: "" };
+    }
+    try {
+      return { key, label, state: "ok", detail: await test(), action: "" };
+    } catch (e) {
+      return { key, label, state: "error", detail: e instanceof Error ? e.message : String(e), action: "open_settings" };
+    }
+  }));
 }
-onMounted(kontrolEt);
+
+async function kontrolEt() {
+  const request = ++checkRequest;
+  dataChecks.value = [];
+  connectionChecks.value = [];
+  checking.value = true;
+  if (teamRestoring.value) return;
+  const results = [
+    { slot: dataChecks, result: inWorkspace.value ? readTeamDataHealth() : api.localHealth() },
+    { slot: connectionChecks, result: inWorkspace.value ? sharedConnectionChecks() : api.remoteHealth() },
+  ];
+  await Promise.all(results.map(async ({ slot, result }) => {
+    try {
+      const checks = await result;
+      if (request === checkRequest) slot.value = checks;
+    } catch (e) {
+      if (request === checkRequest) store.toast(String(e), "error");
+    }
+  }));
+  if (request !== checkRequest) return;
+  checking.value = false;
+  emit("done", hepsi.value.length === 5 && sorunlu.value.length === 0);
+}
+watch([teamUser, teamWorkspace, teamRestoring, teamReachable, teamAccessIssue], kontrolEt, { immediate: true });
 defineExpose({ kontrolEt });
 
 /**
@@ -82,7 +106,7 @@ async function calistir(c: HealthCheck) {
     // eylemi ayrıca listeyi yeniliyor ve özet şeridini gösteriyor, ikisi de gerekli.
     if (c.action === "sync_feed") await store.sync();
     else if (c.action === "run_analysis") await store.runOpportunityAnalysis();
-    else if (c.action === "sync_store_pages") await api.syncStorePages();
+    else if (c.action === "sync_store_pages") await syncTeamStoreInventory();
     else if (c.action === "open_settings") {
       store.page = "settings";
       emit("done", true);
@@ -102,11 +126,16 @@ const EYLEM_AD: Record<string, string> = {
   sync_store_pages: "Envanteri çek",
   open_settings: "Ayarlar",
 };
+
+function actionLabel(action: string) {
+  if (inWorkspace.value && action === "sync_feed") return "Kataloğu yenile";
+  return EYLEM_AD[action] || "Çalıştır";
+}
 </script>
 
 <template>
   <div class="hp" :class="{ compact: props.compact }">
-    <div v-if="uzakBekliyor" class="bar">
+    <div v-if="checking" class="bar">
       <div class="dolgu" :style="{ width: ilerleme + '%' }"></div>
     </div>
 
@@ -121,11 +150,11 @@ const EYLEM_AD: Record<string, string> = {
         @click="calistir(c)"
       >
         <Icon v-if="calisan === c.key" name="refresh" :size="12" class="spin" />
-        {{ calisan === c.key ? "…" : EYLEM_AD[c.action] || "Çalıştır" }}
+        {{ calisan === c.key ? "…" : actionLabel(c.action) }}
       </button>
     </div>
 
-    <div v-if="uzakBekliyor" class="sat bekle">
+    <div v-if="checking" class="sat bekle">
       <Icon name="refresh" :size="14" class="spin" />
       <span class="ad">Bağlantılar denetleniyor…</span>
     </div>
@@ -191,7 +220,19 @@ const EYLEM_AD: Record<string, string> = {
   color: var(--c-faint);
 }
 .compact .sat {
-  padding: 5px 0;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  padding: 7px 0;
   font-size: 12px;
+}
+.compact .det {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  text-align: left;
+}
+.compact .sat:has(.eyl) .det { grid-column-end: 3; }
+.compact .eyl {
+  grid-column: 3;
+  grid-row: 1 / span 2;
 }
 </style>

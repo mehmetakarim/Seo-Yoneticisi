@@ -14,6 +14,8 @@
 import { ref, watch } from "vue";
 import { api } from "../api";
 import { useStore } from "../store";
+import { teamGscMode, teamMeasurementScope, teamOutcomeInputs } from "../teamGsc";
+import { teamReachable } from "../teamConnection";
 import type { ProductTimeline } from "../types";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
@@ -21,20 +23,27 @@ import SeoCard from "./SeoCard.vue";
 const store = useStore();
 const data = ref<ProductTimeline | null>(null);
 const busy = ref(false);
+let selection = 0;
 
 async function yukle(sku: string | null) {
+  const request = ++selection;
   data.value = null;
+  busy.value = false;
   if (!sku) return;
   busy.value = true;
   try {
-    data.value = await api.getProductTimeline(sku);
+    const sharedMode = teamGscMode();
+    const shared = sharedMode ? await teamOutcomeInputs() : null;
+    if (request !== selection || (sharedMode && !shared)) return;
+    const timeline = await api.getProductTimeline(sku, shared);
+    if (request === selection) data.value = timeline;
   } catch {
     // Sessiz: zaman çizelgesi yardımcı bir katman, ürün ekranını düşürmemeli.
   } finally {
-    busy.value = false;
+    if (request === selection) busy.value = false;
   }
 }
-watch(() => store.selectedSku, yukle, { immediate: true });
+watch([() => store.selectedSku, teamReachable, teamGscMode, teamMeasurementScope], ([sku]) => yukle(sku), { immediate: true });
 
 /** `2026-08-01T13:20:00` → `01 Ağu 13:20` */
 const AYLAR = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];

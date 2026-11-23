@@ -80,12 +80,29 @@ fn norm_url(u: &str) -> String {
 }
 
 const OPPORTUNITY_DAYS: i64 = 90;
+type AnalysisProduct = (String, String, String, String, String, String, String);
+
+#[derive(serde::Deserialize)]
+pub struct SharedOpportunityInputs {
+    pages: Vec<seo_data::PageStat>,
+    products: Vec<AnalysisProduct>,
+    queries: Option<Vec<seo_data::QueryPageStat>>,
+    previous: Option<Vec<seo_data::PageStat>>,
+    snapshot: Option<super::SharedSnapshot>,
+}
 
 #[tauri::command]
 pub async fn analyze_opportunities(
     state: State<'_, AppState>,
+    measurement_scope: Option<String>,
+    mut shared: Option<SharedOpportunityInputs>,
 ) -> Result<OpportunityReport, String> {
-    let (gsc_json, gsc_site, products) = {
+    if measurement_scope.is_some() != shared.is_some() {
+        return Err("Ortak GSC analiz girdileri eksik.".into());
+    }
+    let (gsc_json, gsc_site, products) = if let Some(input) = shared.as_mut() {
+        (String::new(), String::new(), std::mem::take(&mut input.products))
+    } else {
         let conn = state.conn.lock().unwrap();
         let gsc_json = db::get_setting(&conn, "gsc_service_account_json")?.unwrap_or_default();
         let gsc_site = db::get_setting(&conn, "gsc_site_url")?.unwrap_or_default();
@@ -99,7 +116,7 @@ pub async fn analyze_opportunities(
                  WHERE p.url IS NOT NULL AND p.url <> ''",
             )
             .map_err(|e| format!("Ürünler okunamadı: {e}"))?;
-        let rows: Vec<(String, String, String, String, String, String, String)> = stmt
+        let rows: Vec<AnalysisProduct> = stmt
             .query_map([], |r| {
                 Ok((
                     r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
@@ -112,7 +129,7 @@ pub async fn analyze_opportunities(
     };
 
     // Yapılandırılmamışsa sessizce boş liste DÖNME — kullanıcı "fırsat yok" sanır.
-    if gsc_json.trim().is_empty() || gsc_site.trim().is_empty() {
+    if shared.is_none() && (gsc_json.trim().is_empty() || gsc_site.trim().is_empty()) {
         return Err(
             "Google Search Console bağlantısı kurulmamış. Ayarlar'dan service-account \
              dosyasını yükleyip mülk adresini girin."
@@ -129,14 +146,13 @@ pub async fn analyze_opportunities(
         .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
 
     // Tek çağrı: sayfa boyutunda tüm site. Ürün başına istek atmak 262 çağrı olurdu.
-    let stats = seo_data::gsc::page_stats(
-        &client,
-        &gsc_json,
-        gsc_site.trim(),
-        OPPORTUNITY_DAYS,
-        25_000,
-    )
-    .await?;
+    let use_shared = shared.is_some();
+    let (stats, shared_queries, shared_previous, shared_snapshot) = if let Some(input) = shared {
+        (input.pages, input.queries, input.previous, input.snapshot)
+    } else {
+        let stats = seo_data::gsc::page_stats(&client, &gsc_json, gsc_site.trim(), OPPORTUNITY_DAYS, 25_000).await?;
+        (stats, None, None, None)
+    };
 
     let by_url: std::collections::HashMap<String, &seo_data::PageStat> =
         stats.iter().map(|s| (norm_url(&s.page), s)).collect();
@@ -210,7 +226,7 @@ pub async fn analyze_opportunities(
     // hiç indirilmiyordu. Ölçüldü (2026-08-12): filtre kalkınca +6.276 satır / +5.700 sorgu /
     // +101.118 gösterim geliyor ve içerik açığı tam olarak orada. Maliyet ihmal edilebilir:
     // 23.914 → 30.190 satır, 2,1 → 3,8 sn.
-    let (striking, cannibalization) = match seo_data::gsc::query_page_stats(
+    let queries = if use_shared { shared_queries.ok_or_else(|| "GSC sorgu ayrıntıları alınamadı.".to_owned()) } else { seo_data::gsc::query_page_stats(
         &client,
         &gsc_json,
         gsc_site.trim(),
@@ -218,8 +234,8 @@ pub async fn analyze_opportunities(
         None,
         60_000,
     )
-    .await
-    {
+    .await };
+    let (striking, cannibalization) = match queries {
         Ok(qp) => {
             let by_page: std::collections::HashMap<String, (String, String)> = opportunities
                 .iter()
@@ -268,7 +284,7 @@ pub async fn analyze_opportunities(
 
     // Trend: önceki 90 günü de çek ve karşılaştır. Ayrı bir GSC çağrısı; başarısız olursa
     // raporun geri kalanı yine dönsün — trend ek bilgidir.
-    let decay = match seo_data::gsc::page_stats_offset(
+    let previous = if use_shared { shared_previous.ok_or_else(|| "Önceki GSC dönemi alınamadı.".to_owned()) } else { seo_data::gsc::page_stats_offset(
         &client,
         &gsc_json,
         gsc_site.trim(),
@@ -276,8 +292,8 @@ pub async fn analyze_opportunities(
         OPPORTUNITY_DAYS,
         25_000,
     )
-    .await
-    {
+    .await };
+    let decay = match previous {
         Ok(prev) => {
             let to_tuples = |v: &[seo_data::PageStat]| -> Vec<(String, f64, f64, f64)> {
                 v.iter()
@@ -314,7 +330,13 @@ pub async fn analyze_opportunities(
 
     // Ölçüm omurgası: son anlık görüntü ≥7 günse yenisini al. Hata yutuluyor — ölçüm
     // kaydı alınamadı diye fırsat analizi başarısız sayılmamalı.
-    super::snapshot_if_due(&state, &gsc_json, gsc_site.trim(), &client).await;
+    if use_shared {
+        if let (Some(scope), Some(snapshot)) = (measurement_scope.as_deref(), shared_snapshot) {
+            super::queue_shared_snapshot(&state, scope, snapshot)?;
+        }
+    } else {
+        super::snapshot_if_due(&state, &gsc_json, gsc_site.trim(), &client).await;
+    }
 
     Ok(report)
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../store";
 import { computeBadge } from "../validation";
@@ -12,12 +12,36 @@ import TechTableCard from "./TechTableCard.vue";
 import SchemaCard from "./SchemaCard.vue";
 import FeedChangeNotice from "./FeedChangeNotice.vue";
 import OutcomeTimeline from "./OutcomeTimeline.vue";
+import QueryComparisonModal from "./QueryComparisonModal.vue";
 import ProductContacts from "./contacts/ProductContacts.vue";
 import IdeasoftPushModal from "./IdeasoftPushModal.vue";
+import { teamSeoSync } from "../teamProductSeo";
 
 const store = useStore();
 const detail = computed(() => store.detail);
+const sharedWithoutDraft = computed(() => Boolean(detail.value?.team_seo_scope && detail.value.seo_revision == null));
+const metaLocked = computed(() => store.generating || Boolean(detail.value?.team_seo_scope &&
+  (store.generatingDetails || store.techStructuring || store.techTableSaving || store.ideasoftBusy)));
 const showResearch = ref(false);
+const showComparison = ref(false);
+const comparisonButton = ref<HTMLButtonElement | null>(null);
+const detailPane = ref<HTMLElement | null>(null);
+
+watch(() => store.selectedSku, () => { showComparison.value = false; });
+
+async function closeComparison() {
+  showComparison.value = false;
+  await nextTick();
+  comparisonButton.value?.focus();
+}
+
+watch(
+  () => detail.value?.sku,
+  () => {
+    if (detailPane.value) detailPane.value.scrollTop = 0;
+  },
+  { flush: "post" },
+);
 
 // Düzenlenebilir yerel alanlar (taslak ?? feed değeri)
 const title = ref("");
@@ -31,35 +55,48 @@ watch(
   () => store.detail,
   (d) => {
     if (!d) return;
-    title.value = d.draft_title ?? d.title ?? "";
-    desc.value = d.draft_descriptions ?? d.descriptions ?? "";
-    searchKw.value = d.draft_search_keywords ?? d.search_keywords ?? "";
-    keyword.value = d.target_keyword ?? "";
+    const useDraft = !d.team_seo_scope || d.seo_revision != null;
+    title.value = (useDraft ? d.draft_title : null) ?? d.title ?? "";
+    desc.value = (useDraft ? d.draft_descriptions : null) ?? d.descriptions ?? "";
+    searchKw.value = (useDraft ? d.draft_search_keywords : null) ?? d.search_keywords ?? "";
+    keyword.value = useDraft ? d.target_keyword ?? "" : "";
   },
   { immediate: true },
 );
 
-const liveBadge = computed(() =>
-  computeBadge(title.value, desc.value, keyword.value, store.detail?.meta_status === "done"),
+watch(() => detail.value?.draft_title ?? detail.value?.title ?? "", (value, previous) => {
+  if (title.value === previous) title.value = value;
+});
+watch(() => detail.value?.draft_descriptions ?? detail.value?.descriptions ?? "", (value, previous) => {
+  if (desc.value === previous) desc.value = value;
+});
+watch(() => detail.value?.draft_search_keywords ?? detail.value?.search_keywords ?? "", (value, previous) => {
+  if (searchKw.value === previous) searchKw.value = value;
+});
+watch(() => detail.value?.target_keyword ?? "", (value, previous) => {
+  if (keyword.value.trim() === previous) keyword.value = value;
+});
+watch(
+  () => sharedWithoutDraft.value ? "" : detail.value?.target_keyword ?? "",
+  (next, previous) => {
+    if (keyword.value.trim() === previous) keyword.value = next;
+  },
 );
 
-// Debounced taslak kaydı
-let draftTimer: number | undefined;
+const liveBadge = computed(() =>
+  computeBadge(title.value, desc.value, keyword.value, !sharedWithoutDraft.value && store.detail?.meta_status === "done"),
+);
+
 function scheduleDraftSave() {
-  window.clearTimeout(draftTimer);
-  draftTimer = window.setTimeout(async () => {
-    await store.saveDraft(title.value, desc.value, searchKw.value);
-    await store.reload();
-  }, 600);
+  const product = detail.value;
+  if (product) store.scheduleProductMetaEdits(product, {
+    draft_title: title.value, draft_descriptions: desc.value, draft_search_keywords: searchKw.value,
+  });
 }
 
-let kwTimer: number | undefined;
 function scheduleKeywordSave() {
-  window.clearTimeout(kwTimer);
-  kwTimer = window.setTimeout(async () => {
-    await store.saveKeyword(keyword.value);
-    await store.reload();
-  }, 500);
+  const product = detail.value;
+  if (product) store.scheduleProductMetaEdits(product, { target_keyword: keyword.value.trim() });
 }
 
 function onTitle(v: string) { title.value = v; scheduleDraftSave(); }
@@ -88,89 +125,111 @@ async function openProduct() {
 </script>
 
 <template>
-  <section class="detail om-scroll">
+  <section ref="detailPane" class="detail om-scroll">
     <div v-if="detail" class="inner">
-      <!-- ürün başlığı -->
-      <div class="prod-head">
-        <div style="min-width:0">
-          <div class="title-row">
-            <h1>{{ detail.name }}</h1>
-            <a v-if="detail.url" class="ext" title="Ürün sayfasını aç" @click.prevent="openProduct">
-              <Icon name="external" :size="14" />
-            </a>
-          </div>
-          <div class="meta-line">
-            <span class="brand">{{ detail.brand || "—" }}</span>
-            <span class="sep">·</span>
-            <span>{{ detail.category || detail.main_category || "Kategori yok" }}</span>
-            <span class="sep">·</span>
-            <span>Stok: {{ detail.quantity ?? "—" }}</span>
-            <template v-if="detail.ideasoft_seo_rule !== null">
+      <header class="detail-header">
+        <!-- ürün başlığı -->
+        <div class="prod-head">
+          <div style="min-width:0">
+            <div class="title-row">
+              <h1>{{ detail.name }}</h1>
+              <a v-if="detail.url" class="ext" title="Ürün sayfasını aç" @click.prevent="openProduct">
+                <Icon name="external" :size="14" />
+              </a>
+            </div>
+            <div class="meta-line">
+              <span class="brand">{{ detail.brand || "—" }}</span>
               <span class="sep">·</span>
-              <span class="seo-rule" title="IdeaSoft'un kendi SEO kural skoru">
-                IdeaSoft SEO: <b>{{ detail.ideasoft_seo_rule }}</b>
-              </span>
-            </template>
-            <template v-if="detail.ideasoft_pushed_at">
+              <span>{{ detail.category || detail.main_category || "Kategori yok" }}</span>
               <span class="sep">·</span>
-              <span class="pushed">IdeaSoft'a gönderildi · {{ detail.ideasoft_pushed_at.replace("T"," ").slice(5,16) }}</span>
-            </template>
+              <span>Stok: {{ detail.quantity ?? "—" }}</span>
+              <template v-if="detail.ideasoft_seo_rule !== null">
+                <span class="sep">·</span>
+                <span class="seo-rule" title="IdeaSoft'un kendi SEO kural skoru">
+                  IdeaSoft SEO: <b>{{ detail.ideasoft_seo_rule }}</b>
+                </span>
+              </template>
+              <template v-if="detail.ideasoft_pushed_at">
+                <span class="sep">·</span>
+                <span class="pushed">IdeaSoft'a gönderildi · {{ detail.ideasoft_pushed_at.replace("T"," ").slice(5,16) }}</span>
+              </template>
+            </div>
           </div>
         </div>
-      </div>
 
+        <!-- ortak hedef kelime -->
+        <div class="keyword-row">
+          <label>
+            <Icon name="tag" :size="14" :stroke-width="1.9" />
+            Hedef Kelime
+          </label>
+          <input
+            class="fx kw-input"
+            :value="keyword"
+            :disabled="metaLocked || store.generatingDetails"
+            @input="onKeyword"
+            placeholder="ör. bluetooth kulaklık"
+          />
+          <button v-if="!detail.catalog_only" class="research-btn" title="Gerçek SEO verisiyle araştır" @click="showResearch = true">
+            <Icon name="search" :size="13" :stroke-width="2" />
+            SEO Araştır
+          </button>
+          <button
+            v-if="!detail.catalog_only || detail.seo_revision != null"
+            ref="comparisonButton"
+            type="button"
+            class="research-btn"
+            aria-haspopup="dialog"
+            title="7 günlük GSC sorgu karşılaştırmasını aç"
+            @click="showComparison = true"
+          >
+            <Icon name="chartLine" :size="14" :stroke-width="1.9" />
+            Sorgu Karşılaştır
+          </button>
+          <template v-if="store.productIdeasoftAvailable">
+            <button
+              class="research-btn"
+              :disabled="store.ideasoftBusy"
+              title="Hedef kelimeyi ve varsa teknik tablo verisini IdeaSoft'tan getir"
+              @click="store.pullIdeasoftKeyword()"
+            >
+              <Icon name="download" :size="13" :stroke-width="2" />
+              Getir
+            </button>
+            <button
+              class="research-btn"
+              :disabled="store.ideasoftBusy || !keyword.trim()"
+              title="Hedef kelimeyi IdeaSoft'a gönder (SEO kural skorunu etkiler)"
+              @click="store.openIdeasoftPreview(['keyword'])"
+            >
+              <Icon name="upload" :size="13" :stroke-width="2" />
+              Gönder
+            </button>
+          </template>
+        </div>
+      </header>
+
+      <p v-if="detail.seo_revision != null" class="shared-seo-status" role="status">
+        Ortak SEO taslağı · v{{ detail.seo_revision }}
+        <span v-if="teamSeoSync.pending"> · {{ teamSeoSync.pending }} değişiklik gönderim bekliyor</span>
+        <span v-if="teamSeoSync.conflicts"> · {{ teamSeoSync.conflicts }} ürünün düzenlemesi çakıştı</span>
+      </p>
       <!-- feed değişikliği uyarısı + karşılaştırma: onaydan SONRA kaynak veri değişmişse çıkar -->
       <FeedChangeNotice v-if="detail.feed_changed" :changed="detail.feed_changed" />
-
-      <!-- ortak hedef kelime -->
-      <div class="keyword-row">
-        <label>
-          <Icon name="tag" :size="14" :stroke-width="1.9" />
-          Hedef Kelime
-        </label>
-        <input
-          class="fx kw-input"
-          :value="keyword"
-          @input="onKeyword"
-          placeholder="ör. bluetooth kulaklık"
-        />
-        <button class="research-btn" title="Gerçek SEO verisiyle araştır" @click="showResearch = true">
-          <Icon name="search" :size="13" :stroke-width="2" />
-          SEO Araştır
-        </button>
-        <template v-if="store.settings?.ideasoft_active">
-          <button
-            class="research-btn"
-            :disabled="store.ideasoftBusy"
-            title="Hedef kelimeyi ve varsa teknik tablo verisini IdeaSoft'tan getir"
-            @click="store.pullIdeasoftKeyword()"
-          >
-            <Icon name="download" :size="13" :stroke-width="2" />
-            Getir
-          </button>
-          <button
-            class="research-btn"
-            :disabled="store.ideasoftBusy || !keyword.trim()"
-            title="Hedef kelimeyi IdeaSoft'a gönder (SEO kural skorunu etkiler)"
-            @click="store.openIdeasoftPreview(['keyword'])"
-          >
-            <Icon name="upload" :size="13" :stroke-width="2" />
-            Gönder
-          </button>
-        </template>
-      </div>
 
       <ImageScoreCard :gallery="detail.gallery" :image-count="detail.image_count" />
 
       <MetaSeoCard
+        :key="detail.sku"
         :title="title"
         :desc="desc"
         :search-kw="searchKw"
         :keyword="keyword"
-        :meta-done="detail.meta_status === 'done'"
-        :model="detail.meta_model"
-        :history="detail.meta_history"
+        :meta-done="!sharedWithoutDraft && detail.meta_status === 'done'"
+        :model="sharedWithoutDraft ? null : detail.meta_model"
+        :history="sharedWithoutDraft ? [] : detail.meta_history"
         :badge="liveBadge"
+        :locked="metaLocked"
         @update:title="onTitle"
         @update:desc="onDesc"
         @update:search-kw="onSearch"
@@ -178,13 +237,13 @@ async function openProduct() {
       />
 
       <DetailsSeoCard
-        :details-html="detail.draft_details ?? detail.details ?? ''"
+        :details-html="(sharedWithoutDraft ? null : detail.draft_details) ?? detail.details ?? ''"
         :keyword="keyword"
-        :details-done="detail.details_status === 'done'"
-        :badge="detail.details_badge"
+        :details-done="!sharedWithoutDraft && detail.details_status === 'done'"
+        :badge="sharedWithoutDraft ? 'eksik' : detail.details_badge"
         :image-count="detail.image_count"
-        :model="detail.details_model"
-        :history="detail.details_history"
+        :model="sharedWithoutDraft ? null : detail.details_model"
+        :history="sharedWithoutDraft ? [] : detail.details_history"
       />
 
       <TechTableCard
@@ -199,11 +258,20 @@ async function openProduct() {
       <!-- JSON-LD teknik tablodan besleniyor → hemen onun altında -->
       <SchemaCard />
 
+      <template v-if="!detail.catalog_only || detail.seo_revision != null">
       <!-- İlgilenen kişiler de bir sonuçtur: üretim kartlarından sonra, geçmişten önce. -->
       <ProductContacts />
 
       <!-- "Ne yaptık, sonra ne oldu" — en altta: geçmiş, üretim kartlarının ardından okunur -->
       <OutcomeTimeline />
+      <QueryComparisonModal
+        v-if="showComparison"
+        :sku="detail.sku"
+        :product="detail.name"
+        :keyword="keyword"
+        @close="closeComparison"
+      />
+      </template>
     </div>
 
     <div v-else class="no-sel">
@@ -229,6 +297,7 @@ async function openProduct() {
 </template>
 
 <style scoped>
+.shared-seo-status { margin: 10px 0; font-size: 12px; color: var(--c-mid); }
 .detail {
   flex: 1;
   overflow-y: auto;
@@ -236,9 +305,18 @@ async function openProduct() {
   background: var(--c-bg);
 }
 .inner {
-  max-width: 740px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 20px 32px 48px;
+  padding: 0 32px 48px;
+}
+.detail-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 -12px 4px;
+  padding: 20px 12px 12px;
+  background: var(--c-bg);
+  border-bottom: 1px solid var(--c-border);
 }
 .prod-head {
   display: flex;
@@ -305,6 +383,7 @@ h1 {
 .keyword-row {
   margin-top: 16px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
@@ -318,6 +397,7 @@ h1 {
 }
 .kw-input {
   flex: 1;
+  min-width: 130px;
   max-width: 260px;
   height: 32px;
   padding: 0 11px;

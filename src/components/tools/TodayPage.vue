@@ -18,8 +18,9 @@
  * bitmiyordu — *"bu mantık ile günlük iş hiç bitmez"*. Artık madde yerinde kalıyor, üstü
  * çiziliyor ve "4 / 10 bitti" ilerlemesi sayılabiliyor.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useStore } from "../../store";
+import { teamTodayMode, teamTodayScope, teamTodaySync, todayLocalDay } from "../../teamToday";
 import type { QueueItem } from "../../types";
 import { BUCKET_LABEL as LABEL, BUCKET_TONE as TONE } from "../../buckets";
 import Icon from "../Icon.vue";
@@ -27,6 +28,10 @@ import ModalShell from "../ModalShell.vue";
 
 const store = useStore();
 const skorAcik = ref(false);
+const conflictsOpen = ref(false);
+const sync = computed(() => teamTodaySync.value.scope && teamTodaySync.value.scope === teamTodayScope() ? teamTodaySync.value : null);
+const canSet = computed(() => !teamTodayMode() || sync.value?.canEdit);
+watch(teamTodayScope, () => { conflictsOpen.value = false; });
 
 onMounted(() => {
   // Kuyruk mevcut önbellekten hesaplanıyor; önbellek yoksa önce onu yükle.
@@ -67,7 +72,7 @@ const AGIRLIKLAR = [
 function yarin(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return todayLocalDay(d);
 }
 
 /** Bugünün listesindeki müşteri maddesi sayısı — üst şeritteki özet. */
@@ -79,14 +84,35 @@ const gunFarki = computed(() => {
   if (!a) return -1;
   return Math.round((Date.now() - new Date(a.slice(0, 10)).getTime()) / 86400000);
 });
+
+const referenceLabel = (kind: string, reference: string) =>
+  items.value.find(({ reference: item }) => item.kind === kind && item.ref === reference)?.title
+  ?? (kind === "contact" ? "Müşteri takibi" : reference);
 </script>
 
 <template>
   <div class="page om-scroll">
+    <div v-if="sync && (sync.pending || sync.conflicts.length)" class="queue-status" role="status">
+      <Icon :name="sync.conflicts.length ? 'alert' : 'refresh'" :size="15" />
+      <span v-if="sync.pending">{{ sync.pending }} iş kararı eşitleme bekliyor.</span>
+      <button v-if="sync.conflicts.length" class="secondary-action" type="button" @click="conflictsOpen = true">
+        {{ sync.conflicts.length }} çakışmayı incele
+      </button>
+    </div>
+    <div v-if="store.todayError" class="empty">
+      <Icon name="alert" :size="24" />
+      <p class="e-title">İş kuyruğu yenilenemedi</p>
+      <p class="e-sub">{{ store.todayError }}</p>
+      <button class="e-btn" type="button" @click="store.loadToday()">Yeniden dene</button>
+    </div>
+    <div v-else-if="store.todayBusy && !q" class="empty" role="status">
+      <Icon name="loader" :size="20" class="spin" />
+      <p class="e-title">Bugünün işleri yükleniyor…</p>
+    </div>
     <!-- Analiz hiç çalışmamışsa SEO kuyruğu kurulamaz; kullanıcıyı boş listeyle baş başa
          bırakma. ⚠️ Müşteri maddeleri analizden BAĞIMSIZ (Faz C): kişi eklenmişse liste
          doludur ve bu ekran gösterilmemeli. -->
-    <div v-if="!store.opportunity && !items.length" class="empty">
+    <div v-else-if="!q?.analyzed_at && !items.length && !q?.hidden" class="empty">
       <Icon name="sun" :size="24" :stroke-width="1.9" />
       <p class="e-title">Analiz henüz çalışmadı</p>
       <p class="e-sub">
@@ -119,13 +145,13 @@ const gunFarki = computed(() => {
             </div>
           </div>
           <div class="meta">
-            Analiz {{ gunFarki <= 0 ? "bugün" : `${gunFarki} gün önce` }} çalıştı ·
+            <template v-if="q?.analyzed_at">Analiz {{ gunFarki <= 0 ? "bugün" : `${gunFarki} gün önce` }} çalıştı ·</template>
             her kovadan en fazla 3 madde
             <!-- "gizli" değil "kuyruktan çıkarıldı": sayı hem kalıcı gizlenenleri hem
                  bugünlük ertelenenleri kapsıyor, ikisine birden "gizli" demek yanıltırdı. -->
             <template v-if="q && q.hidden">
               · {{ q.hidden }} madde kuyruktan çıkarıldı
-              <a class="link" @click="store.restoreQueueItems()">geri getir</a>
+              <a v-if="canSet" class="link" @click="store.restoreQueueItems()">geri getir</a>
             </template>
             <!-- Süzgeç sessiz çalışsaydı kullanıcı kovanın neden küçüldüğünü bilemezdi:
                  yaptığı iş listeden düşmüş ama sebebi görünmüyor olurdu. -->
@@ -154,7 +180,7 @@ const gunFarki = computed(() => {
           <button
             v-if="items.length && !store.session?.session_id"
             class="seans-btn"
-            :disabled="!store.sessionCanStart"
+            :disabled="!store.sessionCanStart || !canSet || store.todayBusy || store.sessionBusy"
             :data-tip="store.sessionCanStart
               ? 'Kuyruktan tek iş kilitlenir, süre ölçülür. Oyunlaştırma yok.'
               : 'Bugünün işleri bitmiş — kilitlenecek iş kalmadı'"
@@ -197,21 +223,22 @@ const gunFarki = computed(() => {
               </button>
 
               <button
-                v-if="!it.done"
+                v-if="!it.done && canSet"
                 class="mark"
-                :data-tip="it.reference.kind === 'product'
+                :disabled="store.todayBusy"
+                :data-tip="it.reference.kind === 'product' && it.bucket !== 'review'
                   ? 'Bu işi yaptım. Sonucunu ölçmeye başla — mağazada gerçekten bir değişiklik yaptıysanız işaretleyin.'
                   : 'Bu işi yaptım. Madde sonraki analize kadar kapalı kalır.'"
-                @click="store.completeQueueItem(it.reference.kind, it.reference.ref)"
+                @click="store.completeQueueItem(it.reference.kind, it.reference.ref, it.reference.kind === 'product' && it.bucket !== 'review')"
               >
                 <Icon name="check" :size="12" :stroke-width="2.6" /> Yapıldı
               </button>
-              <template v-else>
+              <template v-else-if="it.done">
                 <span class="mark on">
                   <Icon name="check" :size="12" :stroke-width="2.6" /> Yapıldı
                 </span>
                 <a
-                  class="link geri"
+                  v-if="canSet" class="link geri"
                   @click="store.restoreQueueItem(it.reference.kind, it.reference.ref)"
                 >
                   geri al
@@ -220,9 +247,10 @@ const gunFarki = computed(() => {
 
               <!-- ⚠️ Ertele/gizle üstüne gelince beliriyor ama yeri BAŞTAN ayrılmış:
                    satır yüksekliği değişirse liste zıplar. -->
-              <span v-if="!it.done" class="gec">
+              <span v-if="!it.done && canSet" class="gec">
                 <button
                   class="ghost-sm"
+                  :disabled="store.todayBusy"
                   data-tip="Yarın tekrar göster"
                   @click="store.dismissQueueItem(it.reference.kind, it.reference.ref, yarin())"
                 >
@@ -230,6 +258,7 @@ const gunFarki = computed(() => {
                 </button>
                 <button
                   class="ghost-sm"
+                  :disabled="store.todayBusy"
                   data-tip="Bu bir iş değil, bir daha gösterme. Veri silinmez, ürün kendi ekranında durur."
                   @click="store.dismissQueueItem(it.reference.kind, it.reference.ref, null)"
                 >
@@ -270,8 +299,8 @@ const gunFarki = computed(() => {
         <p class="e-sub">
           Kuyruktaki işlerin hepsi kapandı. Yeni adaylar bir sonraki analizde çıkacak.
           <template v-if="q && q.hidden">
-            {{ q.hidden }} madde kuyruktan çıkarılmış —
-            <a class="link" @click="store.restoreQueueItems()">geri getirin</a>.
+            {{ q.hidden }} madde kuyruktan çıkarılmış.
+            <a v-if="canSet" class="link" @click="store.restoreQueueItems()">Geri getir</a>
           </template>
         </p>
         <button class="e-btn" @click="store.page = 'opportunities'">Tüm fırsatlara git</button>
@@ -290,6 +319,20 @@ const gunFarki = computed(() => {
         </span>
       </div>
     </template>
+
+    <ModalShell :open="conflictsOpen" label="İş kararı çakışmaları" icon="alert"
+      title="İş kararı çakışmaları" :width="560" @close="conflictsOpen = false">
+      <p v-if="sync?.conflicts.length" class="mp">Ortak kaydı seçtiğinizde bu iş için cihazda bekleyen kararlar kaldırılır.</p>
+      <div v-for="conflict in sync?.conflicts" :key="conflict.id" class="queue-conflict">
+        <div class="conflict-copy">
+          <strong>{{ referenceLabel(conflict.kind, conflict.reference) }}</strong>
+          <span>{{ conflict.reason }}</span>
+        </div>
+        <button class="secondary-action" type="button" :disabled="store.todayBusy"
+          @click="store.resolveTodayConflict(conflict.id)">Ortak kaydı kullan</button>
+      </div>
+      <p v-if="!sync?.conflicts.length" class="mp">Bekleyen çakışma yok.</p>
+    </ModalShell>
 
     <!-- Skor formülü: yol haritasının şartı, kullanıcıya açıkça gösteriliyor. -->
     <ModalShell
@@ -326,6 +369,33 @@ const gunFarki = computed(() => {
 </template>
 
 <style scoped>
+.queue-status, .queue-conflict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.queue-status {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-card);
+  color: var(--c-mid);
+  font-size: 13px;
+}
+.queue-conflict {
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--c-border);
+}
+.conflict-copy {
+  display: grid;
+  overflow-wrap: anywhere;
+  gap: 4px;
+  font-size: 13px;
+}
+.conflict-copy span { color: var(--c-soft); }
 .page {
   flex: 1;
   min-height: 0;

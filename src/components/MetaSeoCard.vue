@@ -15,6 +15,7 @@ const props = defineProps<{
   keyword: string;
   metaDone: boolean;
   badge: MetaBadge;
+  locked: boolean;
   /** İçeriği üreten Gemini modeli (null = henüz üretilmedi). */
   model: string | null;
   /** Yeniden üretimden önceki hâller (en yeni başta). */
@@ -66,9 +67,6 @@ async function copy(field: string, text: string) {
   }
 }
 
-function genMeta() {
-  store.generateMeta();
-}
 </script>
 
 <template>
@@ -90,6 +88,7 @@ function genMeta() {
       <input
         class="fx input"
         :value="title"
+        :disabled="locked"
         @input="emit('update:title', ($event.target as HTMLInputElement).value)"
         placeholder="Sayfa başlığını yazın veya Gemini ile üretin"
       />
@@ -119,6 +118,7 @@ function genMeta() {
         class="fx textarea"
         rows="3"
         :value="desc"
+        :disabled="locked"
         @input="emit('update:desc', ($event.target as HTMLTextAreaElement).value)"
         placeholder="Meta açıklamayı yazın veya Gemini ile üretin"
       ></textarea>
@@ -148,6 +148,7 @@ function genMeta() {
         class="fx textarea small"
         rows="2"
         :value="searchKw"
+        :disabled="locked"
         @input="emit('update:searchKw', ($event.target as HTMLTextAreaElement).value)"
         placeholder="virgülle ayırın · ör. kulaklık, kablosuz kulaklık, gürültü önleyici"
       ></textarea>
@@ -170,12 +171,12 @@ function genMeta() {
       />
 
     <template #actions>
-      <button class="gen" :class="{ busy: store.generating }" :disabled="store.generating" @click="genMeta">
+      <button class="gen" :class="{ busy: store.generating }" :disabled="locked" @click="store.generateMeta()">
         <Icon :name="store.generating ? 'loader' : 'sparkles'" :size="15" :stroke-width="store.generating ? 2.2 : 1.9" :class="{ spin: store.generating }" />
         {{ store.generating ? "Üretiliyor…" : "Gemini ile Üret" }}
       </button>
         <button
-          v-if="store.settings?.ideasoft_active"
+          v-if="store.productIdeasoftAvailable"
           class="is-push"
           :disabled="store.ideasoftBusy"
           title="Bu kartın içeriğini IdeaSoft'a gönder"

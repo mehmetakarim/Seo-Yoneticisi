@@ -13,6 +13,7 @@
  * (ad ağırlığı 560 iken üründe 600'dü). Burada kalan `.row` çizgili düzen — bilinçli fark.
  */
 import { computed, onMounted, ref } from "vue";
+import { teamUser } from "../../teamConnection";
 import { useStore } from "../../store";
 import ContactImportModal from "./ContactImportModal.vue";
 import Icon from "../Icon.vue";
@@ -62,10 +63,10 @@ function tarihMetni(c: { next_step_at: string | null }) {
           placeholder="Ad, firma, telefon ara"
         />
       </div>
-      <button class="eylem birincil" title="Yeni kişi ekle" @click="store.contact = null">
+      <button class="eylem birincil" title="Yeni kişi ekle" @click="store.closeContact()">
         <Icon name="plus" :size="15" :stroke-width="2.4" />
       </button>
-      <button class="eylem" title="CSV'den içe aktar" @click="iceAktarAcik = true">
+      <button v-if="!teamUser" class="eylem" title="CSV'den içe aktar" @click="iceAktarAcik = true">
         <Icon name="upload" :size="15" :stroke-width="2" />
       </button>
     </div>

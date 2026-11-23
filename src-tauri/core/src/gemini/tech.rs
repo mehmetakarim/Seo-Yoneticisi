@@ -51,9 +51,14 @@ fn tech_system_prompt() -> &'static str {
      5) Pazarlama cümlesi yazma; tablo verisi üret. Yalnızca istenen JSON'u döndür."
 }
 
+enum TechTransport<'a> {
+    Direct(&'a str),
+    Workspace(&'a WorkspaceGemini),
+}
+
 async fn call_specs_model(
     client: &reqwest::Client,
-    api_key: &str,
+    transport: &TechTransport<'_>,
     model: &str,
     prompt: &str,
     chain: &ChainCtx<'_>,
@@ -87,7 +92,10 @@ async fn call_specs_model(
             "temperature": 0.2
         }
     });
-    let inner = post_generate(client, api_key, model, &body, chain).await?;
+    let inner = match transport {
+        TechTransport::Direct(key) => post_generate(client, key, model, &body, chain).await,
+        TechTransport::Workspace(connection) => post_workspace_generate(client, connection, model, &body, chain).await,
+    }?;
     serde_json::from_str::<Vec<TechGroup>>(&inner)
         .map_err(|e| (false, format!("Üretilen tablo okunamadı: {e}")))
 }
@@ -147,6 +155,24 @@ pub async fn structure_tech_specs(
     if key.is_empty() {
         return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
     }
+    structure_with(TechTransport::Direct(key), ctx, source_text, chain).await
+}
+
+pub async fn structure_team_tech_specs(
+    connection: &WorkspaceGemini,
+    ctx: &ProductContext<'_>,
+    source_text: &str,
+    chain: &ChainCtx<'_>,
+) -> Result<Produced<TechSpecsResult>, String> {
+    structure_with(TechTransport::Workspace(connection), ctx, source_text, chain).await
+}
+
+async fn structure_with(
+    transport: TechTransport<'_>,
+    ctx: &ProductContext<'_>,
+    source_text: &str,
+    chain: &ChainCtx<'_>,
+) -> Result<Produced<TechSpecsResult>, String> {
     let src = source_text.trim();
     if src.is_empty() {
         return Err("Önce üreticinin teknik özellik metnini yapıştırın.".to_string());
@@ -160,14 +186,16 @@ pub async fn structure_tech_specs(
         src,
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(90))
-        .build()
+    let mut client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(90));
+    if matches!(transport, TechTransport::Workspace(_)) {
+        client = client.redirect(reqwest::redirect::Policy::none());
+    }
+    let client = client.build()
         .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
 
     let mut last_err = String::from("Bilinmeyen hata");
     for model in &chain.models {
-        match call_specs_model(&client, key, model, &prompt, chain).await {
+        match call_specs_model(&client, &transport, model, &prompt, chain).await {
             Ok(groups) => {
                 let result = verify_traceable(groups, src);
                 if result.groups.is_empty() {

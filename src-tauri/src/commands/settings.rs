@@ -54,12 +54,12 @@ pub fn save_settings(
     capsolver_api_key: String,
     seo_country: String,
     gsc_site_url: String,
-    ideasoft_domain: String,
-    ideasoft_token: String,
+    ideasoft_domain: Option<String>,
+    ideasoft_token: Option<String>,
 ) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
     let url = feed_url.trim();
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    if !url.is_empty() && !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("Geçerli bir URL girin (http/https).".to_string());
     }
     db::set_setting(&conn, "feed_url", url)?;
@@ -69,8 +69,10 @@ pub fn save_settings(
     let country = if country.is_empty() { "tr".to_string() } else { country };
     db::set_setting(&conn, "seo_country", &country)?;
     db::set_setting(&conn, "gsc_site_url", gsc_site_url.trim())?;
-    db::set_setting(&conn, "ideasoft_domain", ideasoft_domain.trim())?;
-    db::set_setting(&conn, "ideasoft_token", ideasoft_token.trim())?;
+    if let (Some(domain), Some(token)) = (ideasoft_domain, ideasoft_token) {
+        db::set_setting(&conn, "ideasoft_domain", domain.trim())?;
+        db::set_setting(&conn, "ideasoft_token", token.trim())?;
+    }
     Ok(())
 }
 
@@ -420,31 +422,86 @@ pub fn export_db(state: State<'_, AppState>, path: String, format: String) -> Re
     Ok(())
 }
 
-fn export_json(conn: &Connection) -> Result<String, String> {
-    use serde_json::{json, Value};
-    fn dump(conn: &Connection, table: &str, cols: &[&str]) -> Result<Vec<Value>, String> {
-        let sql = format!("SELECT {} FROM {}", cols.join(", "), table);
-        let mut stmt = conn.prepare(&sql).map_err(|e| format!("{table} okunamadı: {e}"))?;
-        let rows = stmt
-            .query_map([], |row| {
-                let mut obj = serde_json::Map::new();
-                for (i, col) in cols.iter().enumerate() {
-                    let v: Option<rusqlite::types::Value> = row.get(i)?;
-                    let jv = match v {
-                        Some(rusqlite::types::Value::Text(s)) => Value::String(s),
-                        Some(rusqlite::types::Value::Integer(n)) => Value::from(n),
-                        Some(rusqlite::types::Value::Real(f)) => Value::from(f),
-                        _ => Value::Null,
-                    };
-                    obj.insert((*col).to_string(), jv);
-                }
-                Ok(Value::Object(obj))
-            })
-            .map_err(|e| format!("{table} okunamadı: {e}"))?
-            .filter_map(Result::ok)
-            .collect();
-        Ok(rows)
+use serde_json::Value;
+
+fn dump(conn: &Connection, table: &str, cols: &[&str]) -> Result<Vec<Value>, String> {
+    let sql = format!("SELECT {} FROM {}", cols.join(", "), table);
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("{table} okunamadı: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            let mut obj = serde_json::Map::new();
+            for (i, col) in cols.iter().enumerate() {
+                let v: Option<rusqlite::types::Value> = row.get(i)?;
+                let jv = match v {
+                    Some(rusqlite::types::Value::Text(s)) => Value::String(s),
+                    Some(rusqlite::types::Value::Integer(n)) => Value::from(n),
+                    Some(rusqlite::types::Value::Real(f)) => Value::from(f),
+                    _ => Value::Null,
+                };
+                obj.insert((*col).to_string(), jv);
+            }
+            Ok(Value::Object(obj))
+        })
+        .map_err(|e| format!("{table} okunamadı: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("{table} satırı okunamadı: {e}"))?;
+    Ok(rows)
+}
+fn crm_backup_rows(conn: &Connection) -> Result<Value, String> {
+    let contacts = dump(
+        conn,
+        "contacts",
+        &[
+            "id", "name", "company", "email", "phone", "channel", "note", "last_contact_at",
+            "next_step_at", "next_step_note", "created_at", "updated_at", "archived",
+        ],
+    )?;
+    let contact_events = dump(conn, "contact_events", &["id", "contact_id", "at", "kind", "note"])?;
+    let contact_tags = dump(conn, "contact_tags", &["contact_id", "tag"])?;
+    let contact_products = dump(conn, "contact_products", &["contact_id", "sku", "at"])?;
+
+    // Teklif (Faz T) — yeniden üretilemez: teklif bir KAYIT, katalogdan türetilemiyor
+    // (fiyat, maliyet ve kur o günkü hâliyle donmuş durumda).
+    let quotes = dump(
+        conn,
+        "quotes",
+        &[
+            "id", "no", "contact_id", "status", "currency", "fx_rate", "fx_date", "valid_until",
+            "note", "created_at", "updated_at", "sent_at", "closed_at", "close_reason",
+        ],
+    )?;
+    let quote_items = dump(
+        conn,
+        "quote_items",
+        &["id", "quote_id", "sku", "name", "qty", "unit_price", "tax_rate", "cost", "sort"],
+    )?;
+    let quote_versions =
+        dump(conn, "quote_versions", &["id", "quote_id", "version", "snapshot_json", "at"])?;
+    Ok(serde_json::json!({
+        "contacts": contacts,
+        "contact_events": contact_events,
+        "contact_tags": contact_tags,
+        "contact_products": contact_products,
+        "quotes": quotes,
+        "quote_items": quote_items,
+        "quote_versions": quote_versions,
+    }))
+}
+
+#[tauri::command]
+pub fn read_team_backup(state: State<'_, AppState>, path: Option<String>) -> Result<Value, String> {
+    if let Some(path) = path {
+        let mut conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("SQLite yedeği açılamadı: {e}"))?;
+        let tx = conn.transaction().map_err(|e| format!("Yedek okunamadı: {e}"))?;
+        return crm_backup_rows(&tx);
     }
+    let conn = state.conn.lock().unwrap();
+    crm_backup_rows(&conn)
+}
+
+fn export_json(conn: &Connection) -> Result<String, String> {
+    use serde_json::json;
     let products = dump(
         conn,
         "products",
@@ -493,6 +550,11 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         "metric_snapshots",
         &["id", "captured_at", "window_start", "window_end", "source", "rows", "clicks", "impressions"],
     )?;
+    let query_comparisons = dump(
+        conn,
+        "gsc_query_comparisons",
+        &["property", "page", "query", "event_day", "daily_rows"],
+    )?;
     let snap_rows = dump(
         conn,
         "metric_page_rows",
@@ -511,35 +573,7 @@ fn export_json(conn: &Connection) -> Result<String, String> {
     // "geri yükledim ama eksik" sürprizinin en ağır hâli olurdu.
     // ⚠️ Bu tablolarla birlikte yedek dosyası KİŞİSEL VERİ taşıyor; Ayarlar ekranı bunu
     // kullanıcıya açıkça söylüyor.
-    let contacts = dump(
-        conn,
-        "contacts",
-        &[
-            "id", "name", "company", "email", "phone", "channel", "note", "last_contact_at",
-            "next_step_at", "next_step_note", "created_at", "updated_at", "archived",
-        ],
-    )?;
-    let contact_events = dump(conn, "contact_events", &["id", "contact_id", "at", "kind", "note"])?;
-    let contact_tags = dump(conn, "contact_tags", &["contact_id", "tag"])?;
-    let contact_products = dump(conn, "contact_products", &["contact_id", "sku", "at"])?;
-
-    // Teklif (Faz T) — yeniden üretilemez: teklif bir KAYIT, katalogdan türetilemiyor
-    // (fiyat, maliyet ve kur o günkü hâliyle donmuş durumda).
-    let quotes = dump(
-        conn,
-        "quotes",
-        &[
-            "id", "no", "contact_id", "status", "currency", "fx_rate", "fx_date", "valid_until",
-            "note", "created_at", "updated_at", "sent_at", "closed_at", "close_reason",
-        ],
-    )?;
-    let quote_items = dump(
-        conn,
-        "quote_items",
-        &["id", "quote_id", "sku", "name", "qty", "unit_price", "tax_rate", "cost", "sort"],
-    )?;
-    let quote_versions =
-        dump(conn, "quote_versions", &["id", "quote_id", "version", "snapshot_json", "at"])?;
+    let crm = crm_backup_rows(conn)?;
     // Kullanım kaydı yedeğe DAHİL: kullanıcının amacı bu veriyle "limitler darboğaz mı,
     // ücretli API'ye geçmeli miyim" sorusuna cevap biriktirmek. Geri yüklemede kaybolsaydı
     // sayaç her makine değişiminde sıfırdan başlar ve o soru hiç cevaplanamazdı.
@@ -560,13 +594,14 @@ fn export_json(conn: &Connection) -> Result<String, String> {
         "work_events": events,
         "metric_snapshots": snaps,
         "metric_page_rows": snap_rows,
-        "contacts": contacts,
-        "contact_events": contact_events,
-        "contact_tags": contact_tags,
-        "contact_products": contact_products,
-        "quotes": quotes,
-        "quote_items": quote_items,
-        "quote_versions": quote_versions,
+        "gsc_query_comparisons": query_comparisons,
+        "contacts": crm["contacts"],
+        "contact_events": crm["contact_events"],
+        "contact_tags": crm["contact_tags"],
+        "contact_products": crm["contact_products"],
+        "quotes": crm["quotes"],
+        "quote_items": crm["quote_items"],
+        "quote_versions": crm["quote_versions"],
         "gemini_calls": gemini_calls,
     });
     serde_json::to_string_pretty(&root).map_err(|e| format!("JSON oluşturulamadı: {e}"))
@@ -611,6 +646,7 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
     tx.execute_batch(
         "DELETE FROM seo_status; DELETE FROM products; DELETE FROM sync_log; DELETE FROM settings;
          DELETE FROM work_events; DELETE FROM metric_page_rows; DELETE FROM metric_snapshots;
+         DELETE FROM gsc_query_comparisons;
          DELETE FROM contact_products; DELETE FROM contact_tags; DELETE FROM contact_events;
          DELETE FROM quote_versions; DELETE FROM quote_items; DELETE FROM quotes;
          DELETE FROM contacts; DELETE FROM gemini_calls;",
@@ -859,6 +895,16 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
         );
     }
 
+    for row in arr("gsc_query_comparisons") {
+        tx.execute(
+            "INSERT OR REPLACE INTO gsc_query_comparisons
+              (property, page, query, event_day, daily_rows) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                s(&row, "property"), s(&row, "page"), s(&row, "query"),
+                s(&row, "event_day"), s(&row, "daily_rows")
+            ],
+        ).map_err(|e| format!("GSC sorgu geçmişi aktarılamadı: {e}"))?;
+    }
     tx.commit().map_err(|e| format!("İşlem tamamlanamadı: {e}"))?;
     Ok(())
 }

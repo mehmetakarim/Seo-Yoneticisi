@@ -13,6 +13,20 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.22.0
+- **Ortak çalışma alanı.** Ürünleri, SEO taslaklarını, mağaza sayfalarını, kişileri ve teklifleri kendi ekranlarından ekipçe yönetin.
+- **Ekip hesabınızla ilk açılışta giriş yapın.** E-posta ve parola yeterli. Geçerli oturum cihazda güvenli saklanır ve sonraki açılışta çalışma alanınız yüklenir.
+- Bakım kontrolü ortak ürün kataloğunun ve GSC analizinin tarihini, mağaza sayfalarının sayısını Supabase üzerinden gösterir.
+- Ürünler ekranı açıkken yeni ortak katalog sürümü otomatik alınır. Seçili üründeki SEO taslağı korunur.
+- IdeaSoft cihaz bağlantısı, mağaza adresi ve yeni token ile bağımsız doğrulanır. Çalışma alanı sahibi başarılı testten sonra ortak token’ı da güncelleyebilir.
+- Çalışma alanı sahibi Ayarlar’dan cihazdaki Gemini anahtarını kullanabilir veya yeni bir anahtarı doğrulayıp ekip için kaydedebilir.
+- Ayarlar’daki **Örnek taslak üret** ile ortak Gemini üzerinden bir SEO başlığı ve meta açıklaması önizleyin.
+- **Bağlantı kesildiğinde çalışmaya devam edin.** Daha önce indirilen kayıtları açın. Desteklenen yerel değişiklikler bağlantı geri geldiğinde eşitlenir. Sol alttaki gösterge hangi kaynağın kullanıldığını belirtir.
+- **Bugün kuyruğu ekiple eşitlenir.** Yapıldı, ertele, gizle ve geri al kararları çalışma alanında paylaşılır. Odak seansı ortak listeyi kullanır.
+- **GSC sonuçlarına ürün başlığından ulaşın.** Son mağaza işleminin öncesindeki ve sonrasındaki yedi günü karşılaştırın. Kategori, marka ve blog yayımlandığında GSC takibi başlar.
+- **Kategori, marka ve blog oluşturun.** Kayıtları pasif hazırlayın veya mağazada yayımlayın.
+- Sol menüde ekran grupları açılıp kapanır. Ürün başlığı ve işlemleri kaydırırken görünür kalır, başka ürün seçildiğinde ayrıntı başa döner.
+
 ## v0.21.0
 - Yeni: **Kategoriler · Markalar · İçerikler** ekranları. Katalog grubunda, Ürünler'in altında: kategori, marka ve blog sayfalarınız artık ürünler gibi kendi ekranlarında listeleniyor ve düzenleniyor
 - Liste **Google'da en çok görünen sayfa üstte** olacak şekilde sıralı. Görünmeyen bir sayfanın başlığını düzeltmek ölçülebilir sonuç üretmiyor — üstteki satırlar iş çıkaracak olanlar

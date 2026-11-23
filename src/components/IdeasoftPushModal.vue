@@ -39,7 +39,7 @@ function short(s: string, n = 220): string {
   return t.length > n ? t.slice(0, n) + "…" : t || "—";
 }
 function changed(r: Row): boolean {
-  return (r.before ?? "").trim() !== (r.after ?? "").trim();
+  return r.before !== r.after;
 }
 const changedCount = computed(() => rows.value.filter(changed).length);
 </script>
@@ -63,6 +63,7 @@ const changedCount = computed(() => rows.value.filter(changed).length);
       <div class="f-head">
         <span class="f-label">{{ r.label }}</span>
         <span v-if="!changed(r)" class="f-tag">değişiklik yok</span>
+        <span v-else-if="r.before.trim() === r.after.trim()" class="f-tag">boşluk farkı</span>
       </div>
       <div class="f-cols">
         <div class="col">
@@ -77,18 +78,19 @@ const changedCount = computed(() => rows.value.filter(changed).length);
       </div>
     </div>
 
-    <div class="warn">
+    <div v-if="changedCount" class="warn">
       <Icon name="alert" :size="13" />
       Bu işlem canlı mağazadaki ürünü günceller. Gönderilmeyen alanlara dokunulmaz.
     </div>
+    <div v-else-if="rows.length" class="empty">Seçilen alanlar mağazadaki değerlerle eşleşiyor.</div>
 
     <template #footer>
-      <button class="ghost" @click="store.closeIdeasoftPreview()">Vazgeç</button>
+      <button class="secondary-action" @click="store.closeIdeasoftPreview()">{{ changedCount ? "Vazgeç" : "Kapat" }}</button>
       <div style="flex:1"></div>
       <button
-        class="gen"
+        class="primary-action"
         :class="{ busy: store.ideasoftBusy }"
-        :disabled="store.ideasoftBusy || !rows.length"
+        :disabled="store.ideasoftBusy || !changedCount"
         @click="store.confirmIdeasoftPush()"
       >
         <Icon
@@ -173,46 +175,6 @@ const changedCount = computed(() => rows.value.filter(changed).length);
   display: flex;
   align-items: center;
   color: var(--c-faint);
-}
-.ghost {
-  height: 38px;
-  padding: 0 14px;
-  border: 1px solid var(--c-border);
-  border-radius: 9px;
-  background: var(--c-input);
-  color: var(--c-mid);
-  font-size: 12.5px;
-  font-weight: 560;
-  cursor: pointer;
-}
-.ghost:hover {
-  background: var(--c-hover);
-}
-.gen {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 38px;
-  padding: 0 16px;
-  border: none;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 590;
-  cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-}
-.gen:hover {
-  filter: brightness(1.05);
-}
-.gen.busy {
-  opacity: 0.75;
-  cursor: default;
-}
-.gen:disabled:not(.busy) {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 /* Modal iskeleti ve animasyonu artık ModalShell.vue'da. Buradaki `push` animasyonu
    UpdateModal'daki `upd` ile BİREBİR aynıydı — yalnızca adı farklıydı. */

@@ -28,6 +28,9 @@ mod health;
 mod store_pages;
 mod quotes;
 mod settings;
+mod seo_backup;
+mod team_auth;
+mod team_cache;
 mod today;
 mod versions;
 
@@ -46,6 +49,9 @@ pub use quotes::*;
 pub use health::*;
 pub use store_pages::*;
 pub use settings::*;
+pub use seo_backup::*;
+pub use team_auth::*;
+pub use team_cache::*;
 pub use today::*;
 pub use versions::*;
 
@@ -209,6 +215,8 @@ pub struct ProductRow {
 
 #[derive(Debug, Serialize)]
 pub struct ProductDetail {
+    pub catalog_only: bool,
+    pub seo_revision: Option<i64>,
     pub sku: String,
     pub name: String,
     pub brand: Option<String>,
@@ -329,8 +337,13 @@ fn details_badge_of(r: &RowData) -> MetaBadge {
 }
 
 fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
-    conn.query_row(
-        "SELECT p.sku, p.name, p.brand, p.main_category, p.category, p.quantity, p.url,
+    read_product_detail(conn, sku, None)
+}
+
+fn read_product_detail(conn: &Connection, sku: &str, catalog: Option<(&str, &str)>) -> Result<ProductDetail, String> {
+    let catalog_only = if catalog.is_some() { "p.catalog_only" } else { "0" };
+    let revision = if catalog.is_some() { "s.revision" } else { "NULL" };
+    let statement = format!("SELECT p.sku, p.name, p.brand, p.main_category, p.category, p.quantity, p.url,
                 p.img_url, p.title, p.descriptions, p.keywords, p.search_keywords, p.details,
                 COALESCE(s.meta_status,'pending'), COALESCE(s.details_status,'pending'),
                 s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_search_keywords,
@@ -339,11 +352,17 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 s.tech_history_json, s.ideasoft_pushed_at, s.ideasoft_seo_rule,
                 s.meta_model, s.details_model, s.tech_model,
                 s.meta_history_json, s.details_history_json,
-                p.feed_fp, s.reviewed_fp, p.feed_changed
+                p.feed_fp, s.reviewed_fp, p.feed_changed, {catalog_only}, {revision}
          FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
-         WHERE p.sku = ?1",
-        [&sku],
-        |row| {
+         WHERE p.sku = :sku");
+    let local_bindings: &[(&str, &dyn rusqlite::ToSql)] = &[(":sku", &sku)];
+    let (sql, bindings): (String, &[(&str, &dyn rusqlite::ToSql)]) = if let Some((ref catalog, ref seo)) = catalog {
+        (format!("{}{}", products::SHARED_PRODUCTS, statement.replace("LEFT JOIN seo_status", "LEFT JOIN shared_seo")),
+            &[(":sku", &sku), (":catalog", catalog), (":seo", seo)])
+    } else {
+        (statement, local_bindings)
+    };
+    conn.query_row(&sql, bindings, |row| {
             let img_url: Option<String> = row.get(7)?;
             let feed_changed = feed_change_note(row.get(36)?, row.get(37)?, row.get(38)?);
             let draft_keywords: Option<String> = row.get(20)?;
@@ -364,6 +383,7 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                     at: v.at,
                     rows: v.groups.iter().map(|g| g.rows.len()).sum(),
                     groups: v.groups.len(),
+                    model: v.model,
                 })
                 .collect();
             let meta_history: Vec<MetaVersionMeta> =
@@ -388,6 +408,8 @@ fn read_detail(conn: &Connection, sku: &str) -> Result<ProductDetail, String> {
                 .as_deref()
                 .and_then(|j| serde_json::from_str(j).ok());
             Ok(ProductDetail {
+                catalog_only: row.get(39)?,
+                seo_revision: row.get(40)?,
                 sku: row.get(0)?,
                 name: row.get(1)?,
                 brand: row.get(2)?,
@@ -717,6 +739,7 @@ mod tests {
                 rows: vec![gemini::TechRow { label: "İşlemci".into(), value: "i7".into() }],
             }],
             source: format!("kaynak {at}"),
+            model: None,
         }
     }
 

@@ -359,6 +359,66 @@ pub async fn query_page_stats(
     Ok(out)
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DailyQueryRow {
+    pub day: String,
+    pub clicks: f64,
+    pub impressions: f64,
+    pub position: f64,
+}
+
+pub async fn daily_query_rows(
+    client: &reqwest::Client,
+    credentials: &str,
+    property: &str,
+    page: &str,
+    query: &str,
+    start: chrono::NaiveDate,
+    end: chrono::NaiveDate,
+) -> Result<Vec<DailyQueryRow>, String> {
+    let token = access_token(client, credentials).await?;
+    let response = client
+        .post(format!("{SITES_URL}/{}/searchAnalytics/query", pct(property)))
+        .bearer_auth(token)
+        .json(&serde_json::json!({
+            "startDate": start.to_string(),
+            "endDate": end.to_string(),
+            "dimensions": ["date"],
+            "type": "web",
+            "dataState": "final",
+            "dimensionFilterGroups": [{ "filters": [
+                { "dimension": "page", "operator": "equals", "expression": page },
+                { "dimension": "query", "operator": "equals", "expression": query }
+            ] }]
+        }))
+        .send()
+        .await
+        .map_err(|_| "GSC'ye ulaşılamadı.".to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("GSC sorgusu başarısız (HTTP {}).", response.status().as_u16()));
+    }
+    let data: serde_json::Value = response.json().await
+        .map_err(|_| "GSC yanıtı okunamadı.".to_string())?;
+    let Some(rows) = data.get("rows") else { return Ok(Vec::new()) };
+    rows.as_array()
+        .ok_or("GSC tarih satırları okunamadı.")?
+        .iter()
+        .map(|row| {
+            let day = row.pointer("/keys/0").and_then(|v| v.as_str())
+                .and_then(|day| chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+                .ok_or("GSC ölçüm tarihi okunamadı.")?;
+            let number = |field: &str| row.get(field).and_then(|v| v.as_f64())
+                .ok_or_else(|| format!("GSC ölçümü okunamadı ({field})."));
+            Ok(DailyQueryRow {
+                day: day.to_string(),
+                clicks: number("clicks")?,
+                impressions: number("impressions")?,
+                position: number("position")?,
+            })
+        })
+        .collect()
+}
+
 fn parse_query_page_rows(data: &serde_json::Value) -> Vec<QueryPageStat> {
     let rows = match data.get("rows").and_then(|r| r.as_array()) {
         Some(r) => r,

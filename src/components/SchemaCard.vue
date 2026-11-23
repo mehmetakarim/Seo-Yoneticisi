@@ -11,6 +11,8 @@ import { ref, watch } from "vue";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "../api";
 import { useStore } from "../store";
+import { getTeamProductJsonld } from "../teamCatalog";
+import { teamProductSeoScope } from "../teamProductSeo";
 import Icon from "./Icon.vue";
 import SeoCard from "./SeoCard.vue";
 
@@ -20,23 +22,30 @@ const busy = ref(false);
 const copied = ref(false);
 const error = ref("");
 
-// Ürün değişince açık kalan blok yeni ürünü göstermez — kapatılıyor.
 watch(
-  () => store.selectedSku,
+  [() => store.selectedSku, teamProductSeoScope],
   () => {
     code.value = "";
+    copied.value = false;
     error.value = "";
   },
 );
 
 async function fetchCode(): Promise<string> {
-  if (!store.selectedSku) return "";
+  const detail = store.detail;
+  if (!detail || detail.sku !== store.selectedSku) return "";
+  const scope = teamProductSeoScope();
+  const current = () => store.selectedSku === detail.sku && scope === teamProductSeoScope();
   busy.value = true;
   error.value = "";
   try {
-    return await api.getJsonld(store.selectedSku);
+    if (!await store.flushProductMetaEdits(detail) || !current()) return "";
+    const output = detail.team_seo_scope
+      ? await getTeamProductJsonld(detail.sku, detail.team_seo_scope)
+      : await api.getJsonld(detail.sku);
+    return current() ? output : "";
   } catch (e) {
-    error.value = String(e);
+    if (current()) error.value = String(e);
     return "";
   } finally {
     busy.value = false;
@@ -88,7 +97,7 @@ async function copy() {
       buradan yazılan değer bir gün sonra yanlış olurdu.
     </div>
 
-    <div v-if="error" class="warn">
+    <div v-if="error" class="warn" role="alert">
       <Icon name="alert" :size="14" />
       {{ error }}
     </div>

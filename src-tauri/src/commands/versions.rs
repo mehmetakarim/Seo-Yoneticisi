@@ -25,8 +25,16 @@ pub struct MetaVersion {
 pub struct DetailsVersion {
     pub at: String,
     pub html: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_details_model")]
     pub model: String,
+}
+
+fn deserialize_details_model<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let model: Option<String> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(model.unwrap_or_default())
 }
 
 /// UI listesi için hafif özetler — tam sürümler payload'ı şişirmesin
@@ -53,6 +61,8 @@ pub struct TechVersion {
     pub groups: Vec<gemini::TechGroup>,
     #[serde(default)]
     pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// UI listesi için hafif özet (tam sürümler payload'ı şişirmesin).
@@ -61,6 +71,8 @@ pub struct TechVersionMeta {
     pub at: String,
     pub rows: usize,
     pub groups: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// Önceki bir sürümü geri yükler. **Takas mantığı**: mevcut tablo geçmişin başına konur, seçilen
@@ -217,7 +229,7 @@ pub fn restore_tech_version(
     if !cur_groups.is_empty() {
         hist = history::push(
             hist,
-            TechVersion { at: now_str(), groups: cur_groups, source: cur_source },
+            TechVersion { at: now_str(), groups: cur_groups, source: cur_source, model: None },
         );
     }
 

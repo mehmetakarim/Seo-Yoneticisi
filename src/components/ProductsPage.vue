@@ -4,12 +4,17 @@
  * Daha önce App.vue içinde satır içi duruyordu; App.vue'nun sayfa-bağımsız bir kabuk
  * olabilmesi için ayrıldı (bkz. navigation.ts).
  */
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
+import { useStore } from "../store";
 import ProductList from "./ProductList.vue";
 import ProductDetail from "./ProductDetail.vue";
 import SyncSummaryBar from "./SyncSummaryBar.vue";
 
 const listRef = ref<InstanceType<typeof ProductList> | null>(null);
+const store = useStore();
+onMounted(() => {
+  void store.refreshProductsSource().catch((error) => store.toast(String(error), "error"));
+});
 
 /** App.vue'daki ⌘F kısayolu aramayı buradan odaklar. */
 function focusSearch() {

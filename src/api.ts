@@ -1,3 +1,7 @@
+import { teamUser, type TeamFunctionSession } from "./teamConnection";
+import { teamQuotes } from "./teamQuotes";
+import { teamContacts, type ContactDraft } from "./teamContacts";
+import type { TeamTodayInputs } from "./teamToday";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   ImageCheck,
@@ -22,14 +26,17 @@ import type {
   OutcomeSummary,
   OutcomeBadge,
   ProductTimeline,
+  QueryComparison,
   SeedResult,
   TodayQueue,
+  QueueItem,
   FocusState,
   FocusSummary,
   CalibrationRow,
   EolDecision,
   ExportSummary,
   Contact,
+  ContactId,
   ContactEvent,
   ContactProduct,
   CsvPreview,
@@ -42,16 +49,21 @@ import type {
   GeminiKullanim,
   StorePageSyncResult,
   StorePageDetail,
+  NewStorePage,
   HealthCheck,
 } from "./types";
 
 export const api = {
   syncFeed: () => invoke<SyncSummary>("sync_feed"),
   getLastSync: () => invoke<SyncSummary | null>("get_last_sync"),
-  seedMetricHistory: () => invoke<SeedResult>("seed_metric_history"),
-  getOutcomeSummary: () => invoke<OutcomeSummary>("get_outcome_summary"),
-  getOutcomeBadges: () => invoke<OutcomeBadge[]>("get_outcome_badges"),
-  getProductTimeline: (sku: string) => invoke<ProductTimeline>("get_product_timeline", { sku }),
+  seedMetricHistory: (measurementScope?: string) => invoke<SeedResult>("seed_metric_history", { measurementScope }),
+  getOutcomeSummary: (shared?: object | null) => invoke<OutcomeSummary>("get_outcome_summary", { shared }),
+  getOutcomeBadges: (shared?: object | null) => invoke<OutcomeBadge[]>("get_outcome_badges", { shared }),
+  getProductTimeline: (sku: string, shared?: object | null) => invoke<ProductTimeline>("get_product_timeline", { sku, shared }),
+  compareProductQuery: (sku: string, query: string) =>
+    invoke<QueryComparison>("compare_product_query", { sku, query }),
+  summarizeTeamQuery: (eventDay: string, rows: object[]) =>
+    invoke<QueryComparison>("summarize_team_query", { eventDay, rows }),
   getFeedDiff: (sku: string) => invoke<FeedDiff>("get_feed_diff", { sku }),
   getJsonld: (sku: string) => invoke<string>("get_jsonld", { sku }),
   markFeedReviewed: (sku: string) => invoke<void>("mark_feed_reviewed", { sku }),
@@ -84,7 +96,10 @@ export const api = {
     invoke<ProductDetail>("restore_meta_version", { sku, index }),
   restoreDetailsVersion: (sku: string, index: number) =>
     invoke<ProductDetail>("restore_details_version", { sku, index }),
-  analyzeOpportunities: () => invoke<OpportunityReport>("analyze_opportunities"),
+  analyzeOpportunities: (measurementScope?: string, shared?: object | null) =>
+    invoke<OpportunityReport>("analyze_opportunities", { measurementScope, shared }),
+  gscSnapshotWindow: (measurementScope: string, sharedWindowEnd?: string) =>
+    invoke<[string, string] | null>("gsc_snapshot_window", { measurementScope, sharedWindowEnd }),
   getOpportunityCache: () => invoke<OpportunityReport | null>("get_opportunity_cache"),
   suggestEolSuccessor: (url: string) =>
     invoke<SuccessorSuggestion>("suggest_eol_successor", { url }),
@@ -133,6 +148,8 @@ export const api = {
   restoreTechVersion: (sku: string, index: number) =>
     invoke<ProductDetail>("restore_tech_version", { sku, index }),
   testIdeasoft: () => invoke<string>("test_ideasoft"),
+  testAndSaveIdeasoftConnection: (domain: string, token: string) =>
+    invoke<string>("test_and_save_ideasoft_connection", { domain, token }),
   ideasoftPreview: (sku: string, parts: string[]) =>
     invoke<IdeasoftPreview>("ideasoft_preview", { sku, parts }),
   ideasoftPush: (sku: string, parts: string[]) =>
@@ -148,8 +165,8 @@ export const api = {
     capsolverApiKey: string,
     seoCountry: string,
     gscSiteUrl: string,
-    ideasoftDomain: string,
-    ideasoftToken: string,
+    ideasoftDomain?: string,
+    ideasoftToken?: string,
   ) =>
     invoke<void>("save_settings", {
       feedUrl,
@@ -173,11 +190,13 @@ export const api = {
   remoteHealth: () => invoke<HealthCheck[]>("remote_health"),
   getStorePage: (kind: string, id: number) =>
     invoke<StorePageDetail>("get_store_page", { kind, id }),
-  listStorePages: (kind: string) =>
-    invoke<StorePageDetail[]>("list_store_pages", { kind }),
+  listStorePages: (kind: string, fetchedAt?: string) =>
+    invoke<StorePageDetail[]>("list_store_pages", { kind, fetchedAt }),
+  createStorePage: (kind: string, draft: NewStorePage) =>
+    invoke<StorePageDetail>("create_store_page", { kind, draft }),
   /** Meta + tanıtım metni üretir; yalnızca taslağa yazar, mağazaya dokunmaz. */
-  generateStorePage: (kind: string, id: number) =>
-    invoke<StorePageDetail>("generate_store_page", { kind, id }),
+  generateStorePage: (kind: string, id: number, shared?: { page: StorePageDetail; session: TeamFunctionSession; products: string[] }) =>
+    invoke<StorePageDetail>("generate_store_page", { kind, id, shared }),
   saveStorePageDraft: (
     kind: string, id: number, pageTitle: string, metaDescription: string,
     targetKeyword: string, showcase: string,
@@ -186,8 +205,10 @@ export const api = {
       kind, id, pageTitle, metaDescription, targetKeyword, showcase,
     }),
   /** ⚠️ Mağazayı DEĞİŞTİRİR. Yalnızca operatör onayıyla çağrılmalı. */
-  pushStorePage: (kind: string, id: number) =>
-    invoke<StorePageDetail>("push_store_page", { kind, id }),
+  pushStorePage: (kind: string, id: number, shared?: StorePageDetail) =>
+    invoke<StorePageDetail>("push_store_page", { kind, id, shared }),
+  publishStorePage: (kind: string, id: number, shared?: StorePageDetail) =>
+    invoke<void>("publish_store_page", { kind, id, shared }),
   /** Kategori · marka · blog envanterini IdeaSoft'tan çeker (~7 istek). */
   syncStorePages: () => invoke<StorePageSyncResult>("sync_store_pages"),
   getModelChains: () => invoke<ModelChains>("get_model_chains"),
@@ -197,6 +218,8 @@ export const api = {
   /** ⚠️ Gerçek bir istek gönderir — kotadan düşer ve sayaca yazılır. */
   probeGeminiModel: (model: string) =>
     invoke<string>("probe_gemini_model", { model }),
+  previewTeamGeminiMeta: (session: TeamFunctionSession) =>
+    invoke<{ model: string; title: string; description: string }>("preview_team_gemini_meta", { session }),
   geminiUsage: () => invoke<GeminiKullanim>("gemini_usage"),
   testCapsolverKey: (key: string) =>
     invoke<string>("test_capsolver_key", { key }),
@@ -205,30 +228,34 @@ export const api = {
   importDb: (path: string) => invoke<void>("import_db", { path }),
 
   // --- Bugün kuyruğu (Faz K) ---
-  getTodayQueue: () => invoke<TodayQueue>("get_today_queue"),
+  getTodayQueue: (shared?: TeamTodayInputs) => invoke<TodayQueue>("get_today_queue", { shared }),
   /** `until` yoksa kalıcı gizleme, varsa (YYYY-AA-GG) o tarihe kadar erteleme. */
   dismissQueueItem: (kind: string, reference: string, until: string | null) =>
     invoke<void>("dismiss_queue_item", { kind, reference, until }),
   /** "Yapıldı": maddeyi sonraki analize kadar çıkarır ve ürünse ölçüm olayı yazar. */
-  completeQueueItem: (kind: string, reference: string) =>
-    invoke<void>("complete_queue_item", { kind, reference }),
+  completeQueueItem: (kind: string, reference: string, recordStoreChange?: boolean) =>
+    invoke<void>("complete_queue_item", { kind, reference, recordStoreChange }),
   /** Tek maddenin "yapıldı"/gizleme kararını geri alır. Ölçüm olayı silinmez. */
   restoreQueueItem: (kind: string, reference: string) =>
     invoke<void>("restore_queue_item", { kind, reference }),
   restoreQueueItems: () => invoke<void>("restore_queue_items"),
 
   // --- Odak seansı (Faz S) ---
-  startFocusSession: () => invoke<FocusState>("start_focus_session"),
+  startFocusSession: (queueScope?: string, queueItems?: QueueItem[]) =>
+    invoke<FocusState>("start_focus_session", { queueScope, queueItems }),
   /** `outcome`: "done" | "skipped" | "dismissed" */
-  resolveFocusItem: (outcome: string) => invoke<FocusState>("resolve_focus_item", { outcome }),
-  endFocusSession: (reason: string) =>
-    invoke<FocusSummary | null>("end_focus_session", { reason }),
-  getFocusState: () => invoke<FocusState>("get_focus_state"),
-  getFocusCalibration: () => invoke<CalibrationRow[]>("get_focus_calibration"),
+  resolveFocusItem: (outcome: string, queueScope?: string, queueItems?: QueueItem[], expectedSessionId?: number, expectedItemId?: number) =>
+    invoke<FocusState>("resolve_focus_item", { outcome, queueScope, queueItems, expectedSessionId, expectedItemId }),
+  endFocusSession: (reason: string, queueScope?: string, expectedSessionId?: number) =>
+    invoke<FocusSummary | null>("end_focus_session", { reason, queueScope, expectedSessionId }),
+  getFocusState: (queueScope?: string, queueItems?: QueueItem[]) =>
+    invoke<FocusState>("get_focus_state", { queueScope, queueItems }),
+  getFocusCalibration: (queueScope?: string) => invoke<CalibrationRow[]>("get_focus_calibration", { queueScope }),
   setFocusDurations: (work: number, brk: number) =>
     invoke<void>("set_focus_durations", { work, brk }),
   /** Kuyrukta seansa kilitlenebilecek iş var mı — düğme buna göre açılıyor. */
-  hasLockableItem: () => invoke<boolean>("has_lockable_item"),
+  hasLockableItem: (queueScope?: string, queueItems?: QueueItem[]) =>
+    invoke<boolean>("has_lockable_item", { queueScope, queueItems }),
 
   // --- EOL karar deposu + 301 CSV (Faz D) ---
   getEolDecisions: () => invoke<EolDecision[]>("get_eol_decisions"),
@@ -249,53 +276,42 @@ export const api = {
   // --- CRM ince dilim (Faz C) ---
   // ⚠️ Kişisel veri. Bu uçlardan gelen hiçbir alan asistan bağlamına konmuyor.
   listContacts: (search: string, includeArchived: boolean, channel: string, tag: string) =>
-    invoke<Contact[]>("list_contacts", { search, includeArchived, channel, tag }),
-  getContact: (id: number) => invoke<Contact>("get_contact", { id }),
-  /** `id` null ise yeni kayıt açar; her iki durumda kişi kimliğini döner. */
-  saveContact: (c: {
-    id: number | null;
-    name: string;
-    company: string;
-    email: string;
-    phone: string;
-    channel: string;
-    note: string;
-    nextStepAt: string | null;
-    nextStepNote: string;
-  }) => invoke<number>("save_contact", c),
-  /** Silmiyor: geçmiş temaslar bir kayıt, kişi listeden çıksa da kalmalı. */
-  archiveContact: (id: number, archived: boolean) =>
-    invoke<void>("archive_contact", { id, archived }),
-  getContactEvents: (contactId: number) =>
-    invoke<ContactEvent[]>("get_contact_events", { contactId }),
-  /** Temas + yeni randevu TEK adımda — ikiye bölünürse ikincisi unutulur. */
+    teamUser.value ? teamContacts.list(search, includeArchived, channel, tag)
+      : invoke<Contact[]>("list_contacts", { search, includeArchived, channel, tag }),
+  listLocalContacts: () => invoke<Contact[]>("list_contacts", { search: "", includeArchived: false, channel: "", tag: "" }),
+  getContact: (id: ContactId) =>
+    teamUser.value ? teamContacts.get(id) : invoke<Contact>("get_contact", { id }),
+  saveContact: ({ revision, ...draft }: ContactDraft) =>
+    teamUser.value ? teamContacts.save({ ...draft, revision }) : invoke<ContactId>("save_contact", draft),
+  archiveContact: (id: ContactId, archived: boolean, revision?: number) =>
+    teamUser.value ? teamContacts.archive(id, archived, revision) : invoke<void>("archive_contact", { id, archived }),
+  getContactEvents: (contactId: ContactId) =>
+    teamUser.value ? teamContacts.events(contactId) : invoke<ContactEvent[]>("get_contact_events", { contactId }),
   addContactEvent: (
-    contactId: number,
-    kind: string,
-    note: string,
-    nextStepAt: string | null,
-    nextStepNote: string | null,
-  ) => invoke<void>("add_contact_event", { contactId, kind, note, nextStepAt, nextStepNote }),
-
-  /** Kullanılan bütün etiketler — süzgeç ve öneri listesi (sabit liste YOK). */
-  listContactTags: () => invoke<string[]>("list_contact_tags"),
-  /** Etiketleri tamamen değiştirir; ekle/çıkar ayrı komut değil (ayrışma riski). */
-  setContactTags: (contactId: number, tags: string[]) =>
-    invoke<void>("set_contact_tags", { contactId, tags }),
-
-  getContactProducts: (contactId: number) =>
-    invoke<ContactProduct[]>("get_contact_products", { contactId }),
-  /** Ürün detayında "bu ürünle ilgilenenler" — aynı tablodan, kopya sayaç yok. */
-  contactsOfProduct: (sku: string) => invoke<ContactProduct[]>("contacts_of_product", { sku }),
-  linkContactProduct: (contactId: number, sku: string) =>
-    invoke<void>("link_contact_product", { contactId, sku }),
-  unlinkContactProduct: (contactId: number, sku: string) =>
-    invoke<void>("unlink_contact_product", { contactId, sku }),
-
-  /** ⚠️ Hiçbir şey YAZMAZ — eşleştirme ekranının girdisi. */
+    contactId: ContactId, kind: string, note: string, nextStepAt: string | null,
+    nextStepNote: string | null, revision?: number,
+  ) => typeof contactId === "string"
+    ? teamContacts.act(contactId, revision, "event", { kind, note, next_step_at: nextStepAt, next_step_note: nextStepNote })
+    : invoke<void>("add_contact_event", { contactId, kind, note, nextStepAt, nextStepNote }),
+  listContactTags: () =>
+    teamUser.value ? teamContacts.tags() : invoke<string[]>("list_contact_tags"),
+  setContactTags: (contactId: ContactId, tags: string[], revision?: number) =>
+    teamUser.value ? teamContacts.act(contactId, revision, "tags", { tags })
+      : invoke<void>("set_contact_tags", { contactId, tags }),
+  getContactProducts: (contactId: ContactId) =>
+    teamUser.value ? teamContacts.products(contactId) : invoke<ContactProduct[]>("get_contact_products", { contactId }),
+  contactsOfProduct: (sku: string) =>
+    teamUser.value ? teamContacts.contactsOfProduct(sku) : invoke<ContactProduct[]>("contacts_of_product", { sku }),
+  linkContactProduct: (contactId: ContactId, sku: string, revision?: number) =>
+    teamUser.value ? teamContacts.act(contactId, revision, "link", { sku })
+      : invoke<void>("link_contact_product", { contactId, sku }),
+  unlinkContactProduct: (contactId: ContactId, sku: string, revision?: number) =>
+    teamUser.value ? teamContacts.act(contactId, revision, "unlink", { sku })
+      : invoke<void>("unlink_contact_product", { contactId, sku }),
   previewContactCsv: (path: string) => invoke<CsvPreview>("preview_contact_csv", { path }),
   importContactsCsv: (path: string, mapping: (number | null)[]) =>
-    invoke<ImportSummary>("import_contacts_csv", { path, mapping }),
+    teamUser.value ? Promise.reject(new Error("Ekip kayıtlarını içe aktarmak için birleştirme akışı gerekir."))
+      : invoke<ImportSummary>("import_contacts_csv", { path, mapping }),
 
   getSilenceState: () => invoke<SilenceState>("get_silence_state"),
   /** `0` = kapalı. Öneri kendiliğinden yazılmıyor; bu yalnızca kullanıcı onayıyla çağrılır. */
@@ -334,13 +350,18 @@ export const api = {
     invoke<void>("set_quote_status", { id, status, reason }),
   snapshotQuote: (id: number) => invoke<number>("snapshot_quote", { id }),
   /** 🔴 Maliyet İÇERMEZ: arka uçtaki dönüşüm kayıplı (bkz. quotes.rs `to_out`). */
-  renderQuote: (id: number) => invoke<QuoteDoc>("render_quote", { id }),
+  renderQuote: async (id: Quote["id"]) => typeof id === "string"
+    ? invoke<QuoteDoc>("render_team_quote", { quote: await teamQuotes.get(id) })
+    : invoke<QuoteDoc>("render_quote", { id }),
   /** Belgeyi geçici dosyaya yazar **ve tarayıcıda açar** (açma işi Rust'ta: JS'in yol
    *  açma kapsamı geçici klasörü reddediyor). Dönen değer bilgi amaçlı dosya yolu. */
-  exportQuoteHtml: (id: number) => invoke<string>("export_quote_html", { id }),
+  exportQuoteHtml: async (id: Quote["id"]) => typeof id === "string"
+    ? invoke<string>("export_team_quote_html", { quote: await teamQuotes.get(id) })
+    : invoke<string>("export_quote_html", { id }),
   quoteSummary: () => invoke<QuoteSummary>("quote_summary"),
-  quotesOfContact: (contactId: number) =>
-    invoke<Quote[]>("quotes_of_contact", { contactId }),
+  quotesOfContact: async (contactId: Quote["contact_id"]) => typeof contactId === "string"
+    ? (await teamQuotes.list()).filter((quote) => quote.contact_id === contactId)
+    : invoke<Quote[]>("quotes_of_contact", { contactId }),
   getQuoteDefaults: () =>
     invoke<{ tax_rate: number; valid_days: number; seller: string; footer: string }>(
       "get_quote_defaults",

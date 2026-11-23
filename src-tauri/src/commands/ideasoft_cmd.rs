@@ -4,6 +4,13 @@
 
 use super::*;
 
+/// Shared transport uses the same HTML parser without reading local integration secrets.
+#[tauri::command]
+pub fn ideasoft_tech_text(html: String) -> Result<String, String> {
+    if html.len() > 2_000_000 { return Err("Teknik tablo metni çok büyük.".into()); }
+    Ok(ideasoft::tech_html_to_text(&html))
+}
+
 #[derive(Debug, Serialize)]
 pub struct IdeasoftPreview {
     pub id: i64,
@@ -20,13 +27,17 @@ fn ideasoft_local(conn: &Connection, sku: &str) -> Result<(String, String, ideas
         return Err("IdeaSoft bağlantısı ayarlı değil. Ayarlar'dan domain ve token girin.".to_string());
     }
     let d = read_detail(conn, sku)?;
+    Ok((domain, token, ideasoft_content(&d)))
+}
+
+fn ideasoft_content(d: &ProductDetail) -> ideasoft::LocalContent {
     let tech_html = d
         .tech_specs
         .as_ref()
         .filter(|g| !g.is_empty())
         .map(|g| gemini::assemble_tech_html(g))
         .unwrap_or_default();
-    let local = ideasoft::LocalContent {
+    ideasoft::LocalContent {
         page_title: d.draft_title.clone().or(d.title.clone()).unwrap_or_default(),
         meta_description: d.draft_descriptions.clone().or(d.descriptions.clone()).unwrap_or_default(),
         // Üretilen anahtar kelimeler (draft) önceliklidir; yoksa feed'deki, o da yoksa arama kelimeleri
@@ -45,8 +56,19 @@ fn ideasoft_local(conn: &Connection, sku: &str) -> Result<(String, String, ideas
         target_keyword: d.target_keyword.clone().unwrap_or_default(),
         details_html: d.draft_details.clone().or(d.details.clone()).unwrap_or_default(),
         tech_html,
-    };
-    Ok((domain, token, local))
+    }
+}
+
+#[tauri::command]
+pub fn ideasoft_shared_payload(
+    mut content: ideasoft::LocalContent,
+    tech_specs: Option<Vec<gemini::TechGroup>>,
+    parts: Vec<String>,
+) -> serde_json::Value {
+    if let Some(groups) = tech_specs.filter(|groups| !groups.is_empty()) {
+        content.tech_html = gemini::assemble_tech_html(&groups);
+    }
+    ideasoft::build_payload(&parts, &content)
 }
 
 /// sku → IdeaSoft id (önce cache, yoksa arama; bulununca cache'lenir).
@@ -83,16 +105,70 @@ async fn ideasoft_id_for(
     Ok(r.id)
 }
 
+fn ideasoft_connection_settings(conn: &Connection) -> Result<(String, String), String> {
+    Ok((
+        db::get_setting(conn, "ideasoft_domain")?.unwrap_or_default(),
+        db::get_setting(conn, "ideasoft_token")?.unwrap_or_default(),
+    ))
+}
+
 #[tauri::command]
 pub async fn test_ideasoft(state: State<'_, AppState>) -> Result<String, String> {
-    let (domain, token) = {
-        let conn = state.conn.lock().unwrap();
-        (
-            db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default(),
-            db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default(),
-        )
-    };
+    let (domain, token) = ideasoft_connection_settings(&state.conn.lock().unwrap())?;
     ideasoft::test_connection(&domain, &token).await
+}
+
+fn save_verified_ideasoft_connection(
+    conn: &mut Connection,
+    previous: &(String, String),
+    domain: &str,
+    token: &str,
+) -> Result<(), String> {
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|_| "IdeaSoft bağlantısı kaydedilemedi.".to_string())?;
+    let current = ideasoft_connection_settings(&tx)?;
+    if (current.0.as_str(), current.1.as_str()) == (domain, token) {
+        return Ok(());
+    }
+    if &current != previous {
+        return Err("Cihazdaki IdeaSoft bağlantısı değişti. Ayarları yeniden açıp tekrar deneyin.".to_string());
+    }
+    db::set_setting(&tx, "ideasoft_domain", domain)?;
+    db::set_setting(&tx, "ideasoft_token", token)?;
+    tx.commit()
+        .map_err(|_| "IdeaSoft bağlantısı kaydedilemedi.".to_string())
+}
+
+#[tauri::command]
+pub async fn test_and_save_ideasoft_connection(
+    state: State<'_, AppState>,
+    domain: String,
+    token: String,
+) -> Result<String, String> {
+    let domain = domain.trim();
+    let token = token.trim();
+    let address = if domain.contains("://") {
+        domain.to_owned()
+    } else {
+        format!("https://{domain}")
+    };
+    let address = reqwest::Url::parse(&address)
+        .ok()
+        .filter(|url| {
+            url.scheme() == "https"
+                && url.host_str().is_some()
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.query().is_none()
+                && url.fragment().is_none()
+                && matches!(url.path(), "/" | "/admin-api" | "/admin-api/")
+        })
+        .ok_or("IdeaSoft mağazanızın HTTPS adresini girin.")?;
+    let previous = ideasoft_connection_settings(&state.conn.lock().unwrap())?;
+    let result = ideasoft::test_connection(address.as_str(), token).await?;
+    save_verified_ideasoft_connection(&mut state.conn.lock().unwrap(), &previous, domain, token)?;
+    Ok(result)
 }
 
 /// Gönderim öncesi fark önizlemesi — uzaktaki mevcut değerler + gönderilecek gövde.
@@ -268,24 +344,24 @@ pub async fn sync_store_pages(
 
     let mut conn = state.conn.lock().unwrap();
     let tx = conn.transaction().map_err(|e| format!("İşlem başlatılamadı: {e}"))?;
-    // Tam yenileme: mağazadan silinen kategori/marka/yazı envanterde kalmasın, yoksa
-    // sınıflandırma var olmayan bir sayfaya tip verir.
-    tx.execute("DELETE FROM store_pages", [])
-        .map_err(|e| format!("Envanter temizlenemedi: {e}"))?;
     {
         let mut stmt = tx
             .prepare(
-                "INSERT OR REPLACE INTO store_pages
+                "INSERT INTO store_pages
                  (kind, remote_id, slug, name, page_title, meta_description, meta_keywords,
                   target_keyword, showcase_content, status, fetched_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+                 ON CONFLICT(kind,remote_id) DO UPDATE SET slug=excluded.slug, name=excluded.name,
+                   page_title=excluded.page_title, meta_description=excluded.meta_description,
+                   meta_keywords=excluded.meta_keywords, target_keyword=excluded.target_keyword,
+                   showcase_content=excluded.showcase_content, status=excluded.status, fetched_at=excluded.fetched_at",
             )
             .map_err(|e| format!("Envanter yazılamadı: {e}"))?;
         for x in &pages {
-            if x.slug.is_empty() {
+            if x.id <= 0 {
                 continue;
             }
-            let _ = stmt.execute(params![
+            stmt.execute(params![
                 x.kind,
                 x.id,
                 x.slug.to_lowercase(),
@@ -297,9 +373,11 @@ pub async fn sync_store_pages(
                 x.showcase_content,
                 x.status,
                 now
-            ]);
+            ]).map_err(|e| format!("Envanter kaydı yazılamadı: {e}"))?;
         }
     }
+    tx.execute("DELETE FROM store_pages WHERE fetched_at <> ?1 AND nullif(draft_at,'') IS NULL", [&now])
+        .map_err(|e| format!("Eski envanter temizlenemedi: {e}"))?;
     tx.commit().map_err(|e| format!("Envanter kaydedilemedi: {e}"))?;
 
     let by_kind = store_page_summary(&conn)?;
@@ -782,6 +860,37 @@ mod tests {
             .unwrap();
         }
         conn
+    }
+
+    #[test]
+    fn verified_ideasoft_settings_save_without_feed_and_reject_stale_tests() {
+        let mut conn = db_with(&[]);
+        let previous = ideasoft_connection_settings(&conn).unwrap();
+        assert_eq!(db::feed_url(&conn).unwrap(), "");
+
+        save_verified_ideasoft_connection(
+            &mut conn,
+            &previous,
+            "https://shop.example.com",
+            "verified-test-token",
+        )
+        .unwrap();
+        assert_eq!(
+            ideasoft_connection_settings(&conn).unwrap(),
+            ("https://shop.example.com".into(), "verified-test-token".into())
+        );
+        assert_eq!(db::feed_url(&conn).unwrap(), "");
+        assert!(save_verified_ideasoft_connection(
+            &mut conn,
+            &previous,
+            "https://shop.example.com",
+            "older-verified-test-token",
+        )
+        .is_err());
+        assert_eq!(
+            db::get_setting(&conn, "ideasoft_token").unwrap().as_deref(),
+            Some("verified-test-token")
+        );
     }
 
     /// 🔴 Bu testin koruduğu şey saha hatasının kendisi: canonical hedefi SATIŞTAKİ

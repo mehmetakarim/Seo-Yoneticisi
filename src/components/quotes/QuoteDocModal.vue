@@ -23,7 +23,7 @@ import { useStore } from "../../store";
 import Icon from "../Icon.vue";
 import ModalShell from "../ModalShell.vue";
 
-const props = defineProps<{ open: boolean; quoteId: number | null }>();
+const props = defineProps<{ open: boolean; quoteId: number | string | null }>();
 const emit = defineEmits<{ close: [] }>();
 const store = useStore();
 

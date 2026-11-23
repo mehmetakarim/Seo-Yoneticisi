@@ -15,6 +15,7 @@
  */
 import { ref } from "vue";
 import { useStore } from "../store";
+import { teamReachable, teamUser } from "../teamConnection";
 import Icon from "./Icon.vue";
 import HealthPanel from "./HealthPanel.vue";
 
@@ -42,7 +43,7 @@ function bitti(sorunsuz: boolean) {
 
 <template>
   <Transition name="hp-fade">
-    <div v-if="acik && !store.setupOpen" class="kutu">
+    <div v-if="acik && !store.setupOpen && (!teamUser || teamReachable === true)" class="kutu">
       <div class="bas">
         <Icon :name="temiz ? 'badgeCheck' : 'refresh'" :size="15"
               :style="{ color: temiz ? 'var(--green)' : 'var(--accent)' }" />

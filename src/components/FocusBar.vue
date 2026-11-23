@@ -14,6 +14,7 @@
  */
 import { computed, onMounted, onUnmounted } from "vue";
 import { useStore } from "../store";
+import { teamTodayMode, teamTodayScope, teamTodaySync, todayLocalDay } from "../teamToday";
 import { BUCKET_LABEL as LABEL, BUCKET_TONE as TONE } from "../buckets";
 import Icon from "./Icon.vue";
 
@@ -31,6 +32,7 @@ onUnmounted(() => {
 
 const s = computed(() => store.session);
 const it = computed(() => s.value?.locked ?? null);
+const canSet = computed(() => !teamTodayMode() || !!teamTodayScope() && teamTodaySync.value.scope === teamTodayScope() && teamTodaySync.value.canEdit);
 
 // ♻️ Kova etiketleri `buckets.ts`te — Bugün ekranıyla ortak (iki kopya sapmaya bir adımdı).
 
@@ -57,14 +59,11 @@ const isSuresi = computed(() => {
 function yarin(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return todayLocalDay(d);
 }
 
 async function ertele() {
-  const x = it.value;
-  if (!x) return;
-  await store.dismissQueueItem(x.kind, x.reference, yarin());
-  await store.resolveSessionItem("dismissed");
+  await store.resolveSessionItem("dismissed", yarin());
 }
 </script>
 
@@ -88,15 +87,15 @@ async function ertele() {
         <button class="ac" @click="store.openQueueItem(it.page, it.focus_id)">
           <Icon name="external" :size="12" /> Aç
         </button>
-        <button class="ok" @click="store.resolveSessionItem('done')">
+        <button class="ok" :disabled="!canSet || store.sessionBusy" @click="store.resolveSessionItem('done')">
           <Icon name="check" :size="12" :stroke-width="2.6" /> Bitti
         </button>
         <!-- ⚠️ "Atla" YALNIZCA bu seans için: iş kuyrukta kalır, kalıcı karar yazılmaz.
              Kalıcı kararlar (Gizle / Bugünlük ertele) Bugün ekranında ve burada erteleme. -->
-        <button class="gh" data-tip="Bu seansta atla — iş kuyrukta kalır" @click="store.resolveSessionItem('skipped')">
+        <button class="gh" :disabled="store.sessionBusy" data-tip="Bu seansta atla — iş kuyrukta kalır" @click="store.resolveSessionItem('skipped')">
           Atla
         </button>
-        <button class="gh" data-tip="Yarın tekrar göster" @click="ertele()">Ertele</button>
+        <button class="gh" :disabled="!canSet || store.sessionBusy" data-tip="Yarın tekrar göster" @click="ertele()">Ertele</button>
       </div>
     </template>
     <span v-else class="baslik bos">Kuyrukta kilitlenecek iş kalmadı.</span>
@@ -107,7 +106,7 @@ async function ertele() {
       <span v-if="store.sessionBreakOffered" class="mola">
         {{ s.break_minutes }} dakika mola?
       </span>
-      <button class="gh" @click="store.endSession('stopped')">Seansı bitir</button>
+      <button class="gh" :disabled="store.sessionBusy" @click="store.endSession('stopped')">Seansı bitir</button>
     </div>
   </div>
 </template>

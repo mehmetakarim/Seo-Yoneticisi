@@ -1,5 +1,17 @@
 import { defineStore } from "pinia";
 import { api } from "./api";
+import { flushTeamContacts, teamContactProgress } from "./teamContacts";
+import { teamAccessIssue, teamReachable, teamRestoring, teamUser, teamWorkspace } from "./teamConnection";
+import { getTeamProduct, listTeamProducts, prepareTeamCatalogLine, readOnlineTeamCatalogRevision } from "./teamCatalog";
+import { flushTeamGscSnapshots, seedTeamGscHistory, teamGscAnalysis, teamGscMode, teamMeasurementScope, teamOutcomeInputs } from "./teamGsc";
+import { listTeamStorePages } from "./teamStorePages";
+import { fetchTeamIdeasoftProduct, previewTeamIdeasoftProduct, pushTeamIdeasoftProduct } from "./teamIdeasoft";
+import { flushGscReports, loadGscReport, queueGscReport } from "./teamGscReport";
+import { flushTeamProductSeo, getTeamProductSeo, patchTeamProductSeo, readTeamProductSeoForGeneration, teamProductSeoScope, verifyTeamProductSeoRevision, type TeamSeoRecord } from "./teamProductSeo";
+import { assembleTeamProductTech, restoreTeamProductTech, structureTeamProductTech, teamTechSourceChanges } from "./teamProductTech";
+import { generateTeamProductDetails, restoreTeamProductDetails } from "./teamProductDetails";
+import { generateTeamProductMeta, restoreTeamProductMeta } from "./teamProductMeta";
+import { summarizeTeamQuotes, teamQuoteQueue, teamQuotes } from "./teamQuotes";
 import { SOURCES, buildContext, sourceByKey } from "./assistantSources";
 import type { ContextSource, SourceData } from "./assistantSources";
 import type {
@@ -25,6 +37,7 @@ import type {
   FocusSummary,
   EolDecision,
   Contact,
+  ContactId,
   ContactEvent,
   ContactProduct,
   Quote,
@@ -32,9 +45,26 @@ import type {
   StorePageDetail,
 } from "./types";
 import type { Page } from "./navigation";
-import { PAGE_BY_KIND } from "./catalog";
+import { KIND_BY_PAGE, PAGE_BY_KIND } from "./catalog";
+import { acceptTodayConflict, flushTeamToday, loadTeamTodayInputs, queueTodayDecision, refreshTodayDecisions,
+  teamTodayMode, teamTodayScope, teamTodaySync, todayLocalDay, type TeamTodayInputs } from "./teamToday";
+import type { ItemRef } from "./types";
 
 type Theme = "light" | "dark";
+let contactsRequest = 0;
+let contactRequest = 0;
+let quotesRequest = 0;
+let quoteRequest = 0;
+let productsRequest = 0;
+let productRequest = 0;
+let storePagesRequest = 0;
+let todayRequest = 0;
+let todayInputs: TeamTodayInputs | undefined;
+const todaySource = () => teamTodayMode() ? teamTodayScope() ?? "" : undefined;
+
+type ProductMetaEdits = Partial<Record<"draft_title" | "draft_descriptions" | "draft_search_keywords" | "target_keyword", string>>;
+type MetaAutosave = { changes: ProductMetaEdits; timer?: number; saving?: Promise<boolean> };
+const metaAutosaves = new WeakMap<ProductDetail, MetaAutosave>();
 
 /**
  * Katalog listesi süzgeci.
@@ -55,6 +85,7 @@ interface State {
   page: Page;
   theme: Theme;
   allRows: ProductRow[];
+  productCatalogRevision: number | null;
   filter: FilterKey;
   search: string;
   selectedSku: string | null;
@@ -109,10 +140,12 @@ interface State {
   /** Kaydedilmiş sohbetlerin listesi (yalnızca üstveri). */
   chatSessions: ChatSessionMeta[];
   techStructuring: boolean;
+  techTableSaving: boolean;
   techDropped: string[];
   /** Bugünün iş kuyruğu (Faz K). Saklanmıyor, her açılışta hesaplanıyor. */
   today: TodayQueue | null;
   todayBusy: boolean;
+  todayError: string;
   /**
    * Kuyruktan bir maddeye tıklanınca hedef araç ekranında **hangi satırın** öne
    * çıkarılacağı. Ekran onu çizdikten sonra temizleniyor.
@@ -134,6 +167,7 @@ interface State {
   sessionSummary: FocusSummary | null;
   /** Kuyrukta kilitlenebilecek iş var mı — "Odak seansı başlat" düğmesi buna bakıyor. */
   sessionCanStart: boolean;
+  sessionBusy: boolean;
   /** EOL karar deposu (Faz D): slug → karar. ⚠️ Halef ÖNERİLERİ hâlâ bellekte
    *  (`successors`); burada yalnızca ONAYLANMIŞ kararlar var ve bunlar kalıcı. */
   eolDecisions: Record<string, EolDecision>;
@@ -181,6 +215,7 @@ interface State {
   seedBusy: boolean;
   ideasoftBusy: boolean;
   ideasoftPreview: IdeasoftPreview | null;
+  ideasoftPreviewTarget: { sku: string; scope: string; revision: number | null } | null;
   ideasoftParts: string[];
   appVersion: string;
   updateInfo: { version: string; notes: string } | null;
@@ -205,6 +240,7 @@ export const useStore = defineStore("app", {
     page: "today",
     theme: "light",
     allRows: [],
+    productCatalogRevision: null,
     filter: "tumu",
     search: "",
     selectedSku: null,
@@ -238,9 +274,11 @@ export const useStore = defineStore("app", {
     chatId: null,
     chatSessions: [],
     techStructuring: false,
+    techTableSaving: false,
     techDropped: [],
     today: null,
     todayBusy: false,
+    todayError: "",
     contacts: [],
     contactsBusy: false,
     contactSearch: "",
@@ -262,6 +300,7 @@ export const useStore = defineStore("app", {
     sessionBreakOffered: false,
     sessionSummary: null,
     sessionCanStart: false,
+    sessionBusy: false,
     eolDecisions: {},
     redirectPicking: "",
     storePages: [],
@@ -276,6 +315,7 @@ export const useStore = defineStore("app", {
     seedBusy: false,
     ideasoftBusy: false,
     ideasoftPreview: null,
+    ideasoftPreviewTarget: null,
     ideasoftParts: [],
     appVersion: "",
     updateInfo: null,
@@ -291,6 +331,10 @@ export const useStore = defineStore("app", {
   }),
 
   getters: {
+    productIdeasoftAvailable(state): boolean {
+      if (teamWorkspace.value || teamUser.value) return !!state.detail?.team_seo_scope;
+      return !!state.settings?.ideasoft_active;
+    },
     counts(state): Record<FilterKey, number> {
       const c: Record<FilterKey, number> = {
         eksik: 0,
@@ -417,25 +461,24 @@ export const useStore = defineStore("app", {
       }
     },
 
-    async init() {
-      // Tema: kayıtlı tercih yoksa sistem tercihine düş
-      this.loading = true;
+    async loadAppearance() {
+      if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) this.theme = "dark";
+      this.applyTheme();
       try {
         this.settings = await api.getSettings();
         if (this.settings?.theme === "dark" || this.settings?.theme === "light") {
           this.theme = this.settings.theme;
-        } else if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
-          this.theme = "dark";
+          this.applyTheme();
         }
-        this.applyTheme();
+      } catch {
+        // Cihaz tercihi okunamadığında sistem temasını kullan.
+      }
+    },
+
+    async init() {
+      this.loading = true;
+      try {
         this.lastSync = await api.getLastSync();
-        // İlk çalıştırma mı? Karar backend'de (üç koşul birden, bkz. db::needs_setup) —
-        // ön yüz yalnızca sonucu gösteriyor.
-        try {
-          this.setupOpen = await api.needsSetup();
-        } catch {
-          /* sihirbaz sorulamazsa uygulama normal açılsın */
-        }
         // Sürüm bilgisi + sessiz güncelleme kontrolü (açılışta)
         try {
           const { getVersion } = await import("@tauri-apps/api/app");
@@ -455,9 +498,108 @@ export const useStore = defineStore("app", {
       }
     },
 
-    async reload() {
-      // Tüm ürünleri (tamamlananlar dahil) çek; filtre/arama istemcide.
-      this.allRows = await api.listProducts("hepsi", "");
+    async refreshOpenCatalog() {
+      const request = productsRequest;
+      const revision = await readOnlineTeamCatalogRevision();
+      if (revision !== null && this.hasDifferentCatalogRevision(revision) && request === productsRequest &&
+          this.page === "products" && !this.syncing) await this.reload(true);
+    },
+
+    hasDifferentCatalogRevision(revision: number) {
+      return revision !== this.productCatalogRevision ||
+        (this.detail?.team_catalog_revision !== undefined && revision !== this.detail.team_catalog_revision);
+    },
+
+    async reload(backgroundCatalog = false) {
+      const request = ++productsRequest;
+      const inWorkspace = Boolean(teamUser.value && teamWorkspace.value);
+      const shared = inWorkspace ? await listTeamProducts() : null;
+      const rows = inWorkspace ? shared?.rows ?? [] : await api.listProducts("hepsi", "");
+      const current = () => request === productsRequest && (!backgroundCatalog ||
+        (this.page === "products" && teamReachable.value === true && !teamAccessIssue.value && !this.syncing));
+      if (!current()) return;
+      if (backgroundCatalog) {
+        if (!shared || !this.hasDifferentCatalogRevision(shared.revision)) return;
+        const sku = this.selectedSku;
+        const detail = this.detail;
+        if (sku && !rows.some((row) => row.sku === sku)) {
+          const pending = detail && metaAutosaves.get(detail);
+          if (pending?.saving || Object.keys(pending?.changes ?? {}).length ||
+              this.generating || this.generatingDetails || this.techStructuring || this.techTableSaving ||
+              this.ideasoftBusy || this.ideasoftPreview ||
+              document.activeElement?.matches("input, textarea, [contenteditable=true]")) return;
+        } else if (sku && detail?.sku === sku) {
+          const fresh = await getTeamProduct(sku);
+          if (!current() || this.selectedSku !== sku || this.detail !== detail) return;
+          // Keep the detail object and the editor's unsaved drafts while refreshing the feed fields.
+          Object.assign(detail, {
+            name: fresh.name, brand: fresh.brand, main_category: fresh.main_category, category: fresh.category,
+            quantity: fresh.quantity, url: fresh.url, img_url: fresh.img_url, gallery: fresh.gallery,
+            image_count: fresh.image_count, image_badge: fresh.image_badge,
+            title: fresh.title, descriptions: fresh.descriptions, keywords: fresh.keywords,
+            search_keywords: fresh.search_keywords, details: fresh.details, feed_changed: fresh.feed_changed,
+            team_catalog_revision: fresh.team_catalog_revision,
+          });
+        }
+      }
+      this.allRows = rows;
+      this.productCatalogRevision = shared?.revision ?? null;
+      if (this.selectedSku && !rows.some((row) => row.sku === this.selectedSku)) {
+        productRequest++;
+        this.selectedSku = null;
+        this.detail = null;
+      }
+    },
+
+    resetProductsSource() {
+      productsRequest++;
+      productRequest++;
+      this.allRows = [];
+      this.selectedSku = null;
+      this.detail = null;
+      this.productCatalogRevision = null;
+    },
+
+    async readSelectedProduct(sku: string) {
+      return teamUser.value && teamWorkspace.value ? getTeamProduct(sku) : api.getProduct(sku);
+    },
+
+    async applyProductEdit(updated: ProductDetail) {
+      if (this.selectedSku !== updated.sku) return;
+      const request = productRequest;
+      const detail = this.productCatalogRevision !== null
+        ? await this.readSelectedProduct(updated.sku)
+        : updated;
+      if (request === productRequest) this.detail = detail;
+    },
+
+    async saveSharedSeo(detail: ProductDetail, changes: Record<string, unknown>, strict = false) {
+      try {
+        if (detail.team_seo_scope !== teamProductSeoScope()) throw new Error("Çalışma alanı değişti.");
+        const revision = detail.seo_revision ?? null;
+        const saved = await patchTeamProductSeo(detail.sku, revision, changes, strict);
+        void flushTeamProductSeo().catch((error) => this.toast(String(error), "error"));
+        if ((detail.seo_revision ?? 0) < saved.revision) detail.seo_revision = saved.revision;
+        return true;
+      } catch (error) {
+        this.toast(String(error), "error");
+        return false;
+      }
+    },
+
+    needsSharedIntegration() {
+      if (this.detail?.seo_revision == null) return false;
+      this.toast("Bu işlem ortak SEO taslağına henüz bağlanmadı.", "info");
+      return true;
+    },
+
+    async refreshProductsSource() {
+      const previous = this.productCatalogRevision;
+      await this.reload();
+      const selectedRevision = this.detail?.team_catalog_revision ?? previous;
+      if (this.selectedSku && selectedRevision !== this.productCatalogRevision) {
+        await this.select(this.selectedSku);
+      }
     },
 
     setFilter(f: FilterKey) {
@@ -471,7 +613,11 @@ export const useStore = defineStore("app", {
     /** Önbellekteki son analizi yükler (API'ye gitmez). Sayfa açılışında çağrılır. */
     async loadOpportunityCache() {
       try {
-        this.opportunity = await api.getOpportunityCache();
+        const shared = teamGscMode();
+        const scope = teamMeasurementScope();
+        const report = await loadGscReport();
+        if (shared !== teamGscMode() || scope !== teamMeasurementScope()) return;
+        if (!this.opportunity || !report || report.analyzed_at >= this.opportunity.analyzed_at) this.opportunity = report;
       } catch {
         // Önbellek okunamazsa sessiz kal — kullanıcı yine "Analizi çalıştır" diyebilir.
       }
@@ -483,7 +629,21 @@ export const useStore = defineStore("app", {
       this.opportunityBusy = true;
       this.opportunityError = "";
       try {
-        this.opportunity = await api.analyzeOpportunities();
+        const inTeam = teamGscMode();
+        const scope = teamMeasurementScope();
+        const inputs = scope ? await teamOutcomeInputs().catch(() => null) : null;
+        const sharedWindowEnd = inputs?.snapshots.map((snapshot) => snapshot.window_end).sort().pop();
+        if (inTeam !== teamGscMode() || scope !== teamMeasurementScope()) throw new Error("Çalışma alanı değişti.");
+        const shared = inTeam ? await teamGscAnalysis(sharedWindowEnd) : null;
+        if (inTeam !== teamGscMode() || scope !== teamMeasurementScope()) throw new Error("Çalışma alanı değişti.");
+        const report = await api.analyzeOpportunities(scope, shared);
+        if (inTeam !== teamGscMode() || scope !== teamMeasurementScope()) throw new Error("Çalışma alanı değişti.");
+        if (shared && scope) {
+          await queueGscReport(report, scope);
+          void flushGscReports().catch(console.warn);
+        }
+        this.opportunity = report;
+        void flushTeamGscSnapshots().then(() => this.loadOutcomes()).catch(console.warn);
         const n = this.opportunity.opportunities.length;
         this.toast(n ? `${n} fırsat bulundu` : "Fırsat bulunamadı — tablo temiz", "ok");
       } catch (e) {
@@ -832,35 +992,105 @@ export const useStore = defineStore("app", {
     },
 
     async select(sku: string) {
+      const request = ++productRequest;
+      if (this.selectedSku !== sku) this.detail = null;
       this.selectedSku = sku;
       this.research = null; // araştırma ürüne özel — seçim değişince sıfırla
       this.imageCheck = null;
       this.techDropped = [];
       try {
-        this.detail = await api.getProduct(sku);
+        const detail = await this.readSelectedProduct(sku);
+        if (request !== productRequest) return;
+        this.detail = detail;
         // Cache'lenmiş boyut sonucu varsa anında göster, sonra tazele
         this.imageCheck = this.detail?.image_check ?? null;
-        void this.checkImages(sku);
+        if (!detail.team_seo_scope) void this.checkImages(sku);
       } catch (e) {
-        this.toast(String(e), "error");
+        if (request === productRequest) this.toast(String(e), "error");
       }
     },
 
     // ---- Faz 8: teknik özellik tablosu ----
-    async saveTechSource(text: string) {
-      if (!this.selectedSku) return;
-      await api.saveTechSource(this.selectedSku, text);
-      if (this.detail) this.detail.tech_source_text = text;
+    async saveTechSource(detail: ProductDetail, text: string): Promise<boolean> {
+      try {
+        if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+          if (detail.team_seo_scope !== teamProductSeoScope()) throw new Error("Ortak ürün taslağını yeniden açın.");
+          if (!await this.flushProductMetaEdits(detail)) return false;
+          const revision = detail.seo_revision ?? null;
+          const record = await getTeamProductSeo(detail.sku);
+          if ((detail.seo_revision ?? null) !== revision || (record?.revision ?? null) !== revision) {
+            throw new Error("Ortak taslak değişti. Teknik metni yeniden kaydedin.");
+          }
+          if (record?.draft.tech_source_text !== text && !await this.saveSharedSeo(detail, teamTechSourceChanges(record, text), true)) return false;
+        } else await api.saveTechSource(detail.sku, text);
+        detail.tech_source_text = text;
+        return true;
+      } catch (e) {
+        this.toast(String(e), "error");
+        return false;
+      }
     },
 
-    async structureTech() {
-      if (!this.selectedSku || this.techStructuring) return;
+    async applySharedSeoResult(detail: ProductDetail, saved: TeamSeoRecord) {
+      const request = productRequest;
+      const revision = detail.seo_revision ?? null;
+      const current = () => this.detail === detail && this.selectedSku === detail.sku &&
+        request === productRequest && detail.team_seo_scope === teamProductSeoScope() &&
+        (detail.seo_revision ?? null) === revision;
+      if (!current()) return;
+      const updated = await getTeamProduct(detail.sku, saved);
+      if (current()) Object.assign(detail, updated);
+    },
+
+    async structureTech(source: string) {
+      const sku = this.selectedSku;
+      const detail = this.detail;
+      if (!sku || !detail || detail.sku !== sku || this.techStructuring) return;
       this.techStructuring = true;
       this.techDropped = [];
       try {
-        const res = await api.structureTechSpecs(this.selectedSku);
+        if (!await this.flushProductMetaEdits(detail) || this.detail !== detail) return;
+        let res;
+        if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+          const scope = detail.team_seo_scope;
+          let revision = detail.seo_revision ?? null;
+          const current = () => this.detail === detail && this.selectedSku === sku && scope === teamProductSeoScope() &&
+            (detail.seo_revision ?? null) === revision;
+          const assertCurrent = () => {
+            if (!current()) throw new Error("Ürün veya taslak değişti. Teknik tablo üretimini yeniden başlatın.");
+          };
+          assertCurrent();
+          if (!source.trim()) throw new Error("Önce üreticinin teknik özellik metnini yapıştırın.");
+          let draft = await readTeamProductSeoForGeneration(sku, revision);
+          assertCurrent();
+          if (draft?.draft.tech_source_text !== source) {
+            const saved = await patchTeamProductSeo(sku, revision, teamTechSourceChanges(draft, source), true);
+            void flushTeamProductSeo().catch(console.warn);
+            assertCurrent();
+            revision = saved.revision;
+            detail.seo_revision = revision;
+            detail.tech_source_text = source;
+            draft = await readTeamProductSeoForGeneration(sku, revision);
+          }
+          assertCurrent();
+          if (!draft) throw new Error("Önce üreticinin teknik özellik metnini yapıştırın.");
+          const generated = await structureTeamProductTech(detail, draft);
+          await verifyTeamProductSeoRevision(sku, revision);
+          assertCurrent();
+          const saved = await patchTeamProductSeo(sku, revision, generated.changes, true);
+          void flushTeamProductSeo().catch(console.warn);
+          await this.applySharedSeoResult(detail, saved);
+          res = generated.result;
+        } else {
+          await api.saveTechSource(sku, source);
+          res = await api.structureTechSpecs(sku);
+          if (this.detail === detail) {
+            detail.tech_source_text = source;
+            detail.tech_specs = res.groups;
+          }
+        }
+        if (this.selectedSku !== sku || (detail.team_seo_scope && detail.team_seo_scope !== teamProductSeoScope())) return;
         this.techDropped = res.dropped;
-        if (this.detail) this.detail.tech_specs = res.groups;
         const n = res.groups.reduce((a, g) => a + g.rows.length, 0);
         this.toast(`Teknik tablo hazır · ${n} satır`, "ok");
         await this.reload();
@@ -872,23 +1102,65 @@ export const useStore = defineStore("app", {
     },
 
     async saveTechSpecs(specs: TechGroup[]) {
-      if (!this.selectedSku) return;
+      const sku = this.selectedSku;
+      const detail = this.detail;
+      if (!sku || !detail || detail.sku !== sku || this.techTableSaving) return;
+      this.techTableSaving = true;
       try {
-        await api.saveTechSpecs(this.selectedSku, specs);
-        if (this.detail) this.detail.tech_specs = specs;
+        if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+          if (!await this.flushProductMetaEdits(detail)) return;
+          if (!await this.saveSharedSeo(detail, { tech_specs_json: specs }, true)) return;
+        } else await api.saveTechSpecs(sku, specs);
+        if (this.detail === detail) detail.tech_specs = specs;
       } catch (e) {
         this.toast(String(e), "error");
+      } finally {
+        this.techTableSaving = false;
       }
+    },
+
+    async techHtml() {
+      const sku = this.selectedSku;
+      const detail = this.detail;
+      if (!sku || !detail || detail.sku !== sku) throw new Error("Önce bir ürün açın.");
+      if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+        if (detail.team_seo_scope !== teamProductSeoScope() || detail.seo_revision == null) throw new Error("Önce ortak teknik tabloyu yapılandırın.");
+        return assembleTeamProductTech(detail.tech_specs ?? []);
+      }
+      return api.techTableHtml(sku);
     },
 
     // ---- Faz 9: IdeaSoft gönderimi ----
     /** Fark önizlemesini açar (gönderim öncesi zorunlu adım). */
     async openIdeasoftPreview(parts: string[]) {
       if (!this.selectedSku || this.ideasoftBusy) return;
+      this.closeIdeasoftPreview();
       this.ideasoftBusy = true;
-      this.ideasoftParts = parts;
       try {
-        this.ideasoftPreview = await api.ideasoftPreview(this.selectedSku, parts);
+        const sku = this.selectedSku;
+        const selected = this.detail;
+        if (selected && (parts.includes("meta") || parts.includes("keyword"))) {
+          if (!await this.flushProductMetaEdits(selected)) return;
+          if (selected !== this.detail || sku !== this.selectedSku) return;
+        }
+        if (teamWorkspace.value || teamUser.value) {
+          const detail = this.detail;
+          const scope = teamProductSeoScope();
+          if (!detail || detail.sku !== sku || detail.team_seo_scope !== scope) throw new Error("Ortak ürün taslağını yeniden açın.");
+          const revision = detail.seo_revision ?? null;
+          if (revision === null) throw new Error("Mağazaya göndermek için önce ortak SEO taslağını kaydedin.");
+          await verifyTeamProductSeoRevision(sku, revision);
+          const preview = await previewTeamIdeasoftProduct(detail, parts);
+          if (this.detail !== detail || this.selectedSku !== sku || teamProductSeoScope() !== scope ||
+              (detail.seo_revision ?? null) !== revision) throw new Error("Ürün veya taslak değişti. Önizlemeyi yeniden açın.");
+          this.ideasoftPreviewTarget = { sku, scope, revision };
+          this.ideasoftPreview = preview;
+        } else {
+          const preview = await api.ideasoftPreview(sku, parts);
+          if (sku !== this.selectedSku || teamWorkspace.value || teamUser.value) throw new Error("Ürün veya çalışma alanı değişti.");
+          this.ideasoftPreview = preview;
+        }
+        this.ideasoftParts = parts;
       } catch (e) {
         this.toast(String(e), "error");
         this.ideasoftParts = [];
@@ -899,12 +1171,41 @@ export const useStore = defineStore("app", {
 
     /** Hedef kelimeyi IdeaSoft'tan çeker (yerel alan boşken faydalı). */
     async pullIdeasoftKeyword() {
-      if (!this.selectedSku || this.ideasoftBusy) return;
+      const sku = this.selectedSku;
+      const detail = this.detail;
+      if (!sku || !detail || detail.sku !== sku || this.ideasoftBusy) return;
       this.ideasoftBusy = true;
       try {
+        if (!await this.flushProductMetaEdits(detail)) return;
+        if (this.detail !== detail || this.selectedSku !== sku) return;
+        if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+          if (detail.team_seo_scope !== teamProductSeoScope()) throw new Error("Ortak ürün taslağını yeniden açın.");
+          const revision = detail.seo_revision;
+          const remote = await fetchTeamIdeasoftProduct(sku);
+          if (this.detail !== detail || this.selectedSku !== sku || !await this.flushProductMetaEdits(detail)) return;
+          if (this.detail !== detail || detail.seo_revision !== revision || detail.team_seo_scope !== teamProductSeoScope()) {
+            throw new Error("Ürün veya taslak değişti. Getir işlemini yeniden başlatın.");
+          }
+          const changes: Record<string, string> = {};
+          if (remote.keyword && remote.keyword !== detail.target_keyword?.trim()) changes.target_keyword = remote.keyword;
+          if (remote.techText && !detail.tech_source_text?.trim()) changes.tech_source_text = remote.techText;
+          if (!Object.keys(changes).length) {
+            const message = remote.techText ? "Dolu teknik kaynak metni korundu."
+              : remote.keyword ? "Ortak taslaktaki hedef kelime IdeaSoft ile eşleşiyor."
+              : "IdeaSoft’ta getirilecek hedef kelime veya teknik tablo yok.";
+            this.toast(message, "info");
+            return;
+          }
+          if (!await this.saveSharedSeo(detail, changes, true)) return;
+          Object.assign(detail, changes);
+          this.toast(remote.techText && !("tech_source_text" in changes)
+            ? "Hedef kelime getirildi. Dolu teknik kaynak metni korundu."
+            : "IdeaSoft verileri ortak taslağa alındı.", "ok");
+          return;
+        }
         // Ne getirildiği/neyin korunduğu ayrımını arka uç biliyor; mesaj oradan geliyor.
-        const r = await api.ideasoftPullKeyword(this.selectedSku);
-        this.detail = r.detail;
+        const r = await api.ideasoftPullKeyword(sku);
+        await this.applyProductEdit(r.detail);
         this.toast(r.message, "ok");
       } catch (e) {
         this.toast(String(e), "error");
@@ -915,15 +1216,42 @@ export const useStore = defineStore("app", {
 
     closeIdeasoftPreview() {
       this.ideasoftPreview = null;
+      this.ideasoftPreviewTarget = null;
       this.ideasoftParts = [];
     },
 
     /** Onaylanan parçaları IdeaSoft'a yazar. */
     async confirmIdeasoftPush() {
-      if (!this.selectedSku || this.ideasoftBusy || !this.ideasoftParts.length) return;
+      if (!this.selectedSku || this.ideasoftBusy || !this.ideasoftParts.length || !this.ideasoftPreview) return;
       this.ideasoftBusy = true;
       try {
-        this.detail = await api.ideasoftPush(this.selectedSku, this.ideasoftParts);
+        const target = this.ideasoftPreviewTarget;
+        if (target) {
+          if (target.sku !== this.selectedSku || target.scope !== teamProductSeoScope() ||
+              this.detail?.team_seo_scope !== target.scope || (this.detail.seo_revision ?? null) !== target.revision) {
+            this.closeIdeasoftPreview();
+            throw new Error("Ürün veya taslak değişti. Önizlemeyi yeniden açın.");
+          }
+          const preview = this.ideasoftPreview;
+          this.closeIdeasoftPreview();
+          await verifyTeamProductSeoRevision(target.sku, target.revision);
+          if (this.selectedSku !== target.sku || teamProductSeoScope() !== target.scope ||
+              (this.detail?.seo_revision ?? null) !== target.revision) throw new Error("Ürün veya taslak değişti. Önizlemeyi yeniden açın.");
+          const result = await pushTeamIdeasoftProduct(target.sku, preview);
+          if (result.updated && this.detail?.sku === target.sku && this.detail.team_seo_scope === target.scope && result.pushed_at) {
+            this.detail.ideasoft_pushed_at = result.pushed_at;
+          }
+          if (!result.updated) this.toast("Mağazadaki değerler önizlemeyle eşleşiyor.", "ok");
+          else if (result.event_recorded) this.toast("IdeaSoft’a gönderildi ve geçmişe kaydedildi.", "ok");
+          else if (result.event_pending) this.toast("IdeaSoft’a gönderildi. Geçmiş kaydı eşitlenmeyi bekliyor.", "info");
+          else this.toast("IdeaSoft’a gönderildi. Geçmiş kaydı doğrulanamadı.", "info");
+          return;
+        }
+        if (teamWorkspace.value || teamUser.value || this.ideasoftPreview.remote.sku.trim().toLowerCase() !== this.selectedSku.trim().toLowerCase()) {
+          this.closeIdeasoftPreview();
+          throw new Error("Ürün veya çalışma alanı değişti. Önizlemeyi yeniden açın.");
+        }
+        await this.applyProductEdit(await api.ideasoftPush(this.selectedSku, this.ideasoftParts));
         this.toast("IdeaSoft'a gönderildi ✓", "ok");
         this.closeIdeasoftPreview();
       } catch (e) {
@@ -934,9 +1262,26 @@ export const useStore = defineStore("app", {
     },
 
     async restoreMetaVersion(index: number) {
-      if (!this.selectedSku) return;
+      const sku = this.selectedSku;
+      const detail = this.detail;
+      if (!sku || !detail || detail.sku !== sku || this.generating) return;
       try {
-        this.detail = await api.restoreMetaVersion(this.selectedSku, index);
+        if (!await this.flushProductMetaEdits(detail)) return;
+        if (this.detail !== detail || this.selectedSku !== sku) return;
+        if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+          const revision = detail.seo_revision ?? null;
+          const current = () => this.detail === detail && this.selectedSku === sku &&
+            detail.team_seo_scope === teamProductSeoScope() && (detail.seo_revision ?? null) === revision;
+          if (!current()) throw new Error("Ortak ürün taslağını yeniden açın.");
+          const record = await getTeamProductSeo(sku);
+          if (!current() || !record || record.revision !== revision) throw new Error("Taslak değişti. Meta sürüm listesini yeniden açın.");
+          const changes = await restoreTeamProductMeta(record, index);
+          if (!current()) throw new Error("Taslak değişti. Meta sürüm listesini yeniden açın.");
+          const saved = await patchTeamProductSeo(sku, revision, changes, true);
+          void flushTeamProductSeo().catch(console.warn);
+          await this.applySharedSeoResult(detail, saved);
+          await this.reload();
+        } else await this.applyProductEdit(await api.restoreMetaVersion(sku, index));
         this.toast("Önceki meta geri yüklendi", "ok");
       } catch (e) {
         this.toast(String(e), "error");
@@ -944,9 +1289,28 @@ export const useStore = defineStore("app", {
     },
 
     async restoreDetailsVersion(index: number) {
-      if (!this.selectedSku) return;
+      const sku = this.selectedSku;
+      const detail = this.detail;
+      if (!sku || !detail || detail.sku !== sku) return;
       try {
-        this.detail = await api.restoreDetailsVersion(this.selectedSku, index);
+        if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+          const sameProduct = () => this.detail === detail && this.selectedSku === sku &&
+            detail.team_seo_scope === teamProductSeoScope();
+          if (!sameProduct()) throw new Error("Ortak ürün taslağını yeniden açın.");
+          if (!await this.flushProductMetaEdits(detail)) return;
+          const revision = detail.seo_revision ?? null;
+          const current = () => sameProduct() && (detail.seo_revision ?? null) === revision;
+          if (!current()) throw new Error("Ortak ürün taslağını yeniden açın.");
+          const record = await getTeamProductSeo(sku);
+          if (!current() || !record || record.revision !== revision) {
+            throw new Error("Taslak değişti. Açıklama sürümlerini yeniden açın.");
+          }
+          const changes = await restoreTeamProductDetails(record, index);
+          if (!current()) throw new Error("Taslak değişti. Açıklama sürümlerini yeniden açın.");
+          const saved = await patchTeamProductSeo(sku, revision, changes, true);
+          void flushTeamProductSeo().catch(console.warn);
+          await this.applySharedSeoResult(detail, saved);
+        } else await this.applyProductEdit(await api.restoreDetailsVersion(sku, index));
         this.toast("Önceki açıklama geri yüklendi", "ok");
       } catch (e) {
         this.toast(String(e), "error");
@@ -954,9 +1318,23 @@ export const useStore = defineStore("app", {
     },
 
     async restoreTechVersion(index: number) {
-      if (!this.selectedSku) return;
+      const sku = this.selectedSku;
+      const detail = this.detail;
+      if (!sku || !detail || detail.sku !== sku) return;
       try {
-        this.detail = await api.restoreTechVersion(this.selectedSku, index);
+        if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+          const revision = detail.seo_revision ?? null;
+          const current = () => this.detail === detail && this.selectedSku === sku &&
+            detail.team_seo_scope === teamProductSeoScope() && (detail.seo_revision ?? null) === revision;
+          if (!current()) throw new Error("Ortak ürün taslağını yeniden açın.");
+          const record = await getTeamProductSeo(sku);
+          if (!current() || !record || record.revision !== revision) throw new Error("Taslak değişti. Teknik sürüm listesini yeniden açın.");
+          const changes = await restoreTeamProductTech(record, index);
+          if (!current()) throw new Error("Taslak değişti. Teknik sürüm listesini yeniden açın.");
+          const saved = await patchTeamProductSeo(sku, revision, changes, true);
+          void flushTeamProductSeo().catch(console.warn);
+          await this.applySharedSeoResult(detail, saved);
+        } else await this.applyProductEdit(await api.restoreTechVersion(sku, index));
         this.techDropped = [];
         this.toast("Önceki sürüm geri yüklendi", "ok");
       } catch (e) {
@@ -966,8 +1344,12 @@ export const useStore = defineStore("app", {
 
     async toggleTechDone() {
       if (!this.selectedSku || !this.detail) return;
-      const next = await api.markTechDone(this.selectedSku);
-      this.detail.tech_status = next;
+      const detail = this.detail;
+      const next = detail.tech_status === "done" ? "pending" : "done";
+      if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+        if (!await this.saveSharedSeo(detail, { tech_status: next })) return;
+        detail.tech_status = next;
+      } else detail.tech_status = await api.markTechDone(this.selectedSku);
       await this.reload();
     },
 
@@ -986,6 +1368,7 @@ export const useStore = defineStore("app", {
 
     async runResearch(seed?: string) {
       if (!this.selectedSku || this.researching) return;
+      if (this.needsSharedIntegration()) return;
       this.researching = true;
       try {
         this.research = await api.researchSeo(this.selectedSku, seed);
@@ -1012,6 +1395,12 @@ export const useStore = defineStore("app", {
       if (this.syncing) return;
       this.syncing = true;
       try {
+        if (teamUser.value && teamWorkspace.value) {
+          await this.refreshProductsSource();
+          if (this.productCatalogRevision === null) throw new Error("Bu çalışma alanında ortak katalog henüz yayımlanmadı.");
+          this.toast(`Ortak katalog · ${this.allRows.length} etkin ürün`, "ok");
+          return;
+        }
         this.lastSync = await api.syncFeed();
         this.showSummary = true;
         await this.reload();
@@ -1031,20 +1420,66 @@ export const useStore = defineStore("app", {
       }
     },
 
-    async saveDraft(title: string, descriptions: string, searchKeywords: string) {
-      if (!this.selectedSku) return;
-      await api.saveMetaDraft(this.selectedSku, title, descriptions, searchKeywords);
+    scheduleProductMetaEdits(detail: ProductDetail, changes: ProductMetaEdits) {
+      const pending = metaAutosaves.get(detail) ?? { changes: {} };
+      metaAutosaves.set(detail, pending);
+      Object.assign(pending.changes, changes);
+      window.clearTimeout(pending.timer);
+      pending.timer = window.setTimeout(async () => {
+        if (!await this.flushProductMetaEdits(detail)) return;
+        await this.reload().catch((error) => this.toast(String(error), "error"));
+      }, 600);
     },
 
-    async saveKeyword(kw: string) {
-      if (!this.selectedSku) return;
-      await api.setTargetKeyword(this.selectedSku, kw);
+    async flushProductMetaEdits(detail: ProductDetail): Promise<boolean> {
+      const pending = metaAutosaves.get(detail);
+      if (!pending) return true;
+      window.clearTimeout(pending.timer);
+      pending.timer = undefined;
+      const save = async (previous: boolean) => {
+        const changes = pending.changes;
+        if (!Object.keys(changes).length) return previous;
+        pending.changes = {};
+        try {
+          if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+            if (!await this.saveSharedSeo(detail, changes, true)) {
+              pending.changes = { ...changes, ...pending.changes };
+              return false;
+            }
+          } else {
+            if (changes.draft_title !== undefined || changes.draft_descriptions !== undefined || changes.draft_search_keywords !== undefined) {
+              await api.saveMetaDraft(detail.sku,
+                changes.draft_title ?? detail.draft_title ?? detail.title ?? "",
+                changes.draft_descriptions ?? detail.draft_descriptions ?? detail.descriptions ?? "",
+                changes.draft_search_keywords ?? detail.draft_search_keywords ?? detail.search_keywords ?? "");
+            }
+            if (changes.target_keyword !== undefined) await api.setTargetKeyword(detail.sku, changes.target_keyword);
+          }
+          Object.assign(detail, changes);
+          return true;
+        } catch (error) {
+          pending.changes = { ...changes, ...pending.changes };
+          this.toast(String(error), "error");
+          return false;
+        }
+      };
+      const saving = (pending.saving ?? Promise.resolve(true)).then(save);
+      pending.saving = saving;
+      const saved = await saving;
+      if (pending.saving === saving) pending.saving = undefined;
+      return saved;
     },
 
     async toggleMetaDone() {
-      if (!this.selectedSku || !this.detail) return;
-      const next = await api.markMetaDone(this.selectedSku);
-      this.detail.meta_status = next;
+      if (!this.selectedSku || !this.detail || this.generating) return;
+      const detail = this.detail;
+      if (!await this.flushProductMetaEdits(detail) || this.detail !== detail) return;
+      const shared = Boolean(detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value);
+      const next = (!shared || detail.seo_revision != null) && detail.meta_status === "done" ? "pending" : "done";
+      if (shared) {
+        if (!await this.saveSharedSeo(detail, { meta_status: next }, true)) return;
+        detail.meta_status = next;
+      } else detail.meta_status = await api.markMetaDone(this.selectedSku);
       await this.reload();
     },
 
@@ -1059,9 +1494,16 @@ export const useStore = defineStore("app", {
 
     /** Seans durumunu okur (açılışta ve her eylemden sonra). */
     async loadSession() {
+      const source = todaySource();
+      if (source === "") return;
       try {
-        this.session = await api.getFocusState();
-        this.sessionCanStart = await api.hasLockableItem();
+        const [session, canStart] = await Promise.all([
+          api.getFocusState(source, source ? this.today?.items ?? [] : undefined),
+          api.hasLockableItem(source, source ? this.today?.items ?? [] : undefined),
+        ]);
+        if (source !== todaySource() || this.sessionBusy) return;
+        this.session = session;
+        this.sessionCanStart = canStart;
         this.tickSession();
       } catch (e) {
         /* seans yardımcı bir özellik; okunamaması uygulamayı engellemesin */
@@ -1070,8 +1512,14 @@ export const useStore = defineStore("app", {
 
     /** Seansı başlatır ve ilk işi kilitler. */
     async startSession() {
+      const source = todaySource();
+      if (source === "" || this.sessionBusy || (source && !teamTodaySync.value.canEdit)) return;
+      this.sessionBusy = true;
       try {
-        const d = await api.startFocusSession();
+        if (source && !this.today) await this.loadToday();
+        if (source !== todaySource()) return;
+        const d = await api.startFocusSession(source, source ? this.today?.items ?? [] : undefined);
+        if (source !== todaySource()) return;
         // ⚠️ Kilitlenecek iş yoksa arka uç seans AÇMIYOR. Eskiden açıp hemen kapatıyordu ve
         // kullanıcı "Seans bitti · 0 iş" modaliyle karşılaşıyordu — başarısızlık gibi
         // okunuyordu, oysa günün işi bitmiş demek (saha hatası, 2026-08-08).
@@ -1087,6 +1535,8 @@ export const useStore = defineStore("app", {
         this.tickSession();
       } catch (e) {
         this.toast(String(e), "error");
+      } finally {
+        if (source === todaySource()) this.sessionBusy = false;
       }
     },
 
@@ -1112,43 +1562,55 @@ export const useStore = defineStore("app", {
      * ⚠️ "Bitti" Faz K'nin `completeQueueItem`ini çağırıyor — yeni bir "tamamlandı" kavramı
      * YOK. "Atla" ise **yalnızca bu seans için**: kuyrukta kalır, kalıcı karar yazılmaz.
      */
-    async resolveSessionItem(outcome: "done" | "skipped" | "dismissed") {
+    async resolveSessionItem(outcome: "done" | "skipped" | "dismissed", until: string | null = null) {
+      const source = todaySource();
+      const id = this.session?.session_id;
       const it = this.session?.locked;
-      if (!it) return;
+      if (source === "" || !id || !it || this.sessionBusy) return;
+      this.sessionBusy = true;
       try {
         if (outcome === "done") {
-          await api.completeQueueItem(it.kind, it.reference);
-          if (it.kind === "product") void this.loadOutcomes();
+          await this.recordTodayDecision(it.kind as ItemRef["kind"], it.reference, "done", null,
+            it.kind === "product" && it.bucket !== "review");
+        } else if (outcome === "dismissed") {
+          await this.recordTodayDecision(it.kind as ItemRef["kind"], it.reference, until ? "snooze" : "dismiss", until);
         }
-        this.session = await api.resolveFocusItem(outcome);
-        await this.loadToday();
-        // Kuyruk tükendiyse arka uç seansı kapattı; özeti göster.
-        // ⚠️ İkinci koşul emniyet: seans açık ama kilitlenecek iş yoksa çubuk boş asılı
-        // kalırdı. Arka uç normalde bu duruma düşmüyor ama çubuk buna dayanmamalı.
-        if (!this.session.session_id) await this.showSessionSummary("queue_empty");
-        else if (!this.session.locked) await this.endSession("queue_empty");
+        if (source !== todaySource()) return;
+        const session = await api.resolveFocusItem(outcome, source, source ? this.today?.items ?? [] : undefined, id, it.item_id);
+        if (source !== todaySource()) return;
+        this.session = session;
+        if (!session.session_id || !session.locked) {
+          await this.showSessionSummary("queue_empty", source, id);
+        }
+        if (!source) await this.loadToday();
       } catch (e) {
         this.toast(String(e), "error");
+      } finally {
+        if (source === todaySource()) this.sessionBusy = false;
       }
     },
 
     /** Seansı bitirir ve sakin özeti gösterir. */
     async endSession(reason: "time_up" | "stopped" | "queue_empty") {
+      const source = todaySource();
+      const id = this.session?.session_id;
+      if (source === "" || !id || this.sessionBusy) return;
+      this.sessionBusy = true;
       try {
-        const ozet = await api.endFocusSession(reason);
-        this.session = null;
-        this.sessionBreakOffered = false;
-        this.sessionElapsed = 0;
-        this.sessionSummary = ozet;
+        await this.showSessionSummary(reason, source, id);
         await this.loadToday();
       } catch (e) {
         this.toast(String(e), "error");
+      } finally {
+        if (source === todaySource()) this.sessionBusy = false;
       }
     },
 
     /** Arka uç seansı kendi kapattığında (kuyruk tükendi) özeti çeker. */
-    async showSessionSummary(reason: string) {
-      this.sessionSummary = await api.endFocusSession(reason).catch(() => null);
+    async showSessionSummary(reason: string, source: string | undefined, id: number) {
+      const summary = await api.endFocusSession(reason, source, id);
+      if (source !== todaySource()) return;
+      this.sessionSummary = summary;
       this.session = null;
       this.sessionElapsed = 0;
       this.sessionBreakOffered = false;
@@ -1220,16 +1682,50 @@ export const useStore = defineStore("app", {
       }
     },
 
-    /** Bugünün kuyruğunu tazeler. Ek GSC çağrısı YOK — mevcut önbellekten hesaplanıyor. */
-    async loadToday() {
+    resetTodaySource() {
+      todayRequest++;
+      todayInputs = undefined;
+      this.today = null;
+      this.todayBusy = false;
+      this.todayError = "";
+      this.session = null;
+      this.sessionSummary = null;
+      this.sessionCanStart = false;
+      this.sessionBusy = false;
+      this.sessionElapsed = 0;
+      this.sessionBreakOffered = false;
+    },
+
+    /** Ekip ekranı, aynı çalışma alanının önbelleğiyle çevrimdışı da hesaplanır. */
+    async loadToday(reuseInputs = false, refreshDecisions = false) {
+      const source = todaySource();
+      const request = ++todayRequest;
+      this.todayError = "";
+      if (source === "") {
+        this.today = null;
+        this.todayBusy = false;
+        if (!teamRestoring.value) this.todayError = "İş kuyruğu için ekip oturumunu ve çalışma alanını kontrol edin.";
+        return;
+      }
       this.todayBusy = true;
       try {
-        this.today = await api.getTodayQueue();
-        this.sessionCanStart = await api.hasLockableItem();
+        let shared = source && reuseInputs && todayInputs?.focus_scope === source ? todayInputs : undefined;
+        if (source) {
+          shared = shared
+            ? { ...shared, decisions: await refreshTodayDecisions(source, refreshDecisions) }
+            : await loadTeamTodayInputs(source);
+        }
+        const queue = await api.getTodayQueue(shared);
+        if (request !== todayRequest || source !== todaySource()) return;
+        todayInputs = shared;
+        this.today = queue;
+        this.sessionCanStart = queue.items.some((item) => !item.done);
       } catch (e) {
-        this.toast(String(e), "error");
+        if (request === todayRequest && source === todaySource()) {
+          this.todayError = e instanceof Error ? e.message : String(e);
+        }
       } finally {
-        this.todayBusy = false;
+        if (request === todayRequest && source === todaySource()) this.todayBusy = false;
       }
     },
 
@@ -1248,7 +1744,12 @@ export const useStore = defineStore("app", {
       // burada "satır" zaten kartın kendisi.
       if (page === "contacts") {
         this.page = "contacts";
-        await this.openContact(Number(id));
+        await this.openContact(teamTodayMode() ? id : Number(id));
+        return;
+      }
+      const kind = KIND_BY_PAGE[page as Page];
+      if (kind) {
+        await this.openStorePage(kind, Number(id));
         return;
       }
       this.focus = { page, id };
@@ -1263,19 +1764,29 @@ export const useStore = defineStore("app", {
      * ⚠️ Seçim korunuyor ama tazeleniyor: gönderim sonrası liste yeniden yüklendiğinde
      * seçili satır kaybolursa operatör yerini kaybeder.
      */
+    resetStorePagesSource() {
+      storePagesRequest++;
+      this.storePages = [];
+      this.storePage = null;
+      this.storePagesBusy = false;
+    },
+
     async loadStorePages(kind: string) {
+      const request = ++storePagesRequest;
       this.storePagesBusy = true;
       try {
-        this.storePages = await api.listStorePages(kind);
+        const rows = await listTeamStorePages(kind);
+        if (request !== storePagesRequest || this.page !== PAGE_BY_KIND[kind]) return;
+        this.storePages = rows;
         const secili = this.storePage?.remote_id;
         if (secili != null) {
           this.storePage =
             this.storePages.find((r) => r.remote_id === secili) ?? null;
         }
       } catch (e) {
-        this.toast(String(e), "error");
+        if (request === storePagesRequest) this.toast(String(e), "error");
       } finally {
-        this.storePagesBusy = false;
+        if (request === storePagesRequest) this.storePagesBusy = false;
       }
     },
 
@@ -1315,28 +1826,62 @@ export const useStore = defineStore("app", {
 
     // --- Teklif (Faz T) ---
 
+    resetQuoteSource() {
+      quotesRequest++;
+      quoteRequest++;
+      this.quotes = [];
+      this.quote = null;
+      this.quoteSummary = null;
+      this.quotesBusy = false;
+    },
+
     async loadQuotes() {
+      const request = ++quotesRequest;
       this.quotesBusy = true;
       try {
-        this.quotes = await api.listQuotes(this.quoteStatusFilter);
-        this.quoteSummary = await api.quoteSummary();
+        const status = this.quoteStatusFilter;
+        const central = !!teamUser.value;
+        const quotes = central ? await teamQuotes.list() : await api.listQuotes(status);
+        const summary = central ? summarizeTeamQuotes(quotes) : await api.quoteSummary();
+        if (request !== quotesRequest) return;
+        this.quotes = central && status ? quotes.filter((q) => q.status === status) : quotes;
+        this.quoteSummary = summary;
       } catch (e) {
-        this.toast(String(e), "error");
+        if (request === quotesRequest) this.toast(String(e), "error");
       } finally {
-        this.quotesBusy = false;
+        if (request === quotesRequest) this.quotesBusy = false;
       }
     },
 
-    async openQuote(id: number) {
+    async openQuote(id: Quote["id"]) {
+      const request = ++quoteRequest;
       try {
-        this.quote = await api.getQuote(id);
+        const quote = typeof id === "string" ? await teamQuotes.get(id) : await api.getQuote(id);
+        if (request === quoteRequest) this.quote = quote;
       } catch (e) {
-        this.toast(String(e), "error");
+        if (request === quoteRequest) this.toast(String(e), "error");
       }
     },
 
     async createQuote(contactId: number | null, currency: string) {
       try {
+        if (teamUser.value) {
+          const defaults = await api.getQuoteDefaults();
+          const now = new Date();
+          const valid = new Date(now);
+          valid.setDate(valid.getDate() + defaults.valid_days);
+          const id = crypto.randomUUID();
+          await teamQuotes.save({
+            id, no: `T-${now.getFullYear()}-${id.replace(/-/g, "").slice(0, 12).toUpperCase()}`,
+            contact_id: null, contact_name: "", currency, status: "draft", status_label: "Taslak",
+            fx_rate: null, fx_date: null, valid_until: valid.toISOString().slice(0, 10), note: "",
+            close_reason: "", created_at: now.toISOString(), sent_at: null, items: [], subtotal: 0,
+            taxes: [], tax_total: 0, grand_total: 0, margin: null, version_count: 0,
+          }, null);
+          await this.loadQuotes();
+          await this.openQuote(id);
+          return id;
+        }
         const id = await api.createQuote(contactId, currency);
         await this.loadQuotes();
         await this.openQuote(id);
@@ -1347,18 +1892,35 @@ export const useStore = defineStore("app", {
       }
     },
 
-    async saveQuote(q: Parameters<typeof api.saveQuote>[0]) {
+    async saveQuote(q: Omit<Parameters<typeof api.saveQuote>[0], "id" | "contactId"> & {
+      id: Quote["id"]; contactId: ContactId | null; contactName?: string;
+    }) {
       try {
-        await api.saveQuote(q);
+        if (typeof q.id === "string") {
+          const quote = this.quote;
+          if (!quote || quote.id !== q.id || quote.revision == null) return;
+          await teamQuotes.save({
+            ...quote, contact_id: q.contactId,
+            contact_name: q.contactName ?? (quote.contact_id === q.contactId ? quote.contact_name : ""),
+            currency: q.currency, fx_rate: q.fxRate, fx_date: q.fxDate,
+            valid_until: q.validUntil, note: q.note,
+          }, quote.revision);
+        } else {
+          const { contactName: _, ...draft } = q;
+          await api.saveQuote({ ...draft, id: q.id, contactId: typeof q.contactId === "number" ? q.contactId : null });
+        }
         await this.openQuote(q.id);
         await this.loadQuotes();
-        this.toast("Teklif kaydedildi.", "ok");
+        this.toast(typeof q.id === "string" && (teamQuoteQueue.value.pending || teamQuoteQueue.value.conflicts)
+          ? "Teklif bu cihazda kaydedildi. Eşitleme durumunu listeden izleyebilirsiniz."
+          : "Teklif kaydedildi.", "ok");
       } catch (e) {
         this.toast(String(e), "error");
       }
     },
 
-    async deleteQuote(id: number) {
+    async deleteQuote(id: Quote["id"]) {
+      if (typeof id === "string") return;
       try {
         await api.deleteQuote(id);
         if (this.quote?.id === id) this.quote = null;
@@ -1374,7 +1936,15 @@ export const useStore = defineStore("app", {
       const q = this.quote;
       if (!q) return;
       try {
-        if (sku) await api.addQuoteItemFromCatalog(q.id, sku, 1);
+        if (typeof q.id === "string") {
+          if (q.revision == null) return;
+          const item = sku
+            ? await prepareTeamCatalogLine(sku, q.currency, q.fx_rate)
+            : { sku: null, name: name.trim(), qty: 1, unit_price: 0,
+              tax_rate: (await api.getQuoteDefaults()).tax_rate, cost: null };
+          if (!item.name) return;
+          await teamQuotes.save({ ...q, items: [...q.items, { ...item, id: crypto.randomUUID(), net: 0, margin: null }] }, q.revision);
+        } else if (sku) await api.addQuoteItemFromCatalog(q.id, sku, 1);
         else await api.addQuoteItemManual(q.id, name);
         await this.openQuote(q.id);
       } catch (e) {
@@ -1383,7 +1953,7 @@ export const useStore = defineStore("app", {
     },
 
     async updateQuoteLine(
-      itemId: number,
+      itemId: Quote["items"][number]["id"],
       name: string,
       qty: number,
       unitPrice: number,
@@ -1392,18 +1962,23 @@ export const useStore = defineStore("app", {
       const q = this.quote;
       if (!q) return;
       try {
-        await api.updateQuoteItem(itemId, name, qty, unitPrice, taxRate);
+        if (typeof itemId === "string" && q.revision != null) {
+          await teamQuotes.save({ ...q, items: q.items.map((item) => item.id === itemId
+            ? { ...item, name, qty, unit_price: unitPrice, tax_rate: taxRate } : item) }, q.revision);
+        } else if (typeof itemId === "number") await api.updateQuoteItem(itemId, name, qty, unitPrice, taxRate);
         await this.openQuote(q.id);
       } catch (e) {
         this.toast(String(e), "error");
       }
     },
 
-    async deleteQuoteLine(itemId: number) {
+    async deleteQuoteLine(itemId: Quote["items"][number]["id"]) {
       const q = this.quote;
       if (!q) return;
       try {
-        await api.deleteQuoteItem(itemId);
+        if (typeof itemId === "string" && q.revision != null) {
+          await teamQuotes.save({ ...q, items: q.items.filter((item) => item.id !== itemId) }, q.revision);
+        } else if (typeof itemId === "number") await api.deleteQuoteItem(itemId);
         await this.openQuote(q.id);
       } catch (e) {
         this.toast(String(e), "error");
@@ -1415,13 +1990,15 @@ export const useStore = defineStore("app", {
       const q = this.quote;
       if (!q) return;
       try {
-        await api.setQuoteStatus(q.id, status, reason);
+        if (typeof q.id === "string") await teamQuotes.transition(q, status, reason);
+        else await api.setQuoteStatus(q.id, status, reason);
         await this.openQuote(q.id);
         await this.loadQuotes();
         if (q.contact_id) {
           void this.loadContacts();
           if (this.contact?.id === q.contact_id) void this.openContact(q.contact_id);
         }
+        return true;
       } catch (e) {
         this.toast(String(e), "error");
       }
@@ -1429,20 +2006,29 @@ export const useStore = defineStore("app", {
 
     // --- CRM (Faz C) ---
 
+    resetContactsSource() {
+      contactsRequest++;
+      this.contacts = [];
+      this.contactTags = [];
+      this.contactTag = "";
+      this.contactsBusy = false;
+      this.closeContact();
+    },
+
     async loadContacts() {
+      const request = ++contactsRequest;
       this.contactsBusy = true;
       try {
-        this.contacts = await api.listContacts(
-          this.contactSearch,
-          this.contactArchived,
-          this.contactChannel,
-          this.contactTag,
-        );
-        this.contactTags = await api.listContactTags();
+        const rows = await api.listContacts(this.contactSearch, this.contactArchived, this.contactChannel, this.contactTag);
+        if (request !== contactsRequest) return;
+        const tags = await api.listContactTags();
+        if (request !== contactsRequest) return;
+        this.contacts = rows;
+        this.contactTags = tags;
       } catch (e) {
-        this.toast(String(e), "error");
+        if (request === contactsRequest) this.toast(String(e), "error");
       } finally {
-        this.contactsBusy = false;
+        if (request === contactsRequest) this.contactsBusy = false;
       }
     },
 
@@ -1451,26 +2037,32 @@ export const useStore = defineStore("app", {
       void this.loadContacts();
     },
 
-    async openContact(id: number) {
+    async openContact(id: ContactId) {
+      const request = ++contactRequest;
       try {
-        this.contact = await api.getContact(id);
-        this.contactEvents = await api.getContactEvents(id);
-        this.contactProducts = await api.getContactProducts(id);
+        const [contact, events, products] = await Promise.all([
+          api.getContact(id), api.getContactEvents(id), api.getContactProducts(id),
+        ]);
+        if (request !== contactRequest) return;
+        this.contact = contact;
+        this.contactEvents = events;
+        this.contactProducts = products;
       } catch (e) {
-        this.toast(String(e), "error");
+        if (request === contactRequest) this.toast(String(e), "error");
       }
     },
 
     closeContact() {
+      contactRequest++;
       this.contact = null;
       this.contactEvents = [];
       this.contactProducts = [];
     },
 
     /** Etiketleri toptan yazar — ekle/çıkar ayrı değil (ekranla veri ayrışmasın). */
-    async setContactTags(id: number, tags: string[]) {
+    async setContactTags(id: ContactId, tags: string[]) {
       try {
-        await api.setContactTags(id, tags);
+        await api.setContactTags(id, tags, this.contact?.id === id ? this.contact.revision : undefined);
         await this.openContact(id);
         await this.loadContacts();
       } catch (e) {
@@ -1478,19 +2070,19 @@ export const useStore = defineStore("app", {
       }
     },
 
-    async linkContactProduct(id: number, sku: string) {
+    async linkContactProduct(id: ContactId, sku: string) {
       try {
-        await api.linkContactProduct(id, sku);
-        this.contactProducts = await api.getContactProducts(id);
+        await api.linkContactProduct(id, sku, this.contact?.id === id ? this.contact.revision : undefined);
+        await this.openContact(id);
       } catch (e) {
         this.toast(String(e), "error");
       }
     },
 
-    async unlinkContactProduct(id: number, sku: string) {
+    async unlinkContactProduct(id: ContactId, sku: string) {
       try {
-        await api.unlinkContactProduct(id, sku);
-        this.contactProducts = await api.getContactProducts(id);
+        await api.unlinkContactProduct(id, sku, this.contact?.id === id ? this.contact.revision : undefined);
+        await this.openContact(id);
       } catch (e) {
         this.toast(String(e), "error");
       }
@@ -1502,8 +2094,11 @@ export const useStore = defineStore("app", {
         const id = await api.saveContact(c);
         await this.loadContacts();
         await this.openContact(id);
-        void this.loadToday();
-        this.toast("Kişi kaydedildi.", "ok");
+        const progress = typeof id === "string" ? await teamContactProgress(id) : "synced";
+        if (typeof id === "number") void this.loadToday();
+        this.toast(progress === "conflict" ? "Yerel düzenleme korundu. Sunucudaki kayıtla çakışıyor."
+          : progress === "pending" ? "Kişi bu cihazda kaydedildi. Eşitleme bekliyor."
+          : "Kişi kaydedildi.", progress === "conflict" ? "error" : "ok");
         return id;
       } catch (e) {
         this.toast(String(e), "error");
@@ -1511,9 +2106,9 @@ export const useStore = defineStore("app", {
       }
     },
 
-    async archiveContact(id: number, archived: boolean) {
+    async archiveContact(id: ContactId, archived: boolean) {
       try {
-        await api.archiveContact(id, archived);
+        await api.archiveContact(id, archived, this.contact?.id === id ? this.contact.revision : undefined);
         await this.loadContacts();
         if (this.contact?.id === id) await this.openContact(id);
         void this.loadToday();
@@ -1525,16 +2120,18 @@ export const useStore = defineStore("app", {
 
     /** Temas + (varsa) yeni randevu. ⚠️ Kuyruk da tazeleniyor: sonraki adım kuyruğu besliyor. */
     async addContactEvent(
-      contactId: number,
+      contactId: ContactId,
       kind: string,
       note: string,
       nextStepAt: string | null,
       nextStepNote: string | null,
+      revision?: number,
     ) {
       try {
-        await api.addContactEvent(contactId, kind, note, nextStepAt, nextStepNote);
-        await this.openContact(contactId);
-        await this.loadContacts();
+        await api.addContactEvent(contactId, kind, note, nextStepAt, nextStepNote,
+          revision ?? (this.contact?.id === contactId ? this.contact.revision : undefined));
+        if (this.contact?.id === contactId) await this.openContact(contactId);
+        if (this.page === "contacts") await this.loadContacts();
         void this.loadToday();
         this.toast("Temas kaydedildi.", "ok");
       } catch (e) {
@@ -1547,12 +2144,43 @@ export const useStore = defineStore("app", {
       this.focus = null;
     },
 
+    async recordTodayDecision(kind: ItemRef["kind"], reference: string, action: "done" | "dismiss" | "snooze" | "restore", until: string | null = null, recordStoreChange = false) {
+      const source = todaySource();
+      if (source === "") throw new Error("İş kuyruğu için çalışma alanını açın.");
+      if (!source) {
+        if (action === "done") await api.completeQueueItem(kind, reference, recordStoreChange);
+        else if (action === "restore") await api.restoreQueueItem(kind, reference);
+        else await api.dismissQueueItem(kind, reference, until);
+        return;
+      }
+      const shared = todayInputs;
+      if (shared?.focus_scope !== source) throw new Error("İş kuyruğunu yenileyip yeniden deneyin.");
+      await queueTodayDecision(source, shared, kind, reference, action, until, recordStoreChange);
+      if (source !== todaySource()) return;
+      await this.loadToday(true);
+      this.syncTodayDecisions(source);
+    },
+
+    syncTodayDecisions(source: string) {
+      void flushTeamContacts().then(flushTeamToday).then((changed) => {
+        if (!changed || source !== todaySource()) return;
+        void this.loadToday();
+        if (this.page === "contacts") {
+          void this.loadContacts();
+          if (typeof this.contact?.id === "string") void this.openContact(this.contact.id);
+        }
+        if (this.outcomeSummary) void this.loadOutcomes();
+      }).catch(console.warn);
+    },
+
     /** Maddeyi kuyruktan çıkarır. `until` yoksa kalıcı, varsa o tarihe kadar. */
-    async dismissQueueItem(kind: string, reference: string, until: string | null) {
+    async dismissQueueItem(kind: ItemRef["kind"], reference: string, until: string | null) {
+      const source = todaySource();
       try {
-        await api.dismissQueueItem(kind, reference, until);
-        await this.loadToday();
-        this.toast(until ? "Madde yarına ertelendi." : "Madde kuyruktan gizlendi.", "ok");
+        await this.recordTodayDecision(kind, reference, until ? "snooze" : "dismiss", until);
+        if (source !== todaySource()) return;
+        if (!source) await this.loadToday();
+        this.toast(source ? "İş kararı eşitleme kuyruğuna alındı." : until ? "Madde yarına ertelendi." : "Madde kuyruktan gizlendi.", "ok");
       } catch (e) {
         this.toast(String(e), "error");
       }
@@ -1565,9 +2193,15 @@ export const useStore = defineStore("app", {
      * yaramadıysa madde geri gelir. Ürün maddelerinde ayrıca sonuç takibi başlar — Faz Ö'nün
      * "elle yapılan iş ölçülemiyor" boşluğu bu düğmeyle kapanıyor.
      */
-    async completeQueueItem(kind: string, reference: string) {
+    async completeQueueItem(kind: ItemRef["kind"], reference: string, recordStoreChange = false) {
+      const source = todaySource();
       try {
-        await api.completeQueueItem(kind, reference);
+        await this.recordTodayDecision(kind, reference, "done", null, recordStoreChange);
+        if (source !== todaySource()) return;
+        if (source) {
+          this.toast("Yapıldı işareti eşitleme kuyruğuna alındı.", "ok");
+          return;
+        }
         await this.loadToday();
         // Ürün maddelerinde sonuç rozetleri de değişiyor; özet tazelensin.
         if (kind === "product") void this.loadOutcomes();
@@ -1590,10 +2224,11 @@ export const useStore = defineStore("app", {
     },
 
     /** Tek maddenin kararını geri alır ("geri al" bağlantısı). */
-    async restoreQueueItem(kind: string, reference: string) {
+    async restoreQueueItem(kind: ItemRef["kind"], reference: string) {
       try {
-        await api.restoreQueueItem(kind, reference);
-        await this.loadToday();
+        const source = todaySource();
+        await this.recordTodayDecision(kind, reference, "restore");
+        if (!source && source === todaySource()) await this.loadToday();
       } catch (e) {
         this.toast(String(e), "error");
       }
@@ -1602,8 +2237,39 @@ export const useStore = defineStore("app", {
     /** Gizlenen/ertelenen maddelerin tamamını geri getirir. */
     async restoreQueueItems() {
       try {
-        await api.restoreQueueItems();
-        await this.loadToday();
+        const source = todaySource();
+        if (source === "") return;
+        if (!source) {
+          await api.restoreQueueItems();
+          await this.loadToday();
+          return;
+        }
+        const shared = todayInputs;
+        if (shared?.focus_scope !== source) return;
+        const day = todayLocalDay();
+        const hidden = shared.decisions.filter((row) => row.action === "dismiss" || (row.until_day && row.until_day > day));
+        try {
+          for (const row of hidden) {
+            if (teamTodaySync.value.conflicts.some(({ id }) => id === row.id)) continue;
+            await queueTodayDecision(source, shared, row.kind, row.reference, "restore");
+          }
+        } finally {
+          if (source === todaySource()) {
+            await this.loadToday(true);
+            this.syncTodayDecisions(source);
+          }
+        }
+      } catch (e) {
+        this.toast(String(e), "error");
+      }
+    },
+
+    async resolveTodayConflict(id: string) {
+      const source = teamTodayScope();
+      if (!source) return;
+      try {
+        await acceptTodayConflict(source, id);
+        if (source === teamTodayScope()) await this.loadToday();
       } catch (e) {
         this.toast(String(e), "error");
       }
@@ -1611,10 +2277,20 @@ export const useStore = defineStore("app", {
 
     async loadOutcomes() {
       try {
+        const inTeam = teamGscMode();
+        const scope = teamMeasurementScope();
+        const shared = inTeam ? await teamOutcomeInputs() : null;
+        if (inTeam !== teamGscMode() || scope !== teamMeasurementScope()) return;
+        if (inTeam && !shared) {
+          this.outcomeSummary = null;
+          this.outcomeBadges = {};
+          return;
+        }
         const [ozet, rozetler] = await Promise.all([
-          api.getOutcomeSummary(),
-          api.getOutcomeBadges(),
+          api.getOutcomeSummary(shared),
+          api.getOutcomeBadges(shared),
         ]);
+        if (inTeam !== teamGscMode() || scope !== teamMeasurementScope()) return;
         this.outcomeSummary = ozet;
         // ⚠️ Anahtar `sku || url`: içerik rozetlerinin sku'su boş, yalnızca sku ile
         // anahtarlansaydı hepsi tek bir boş anahtara çakışırdı (Faz İ).
@@ -1630,11 +2306,15 @@ export const useStore = defineStore("app", {
       if (this.seedBusy) return;
       this.seedBusy = true;
       try {
-        const r = await api.seedMetricHistory();
-        this.toast(
-          `${r.snapshots_added} dönem eklendi · ${r.events_backfilled} geçmiş gönderim işlendi`,
-          "ok",
-        );
+        const inTeam = teamGscMode();
+        const scope = teamMeasurementScope();
+        const message = inTeam
+          ? await seedTeamGscHistory().then((count) => count
+            ? `${count} GSC dönemi ortak geçmişe eşitlemek için hazırlandı.`
+            : "Ortak GSC geçmişinde kuyruğa alınacak yeni dönem bulunamadı.")
+          : await api.seedMetricHistory().then((result) => `${result.snapshots_added} dönem eklendi · ${result.events_backfilled} geçmiş gönderim işlendi`);
+        if (inTeam !== teamGscMode() || scope !== teamMeasurementScope()) return;
+        this.toast(message, "ok");
         await this.loadOutcomes();
       } catch (e) {
         this.toast(String(e), "error");
@@ -1645,6 +2325,7 @@ export const useStore = defineStore("app", {
 
     async dismissFeedChange() {
       if (!this.selectedSku) return;
+      if (this.needsSharedIntegration()) return;
       await api.markFeedReviewed(this.selectedSku);
       if (this.detail) this.detail.feed_changed = null;
       await this.reload();
@@ -1652,21 +2333,52 @@ export const useStore = defineStore("app", {
     },
 
     async toggleDetailsDone() {
-      if (!this.selectedSku || !this.detail) return;
-      const next = await api.markDetailsDone(this.selectedSku);
-      this.detail.details_status = next;
+      const sku = this.selectedSku;
+      const detail = this.detail;
+      if (!sku || !detail || detail.sku !== sku || this.generatingDetails) return;
+      if (!await this.flushProductMetaEdits(detail) || this.detail !== detail || this.selectedSku !== sku) return;
+      if (detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value) {
+        const next = detail.seo_revision != null && detail.details_status === "done" ? "pending" : "done";
+        if (!await this.saveSharedSeo(detail, { details_status: next }, true)) return;
+        detail.details_status = next;
+      } else detail.details_status = await api.markDetailsDone(sku);
       await this.reload();
     },
 
     async generateMeta() {
-      if (!this.selectedSku || this.generating) return;
-      if (this.detail?.meta_status === "done") {
+      const sku = this.selectedSku;
+      const detail = this.detail;
+      if (!sku || !detail || detail.sku !== sku || this.generating) return;
+      const shared = Boolean(detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value);
+      if (!shared && detail.meta_status === "done") {
         this.toast("Bu ürün zaten tamamlandı işaretli.", "info");
         return;
       }
       this.generating = true;
       try {
-        this.detail = await api.generateMeta(this.selectedSku);
+        if (!await this.flushProductMetaEdits(detail)) return;
+        if (this.detail !== detail || this.selectedSku !== sku) return;
+        if (shared) {
+          const revision = detail.seo_revision ?? null;
+          const current = () => this.detail === detail && this.selectedSku === sku &&
+            detail.team_seo_scope === teamProductSeoScope() && (detail.seo_revision ?? null) === revision;
+          if (!current()) throw new Error("Ortak ürün taslağını yeniden açın.");
+          const record = await readTeamProductSeoForGeneration(sku, revision);
+          if (!current()) throw new Error("Taslak değişti. Meta üretimini yeniden başlatın.");
+          if (record?.draft.meta_status === "done") {
+            this.toast("Bu ürün zaten tamamlandı işaretli.", "info");
+            return;
+          }
+          const changes = await generateTeamProductMeta(detail, record);
+          if (!await this.flushProductMetaEdits(detail)) return;
+          await verifyTeamProductSeoRevision(sku, revision);
+          if (!current()) throw new Error("Taslak değişti. Meta üretimini yeniden başlatın.");
+          const saved = await patchTeamProductSeo(sku, revision, changes, true);
+          void flushTeamProductSeo().catch(console.warn);
+          await this.applySharedSeoResult(detail, saved);
+        } else if (!teamRestoring.value && !teamUser.value && !teamWorkspace.value) {
+          await this.applyProductEdit(await api.generateMeta(sku));
+        } else return;
         await this.reload();
         this.toast("Meta üretildi · alanlar dolduruldu", "ok");
       } catch (e) {
@@ -1677,23 +2389,51 @@ export const useStore = defineStore("app", {
     },
 
     async generateDetails() {
-      if (!this.selectedSku || this.generatingDetails) return;
-      if (this.detail?.details_status === "done") {
+      const sku = this.selectedSku;
+      const detail = this.detail;
+      if (!sku || !detail || detail.sku !== sku || this.generatingDetails) return;
+      const shared = !!(detail.team_seo_scope || teamWorkspace.value || teamUser.value || teamRestoring.value);
+      if (!shared && detail.details_status === "done") {
         this.toast("Bu ürünün açıklaması zaten tamamlandı işaretli.", "info");
         return;
       }
-      if ((this.detail?.image_count ?? 0) < 3) {
+      if (detail.image_count < 3) {
         this.toast(
-          `En az 3 ürün görseli gerekli — şu an ${this.detail?.image_count ?? 0}/4.`,
+          `En az 3 ürün görseli gerekli — şu an ${detail.image_count}/4.`,
           "error",
         );
         return;
       }
       this.generatingDetails = true;
       try {
-        this.detail = await api.generateDetails(this.selectedSku);
+        if (!await this.flushProductMetaEdits(detail)) return;
+        if (this.detail !== detail || this.selectedSku !== sku) return;
+        if (shared) {
+          const sameProduct = () => this.detail === detail && this.selectedSku === sku &&
+            detail.team_seo_scope === teamProductSeoScope();
+          const revision = detail.seo_revision ?? null;
+          const current = () => sameProduct() && (detail.seo_revision ?? null) === revision;
+          if (!current()) throw new Error("Ortak ürün taslağını yeniden açın.");
+          const record = await readTeamProductSeoForGeneration(sku, revision);
+          if (!current()) throw new Error("Üretim sırasında ürün taslağı değişti.");
+          if (record?.draft.details_status === "done") {
+            this.toast("Bu ürünün açıklaması zaten tamamlandı işaretli.", "info");
+            return;
+          }
+          const changes = await generateTeamProductDetails(detail, record);
+          if (!current()) throw new Error("Üretim sırasında ürün taslağı değişti.");
+          if (!await this.flushProductMetaEdits(detail)) return;
+          if (!current()) throw new Error("Üretim sırasında ürün taslağı değişti.");
+          await verifyTeamProductSeoRevision(sku, revision);
+          if (!current()) throw new Error("Üretim sırasında ürün taslağı değişti.");
+          const saved = await patchTeamProductSeo(sku, revision, changes, true);
+          void flushTeamProductSeo().catch(console.warn);
+          await this.applySharedSeoResult(detail, saved);
+        } else if (!teamRestoring.value && !teamUser.value && !teamWorkspace.value) {
+          await this.applyProductEdit(await api.generateDetails(sku));
+        } else return;
         await this.reload();
-        this.toast("Açıklama üretildi · yapı korundu", "ok");
+        this.toast("Açıklama taslağı üretildi", "ok");
       } catch (e) {
         this.toast(String(e), "error");
       } finally {

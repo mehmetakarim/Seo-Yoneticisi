@@ -20,14 +20,17 @@ mod tech;
 // Dış yüzey bölmeden ÖNCEKİYLE aynı: çağıranlar hâlâ `gemini::X` yazıyor, hangi alt
 // modülde durduğunu bilmek zorunda değiller.
 pub use chat::{assistant_system_prompt, chat_stream, session_title, ChatEvent, ChatMessage, CHAT_CHAIN};
-pub use details::{generate_details, generate_details_scratch, has_rewritable_content, optimize_details};
-pub use meta::{generate_meta, GeneratedMeta};
+pub use details::{
+    generate_details, generate_details_scratch, generate_product_details, generate_team_product_details,
+    has_rewritable_content, optimize_details,
+};
+pub use meta::{generate_meta, generate_team_meta, GeneratedMeta};
 pub use store_page::{
-    build_prompt as store_page_prompt, generate_store_page, verify_no_invented_numbers,
-    GeneratedStorePage, StorePageContext,
+    build_prompt as store_page_prompt, generate_store_page, generate_team_store_page,
+    verify_no_invented_numbers, GeneratedStorePage, StorePageContext,
 };
 pub use successor::suggest_successor;
-pub use tech::{assemble_tech_html, structure_tech_specs, TechGroup, TechRow, TechSpecsResult, TECH_GROUPS};
+pub use tech::{assemble_tech_html, structure_team_tech_specs, structure_tech_specs, TechGroup, TechRow, TechSpecsResult, TECH_GROUPS};
 
 /// Kota dolduğunda soldan sağa denenecek modeller.
 /// Kota dolduğunda (veya model emekliye ayrıldığında) soldan sağa denenecek modeller.
@@ -114,6 +117,135 @@ fn classify_error(code: u16, text: &str, model: &str) -> (bool, String) {
 }
 
 const API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+
+pub struct WorkspaceGemini {
+    endpoint: reqwest::Url,
+    workspace: String,
+    publishable_key: String,
+    access_token: String,
+}
+
+impl WorkspaceGemini {
+    pub fn new(
+        project: &str,
+        workspace: String,
+        publishable_key: String,
+        access_token: String,
+    ) -> Result<Self, String> {
+        use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
+
+        let url = reqwest::Url::parse(project).map_err(|_| "Supabase proje adresi geçersiz.")?;
+        let hosted_project = url.host_str()
+            .and_then(|host| host.strip_suffix(".supabase.co"))
+            .is_some_and(|reference| reference.len() == 20 && reference.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        if !hosted_project || url.scheme() != "https" || !url.username().is_empty()
+            || url.password().is_some() || url.port().is_some() || url.path() != "/"
+            || url.query().is_some() || url.fragment().is_some() {
+            return Err("Ortak Gemini için bağlantılı Supabase projesinin standart HTTPS adresi gerekli.".into());
+        }
+        let valid_workspace = workspace.len() == 36 && workspace.bytes().enumerate().all(|(i, c)| {
+            if [8, 13, 18, 23].contains(&i) {
+                c == b'-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        });
+        let valid_publishable_key = publishable_key.strip_prefix("sb_publishable_").is_some_and(|key| {
+            !key.is_empty() && key.len() <= 256 && key.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
+        });
+        if !valid_workspace || !valid_publishable_key || access_token.len() > 8192 {
+            return Err("Ortak Gemini oturum bilgileri geçersiz.".into());
+        }
+
+        // The issuer is a routing guard. Supabase verifies the real session signature and membership.
+        let invalid_session = |_| "Supabase oturumu bu projeyle eşleşmiyor veya süresi dolmuş.".to_string();
+        let header = decode_header(&access_token).map_err(invalid_session)?;
+        let mut validation = Validation::new(header.alg);
+        validation.set_issuer(&[format!("{}/auth/v1", url.origin().ascii_serialization())]);
+        validation.set_audience(&["authenticated"]);
+        validation.set_required_spec_claims(&["iss", "aud", "sub", "exp"]);
+        validation.leeway = 0;
+        validation.insecure_disable_signature_validation();
+        decode::<serde_json::Value>(&access_token, &DecodingKey::from_secret(b""), &validation)
+            .map_err(invalid_session)?;
+
+        let endpoint = url.join("/functions/v1/team-gemini")
+            .map_err(|_| "Supabase işlev adresi geçersiz.")?;
+        Ok(Self { endpoint, workspace, publishable_key, access_token })
+    }
+}
+
+fn valid_workspace_model(model: &str) -> bool {
+    let suffix = model.strip_prefix("gemini-").or_else(|| model.strip_prefix("gemma-"));
+    suffix.is_some_and(|suffix| {
+        let bytes = suffix.as_bytes();
+        let alphanumeric = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+        bytes.len() <= 77
+            && bytes.first().copied().is_some_and(alphanumeric)
+            && bytes.iter().copied().enumerate().all(|(index, byte)| {
+                if byte != b'.' {
+                    return alphanumeric(byte) || byte == b'-';
+                }
+                index > 0 && alphanumeric(bytes[index - 1])
+                    && bytes.get(index + 1).copied().is_some_and(alphanumeric)
+            })
+    })
+}
+
+pub(crate) async fn post_workspace_generate(
+    client: &reqwest::Client,
+    connection: &WorkspaceGemini,
+    model: &str,
+    body: &serde_json::Value,
+    chain: &ChainCtx<'_>,
+) -> Result<String, (bool, String)> {
+    if !valid_workspace_model(model) {
+        return Err((true, format!("{model} ortak Gemini için geçerli bir model adı değil.")));
+    }
+    let response = client.post(connection.endpoint.clone())
+        .header("apikey", &connection.publishable_key)
+        .bearer_auth(&connection.access_token)
+        .json(&serde_json::json!({ "workspace": connection.workspace, "operation": "generate", "model": model, "request": body }))
+        .send().await.map_err(|_| {
+            chain.kaydet(model, 0, false);
+            (false, "Ortak Gemini servisine ulaşılamadı. Bağlantıyı kontrol edip yeniden deneyin.".to_string())
+        })?;
+    let status = response.status();
+    if status.is_success() {
+        chain.kaydet(model, status.as_u16(), true);
+        let data: serde_json::Value = response.json().await
+            .map_err(|_| (false, "Ortak Gemini yanıtı okunamadı.".to_string()))?;
+        return data["candidates"][0]["content"]["parts"][0]["text"].as_str().map(str::to_owned)
+            .ok_or_else(|| (false, "Ortak Gemini metin yanıtı üretmedi.".to_string()));
+    }
+
+    #[derive(Deserialize)]
+    struct FunctionError {
+        error: String,
+        upstream_status: Option<u16>,
+        retry_with_another_model: Option<bool>,
+    }
+    let failure = response.json::<FunctionError>().await.ok();
+    let upstream = failure.as_ref().and_then(|e| e.upstream_status).unwrap_or(0);
+    chain.kaydet(model, upstream, false);
+    let retry = failure.as_ref().and_then(|e| e.retry_with_another_model).unwrap_or(false);
+    let message = match failure.as_ref().map(|e| e.error.as_str()) {
+        Some("sign_in_required") => "Ekip oturumu doğrulanamadı. Sistem → Ekip'ten oturumu kontrol edin.".into(),
+        Some("integration_access_denied") => "Ortak Gemini üretimi için çalışma alanında düzenleme yetkisi gerekli.".into(),
+        Some("gemini_not_configured" | "invalid_configuration") => "Bu çalışma alanı için ortak Gemini bağlantısı hazır değil.".into(),
+        Some("gemini_credentials_rejected") => "Gemini sunucudaki ortak anahtarı reddetti.".into(),
+        Some("gemini_model_not_allowed") => format!("{model} ortak çalışma alanında etkin değil."),
+        Some("gemini_model_unavailable") => format!("{model} Gemini'de artık kullanılabilir değil."),
+        Some("gemini_rate_limited") => format!("{model} Gemini kota sınırına ulaştı."),
+        Some("gemini_prompt_blocked") => "Gemini bu taslağın üretimini engelledi.".into(),
+        Some("gemini_request_rejected") => format!("{model} taslak üretme isteğini kabul etmedi."),
+        Some("request_too_large") => "Bu sayfanın üretim bağlamı çok büyük.".into(),
+        _ if status.as_u16() == 401 => "Ekip oturumu doğrulanamadı. Sistem → Ekip'ten oturumu kontrol edin.".into(),
+        _ if status.as_u16() == 404 => "Ortak Gemini servisi bu Supabase projesinde henüz kurulu değil.".into(),
+        _ => format!("Ortak Gemini isteği tamamlanamadı (HTTP {}).", status.as_u16()),
+    };
+    Err((retry, message))
+}
 
 pub struct ProductContext<'a> {
     pub name: &'a str,
@@ -413,6 +545,27 @@ mod tests {
     //! Zincir ve anahtar doğrulama testleri — modüller arası ortak davranış.
     use super::*;
 
+    #[test]
+    fn workspace_gemini_binds_the_session_to_the_hosted_project() {
+        let project = "https://aaaaaaaaaaaaaaaaaaaa.supabase.co";
+        let workspace = "11111111-1111-4111-8111-111111111111";
+        let claims = serde_json::json!({
+            "iss": format!("{project}/auth/v1"), "aud": "authenticated", "sub": workspace,
+            "exp": jsonwebtoken::get_current_timestamp() + 120,
+        });
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(), &claims,
+            &jsonwebtoken::EncodingKey::from_secret(b"synthetic-test-signing-key"),
+        ).unwrap();
+        let connect = |target: &str| WorkspaceGemini::new(target, workspace.into(), "sb_publishable_test".into(), token.clone());
+        let connection = connect(project).unwrap();
+        assert_eq!(connection.endpoint.as_str(), format!("{project}/functions/v1/team-gemini"));
+        assert!(connect("https://bbbbbbbbbbbbbbbbbbbb.supabase.co").is_err());
+        assert!(connect("https://aaaaaaaaaaaaaaaaaaaa.supabase.co.example.com").is_err());
+        assert!(connect("https://aaaaaaaaaaaaaaaaaaaa.supabase.co:444").is_err());
+        assert!(connect("http://aaaaaaaaaaaaaaaaaaaa.supabase.co").is_err());
+    }
+
     /// Regresyon: 2026-07-28'de `gemini-1.5-flash` emekliye ayrılınca üretim tamamen durdu.
     /// Sebep, 404'ün "kota değil" sayılıp zinciri kırmasıydı — oysa modelin yokluğu tam da
     /// sıradakini denemek için sebep. Bu test o kararı sabitler.
@@ -456,6 +609,19 @@ mod tests {
         // Emekli modeller geri sızmasın
         for dead in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"] {
             assert!(!DEFAULT_MODEL_CHAIN.contains(&dead), "emekli model zincirde: {dead}");
+        }
+    }
+
+    #[test]
+    fn workspace_model_names_accept_release_versions_and_reject_path_parts() {
+        for model in DEFAULT_MODEL_CHAIN {
+            assert!(valid_workspace_model(model), "Ortak Gemini model adı reddedildi: {model}");
+        }
+        for model in [
+            "gemini-.", "gemini-2..5-flash", "gemini-2.-5-flash", "gemini-2.5-flash.",
+            "gemini-flash/other", "gemini-flash%2fother", "gemini-flash?key=y",
+        ] {
+            assert!(!valid_workspace_model(model), "Geçersiz model adı kabul edildi: {model}");
         }
     }
 

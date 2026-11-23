@@ -176,6 +176,7 @@ export const NAV = [
     group: "Asistan",
   },
 
+  { key: "team", label: "Ekip", icon: "users", title: "Ekip çalışma alanı", group: "Sistem" },
   { key: "settings", label: "Ayarlar", icon: "settings", title: "Ayarlar", group: "Sistem" },
 ] as const satisfies readonly NavItem[];
 

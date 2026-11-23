@@ -10,12 +10,13 @@
 use super::*;
 
 /// Ekrana giden mağaza sayfası: mağazadaki hâli + üretilmiş taslak + ölçüm.
-#[derive(Serialize)]
+#[derive(Serialize, serde::Deserialize)]
 pub struct StorePageDetail {
     pub kind: String,
     pub remote_id: i64,
     pub slug: String,
     pub name: String,
+    pub status: i64,
     // Mağazadaki mevcut hâl
     pub page_title: String,
     pub meta_description: String,
@@ -41,6 +42,9 @@ pub struct StorePageDetail {
 /// doldurduğu için analiz koşulmadıysa liste boş gelir. Boş bağlamla üretim yine çalışır
 /// ama zayıf olur — ekran bunu söylemeli.
 fn queries_of(conn: &Connection, slug: &str, limit: usize) -> (Vec<String>, f64, f64) {
+    if slug.is_empty() {
+        return (Vec::new(), 0.0, 0.0);
+    }
     let desen = format!("%/{}", slug.to_lowercase());
     let mut st = match conn.prepare(
         "SELECT query, impressions, clicks FROM query_rows
@@ -110,21 +114,21 @@ fn page_url_of(conn: &Connection, slug: &str) -> Option<String> {
 }
 
 fn read_detail(conn: &Connection, kind: &str, id: i64) -> Result<StorePageDetail, String> {
-    let (slug, name, pt, md, tk, sc, dpt, dmd, dtk, dsc, dm, da, pa): (
+    let (slug, name, pt, md, tk, sc, dpt, dmd, dtk, dsc, dm, da, pa, status): (
         String, String, String, String, String, Option<String>,
         Option<String>, Option<String>, Option<String>, Option<String>,
-        Option<String>, Option<String>, Option<String>,
+        Option<String>, Option<String>, Option<String>, i64,
     ) = conn
         .query_row(
             "SELECT slug, name, page_title, meta_description, target_keyword, showcase_content,
                     draft_page_title, draft_meta_description, draft_target_keyword,
-                    draft_showcase, draft_model, draft_at, pushed_at
+                    draft_showcase, draft_model, draft_at, pushed_at, status
              FROM store_pages WHERE kind = ?1 AND remote_id = ?2",
             params![kind, id],
             |r| {
                 Ok((
                     r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?,
-                    r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?, r.get(12)?,
+                    r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?, r.get(12)?, r.get(13)?,
                 ))
             },
         )
@@ -141,6 +145,7 @@ fn read_detail(conn: &Connection, kind: &str, id: i64) -> Result<StorePageDetail
         remote_id: id,
         slug,
         name,
+        status,
         page_title: pt,
         meta_description: md,
         target_keyword: tk,
@@ -159,6 +164,38 @@ fn read_detail(conn: &Connection, kind: &str, id: i64) -> Result<StorePageDetail
 }
 
 #[tauri::command]
+pub async fn create_store_page(
+    state: State<'_, AppState>,
+    kind: String,
+    draft: ideasoft::NewStorePage,
+) -> Result<StorePageDetail, String> {
+    let (domain, token) = {
+        let conn = state.conn.lock().unwrap();
+        (
+            db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default(),
+            db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default(),
+        )
+    };
+    if domain.trim().is_empty() || token.trim().is_empty() {
+        return Err("Ayarlar'dan IdeaSoft bağlantısını kurun.".into());
+    }
+    let page = ideasoft::create_store_page(&domain, &token, &kind, draft).await?;
+    let conn = state.conn.lock().unwrap();
+    conn.execute(
+        "INSERT INTO store_pages
+           (kind, remote_id, slug, name, page_title, meta_description, meta_keywords,
+            target_keyword, showcase_content, status, fetched_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+         ON CONFLICT(kind, remote_id) DO NOTHING",
+        params![
+            kind, page.id, page.slug, page.name, page.page_title, page.meta_description,
+            page.meta_keywords, page.target_keyword, page.showcase_content, page.status, now_str()
+        ],
+    ).map_err(|e| format!("IdeaSoft kaydı oluşturdu (#{}). Yerel liste için envanteri yenileyin: {e}", page.id))?;
+    read_detail(&conn, &kind, page.id)
+}
+
+#[tauri::command]
 pub fn get_store_page(
     state: State<'_, AppState>,
     kind: String,
@@ -166,6 +203,42 @@ pub fn get_store_page(
 ) -> Result<StorePageDetail, String> {
     let conn = state.conn.lock().unwrap();
     read_detail(&conn, &kind, id)
+}
+
+#[tauri::command]
+pub async fn publish_store_page(
+    state: State<'_, AppState>,
+    kind: String,
+    id: i64,
+    shared: Option<StorePageDetail>,
+) -> Result<(), String> {
+    let (domain, token) = {
+        let conn = state.conn.lock().unwrap();
+        if let Some(ref page) = shared {
+            if page.kind != kind || page.remote_id != id { return Err("Ortak sayfa kimliği uyuşmuyor.".into()); }
+        } else { read_detail(&conn, &kind, id)?; }
+        (
+            db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default(),
+            db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default(),
+        )
+    };
+    if domain.trim().is_empty() || token.trim().is_empty() {
+        return Err("Ayarlar'dan IdeaSoft bağlantısını kurun.".into());
+    }
+    let &(_, resource, _) = ideasoft::STORE_PAGE_KINDS.iter()
+        .find(|(key, _, _)| *key == kind).ok_or("Geçersiz katalog türü.")?;
+    let url = ideasoft::store_page_url(&domain, resource, id)?;
+    ideasoft::publish_store_page(&url, &token).await?;
+    if shared.is_some() { return Ok(()); }
+    let conn = state.conn.lock().unwrap();
+    let updated = conn.execute(
+        "UPDATE store_pages SET status = 1 WHERE kind = ?1 AND remote_id = ?2",
+        params![kind, id],
+    ).map_err(|e| format!("IdeaSoft yayını onayladı. Yerel durumu güncellemek için envanteri yenileyin: {e}"))?;
+    if updated == 0 {
+        return Err("IdeaSoft yayını onayladı. Yerel durumu güncellemek için envanteri yenileyin.".into());
+    }
+    Ok(())
 }
 
 /// Eksik alanı olan ya da GSC'de görünen sayfaları listeler — çalışma listesi.
@@ -176,12 +249,13 @@ pub fn get_store_page(
 pub fn list_store_pages(
     state: State<'_, AppState>,
     kind: String,
+    fetched_at: Option<String>,
 ) -> Result<Vec<StorePageDetail>, String> {
     let conn = state.conn.lock().unwrap();
     let ids: Vec<i64> = conn
-        .prepare("SELECT remote_id FROM store_pages WHERE kind = ?1 AND status = 1")
+        .prepare("SELECT remote_id FROM store_pages WHERE kind = ?1 AND (?2 IS NULL OR fetched_at = ?2)")
         .and_then(|mut st| {
-            st.query_map([&kind], |r| r.get::<_, i64>(0))
+            st.query_map(params![kind, fetched_at], |r| r.get::<_, i64>(0))
                 .map(|it| it.filter_map(|x| x.ok()).collect())
         })
         .unwrap_or_default();
@@ -195,42 +269,82 @@ pub fn list_store_pages(
     Ok(out)
 }
 
+#[derive(serde::Deserialize)]
+pub struct SharedStorePageGeneration {
+    page: StorePageDetail,
+    products: Vec<String>,
+    session: StorePageGeminiSession,
+}
+
+#[derive(serde::Deserialize)]
+struct StorePageGeminiSession {
+    project: String,
+    workspace: String,
+    publishable_key: String,
+    access_token: String,
+}
+
 /// Meta + tanıtım metni üretir ve **taslağa** yazar. Mağazaya dokunmaz.
 #[tauri::command]
 pub async fn generate_store_page(
     state: State<'_, AppState>,
     kind: String,
     id: i64,
+    shared: Option<SharedStorePageGeneration>,
 ) -> Result<StorePageDetail, String> {
-    let (key, zincir, name, existing, queries, products) = {
-        let conn = state.conn.lock().unwrap();
-        let d = read_detail(&conn, &kind, id)?;
-        (
-            db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default(),
-            uretim_zinciri(&conn),
-            d.name.clone(),
-            d.showcase_content.clone(),
-            d.queries.clone(),
-            products_of(&conn, &kind, &d.name, 8),
-        )
+    enum Transport {
+        Local(String),
+        Shared(gemini::WorkspaceGemini),
+    }
+    let (transport, mut page, products) = match shared {
+        Some(SharedStorePageGeneration { page, products, session }) => {
+            if page.kind != kind || page.remote_id != id || id <= 0 || !matches!(kind.as_str(), "category" | "brand" | "blog") {
+                return Err("Ortak sayfa kimliği uyuşmuyor.".into());
+            }
+            if products.len() > 8 {
+                return Err("Ortak sayfa üretim bağlamı geçersiz.".into());
+            }
+            let connection = gemini::WorkspaceGemini::new(&session.project, session.workspace, session.publishable_key, session.access_token)?;
+            (Transport::Shared(connection), page, products)
+        }
+        None => {
+            let conn = state.conn.lock().unwrap();
+            let page = read_detail(&conn, &kind, id)?;
+            let products = products_of(&conn, &kind, &page.name, 8);
+            let key = db::get_setting(&conn, "gemini_api_key")?.unwrap_or_default();
+            (Transport::Local(key), page, products)
+        }
     };
 
     let ctx = gemini::StorePageContext {
         kind: &kind,
-        name: &name,
-        queries: &queries,
+        name: &page.name,
+        queries: &page.queries,
         products: &products,
-        existing: existing.as_deref(),
+        existing: page.showcase_content.as_deref(),
     };
-    let toplayici = CallToplayici::default();
-    let kanal = toplayici.kanal();
-    let chain = gemini::ChainCtx { models: zincir, log: Some(&kanal) };
-    let sonuc = gemini::generate_store_page(&key, &ctx, &chain).await;
+    let models = uretim_zinciri(&state.conn.lock().unwrap());
+    let calls = CallToplayici::default();
+    let log = calls.kanal();
+    let chain = gemini::ChainCtx { models, log: Some(&log) };
+    let result = match &transport {
+        Transport::Local(key) => gemini::generate_store_page(key, &ctx, &chain).await,
+        Transport::Shared(connection) => gemini::generate_team_store_page(connection, &ctx, &chain).await,
+    };
 
     let conn = state.conn.lock().unwrap();
-    toplayici.yaz(&conn, "store_page");
-    let produced = sonuc?;
+    calls.yaz(&conn, "store_page");
+    let produced = result?;
     let v = produced.value;
+    if matches!(transport, Transport::Shared(_)) {
+        page.draft_page_title = v.page_title;
+        page.draft_meta_description = v.meta_description;
+        page.draft_target_keyword = v.target_keyword;
+        page.draft_showcase = v.showcase.join("\n\n");
+        page.draft_model = produced.model;
+        page.draft_at = now_str();
+        return Ok(page);
+    }
     conn.execute(
         "UPDATE store_pages SET draft_page_title = ?3, draft_meta_description = ?4,
                 draft_target_keyword = ?5, draft_showcase = ?6, draft_model = ?7, draft_at = ?8
@@ -282,13 +396,19 @@ pub async fn push_store_page(
     state: State<'_, AppState>,
     kind: String,
     id: i64,
+    shared: Option<StorePageDetail>,
 ) -> Result<StorePageDetail, String> {
-    let (domain, token, d) = {
+    let is_shared = shared.is_some();
+    let (domain, token, mut d) = {
         let conn = state.conn.lock().unwrap();
+        let page = if let Some(page) = shared {
+            if page.kind != kind || page.remote_id != id { return Err("Ortak sayfa kimliği uyuşmuyor.".into()); }
+            page
+        } else { read_detail(&conn, &kind, id)? };
         (
             db::get_setting(&conn, "ideasoft_domain")?.unwrap_or_default(),
             db::get_setting(&conn, "ideasoft_token")?.unwrap_or_default(),
-            read_detail(&conn, &kind, id)?,
+            page,
         )
     };
     if domain.trim().is_empty() || token.trim().is_empty() {
@@ -345,5 +465,12 @@ pub async fn push_store_page(
             serde_json::json!({ "kind": kind, "id": id, "model": d.draft_model }).to_string()
         ],
     );
-    read_detail(&conn, &kind, id)
+    if is_shared {
+        if !d.draft_page_title.is_empty() { d.page_title = d.draft_page_title.clone(); }
+        if !d.draft_meta_description.is_empty() { d.meta_description = d.draft_meta_description.clone(); }
+        if !d.draft_target_keyword.is_empty() { d.target_keyword = d.draft_target_keyword.clone(); }
+        if showcase_alani && !d.draft_showcase.is_empty() { d.showcase_content = Some(d.draft_showcase.clone()); }
+        d.pushed_at = now;
+        Ok(d)
+    } else { read_detail(&conn, &kind, id) }
 }

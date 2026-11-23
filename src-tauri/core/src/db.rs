@@ -97,6 +97,14 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         );
         CREATE INDEX IF NOT EXISTS idx_page_rows_sku ON metric_page_rows(sku);
 
+        CREATE TABLE IF NOT EXISTS team_metric_outbox (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          scope TEXT NOT NULL,
+          snapshot TEXT NOT NULL,
+          page_rows TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_team_metric_outbox_scope ON team_metric_outbox(scope, id);
+
         -- "Ne yaptık, ne zaman". ⚠️ `reaches_store` merkezi kural: yalnızca Google'ın
         -- göreceği değişiklikler (gönderim, canonical) puanlanıyor; yerel "tamamlandı"
         -- işaretleri zaman çizelgesinde bağlam olarak duruyor.
@@ -110,6 +118,15 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           payload_json TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_work_events_sku ON work_events(sku, at);
+
+        CREATE TABLE IF NOT EXISTS gsc_query_comparisons (
+          property TEXT NOT NULL,
+          page TEXT NOT NULL,
+          query TEXT NOT NULL,
+          event_day TEXT NOT NULL,
+          daily_rows TEXT NOT NULL,
+          PRIMARY KEY (property, page, query, event_day)
+        );
 
         -- Bugün kuyruğundan çıkarılan maddeler (Faz K).
         -- ⚠️ Kuyruğun KENDİSİ saklanmıyor (her açılışta hesaplanıyor); kalıcı olan tek şey
@@ -165,6 +182,7 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         -- yakalıyor (meta_done → ideasoft_push farkı 0,6 dk — bu işin değil, gönderimin süresi).
         CREATE TABLE IF NOT EXISTS focus_sessions (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
+          scope TEXT NOT NULL DEFAULT '',
           started_at TEXT NOT NULL,
           ended_at TEXT,
           planned_minutes INTEGER NOT NULL,
@@ -182,6 +200,7 @@ pub fn init(conn: &Connection) -> Result<(), String> {
           kind TEXT NOT NULL,
           ref TEXT NOT NULL,
           bucket TEXT NOT NULL,
+          queue_item TEXT,
           started_at TEXT NOT NULL,
           ended_at TEXT,
           -- 'done' | 'skipped' | 'dismissed' | 'abandoned'
@@ -526,6 +545,13 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     // Mağazanın kendi TL fiyatı (KDV dahil) — TL teklifte kur sormaya gerek bırakmıyor.
     add_column_if_missing(conn, "products", "price_tl", "REAL")?;
     add_column_if_missing(conn, "queue_dismissals", "done_at_analysis", "TEXT")?;
+    add_column_if_missing(conn, "focus_sessions", "scope", "TEXT NOT NULL DEFAULT ''")?;
+    add_column_if_missing(conn, "focus_session_items", "queue_item", "TEXT")?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_focus_sessions_scope ON focus_sessions(scope, ended_at, id)",
+        [],
+    )
+    .map_err(|e| format!("Odak seansı dizini oluşturulamadı: {e}"))?;
     add_column_if_missing(conn, "seo_status", "draft_details", "TEXT")?;
     // Faz 4: SEO araştırma çıktısı (SeoInsights JSON) ürün başına saklanır.
     add_column_if_missing(conn, "seo_status", "research_json", "TEXT")?;

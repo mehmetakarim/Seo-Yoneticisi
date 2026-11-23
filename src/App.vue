@@ -1,6 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch, type Component } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch, type Component } from "vue";
 import { useStore } from "./store";
+import { markTeamDisconnected, probeTeamConnection, resetTeamConnectionStatus, resolveTeamWorkspace, restoreTeamSession, teamAccessIssue, teamClient, teamConnectionRetry, teamProject, teamReachable, teamRestoring, teamSession, teamUser, teamWorkspace } from "./teamConnection";
+import { contactSync, flushTeamContacts, teamContacts } from "./teamContacts";
+import { flushTeamQuotes, resetTeamQuoteIndicators, teamQuoteQueue, teamQuotes } from "./teamQuotes";
+import { refreshTeamCatalog } from "./teamCatalog";
+import { flushTeamProductSeo, teamSeoSync } from "./teamProductSeo";
+import { flushTeamGsc, flushTeamGscSnapshots, teamGscMode, teamMeasurementScope, teamOutcomeInputs } from "./teamGsc";
+import { flushGscReports } from "./teamGscReport";
+import { flushTeamIdeasoftReceipts } from "./teamIdeasoft";
+import { flushTeamStorePages } from "./teamStorePages";
+import { flushTeamToday, teamTodayMode, teamTodayScope, teamTodaySync } from "./teamToday";
+import { KIND_BY_PAGE } from "./catalog";
 import { subOf, titleOf, TOOL_PAGES, type Page } from "./navigation";
 import Sidebar from "./components/Sidebar.vue";
 import ProductsPage from "./components/ProductsPage.vue";
@@ -26,9 +37,13 @@ import FocusSummaryModal from "./components/FocusSummaryModal.vue";
 import UpdateModal from "./components/UpdateModal.vue";
 import SetupWizard from "./components/SetupWizard.vue";
 import StartupCheck from "./components/StartupCheck.vue";
+import TeamSignIn from "./components/TeamSignIn.vue";
 import Icon from "./components/Icon.vue";
 
 const store = useStore();
+const startupReady = ref(false);
+const workspaceOpen = computed(() => startupReady.value && !!teamUser.value && !!teamWorkspace.value && !teamAccessIssue.value);
+watch(workspaceOpen, (open) => { if (open) void store.init(); });
 /**
  * O an gösterilen sayfanın örneği. Kabuk sayfanın ne olduğunu bilmez; yalnızca
  * `focusSearch` gibi bir yeteneği varsa kullanır (ör. ⌘F). Yeni sayfalar da
@@ -54,6 +69,7 @@ const PAGES: Record<Page, Component> = {
   contentgap: ContentGapPage,
   assistant: AssistantPage,
   settings: SettingsPage,
+  team: defineAsyncComponent(() => import("./components/TeamPage.vue")),
 };
 
 const isProducts = computed(() => store.page === "products");
@@ -82,6 +98,7 @@ function fmtSync(): string {
 }
 
 function onKey(e: KeyboardEvent) {
+  if (!workspaceOpen.value) return;
   const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
   const typing = tag === "input" || tag === "textarea";
 
@@ -127,15 +144,190 @@ watch(
   { immediate: true },
 );
 
+function refreshTeamScreen(reuseTodayInputs = false, refreshTodayDecisions = false) {
+  if (store.page === "today") return store.loadToday(reuseTodayInputs, refreshTodayDecisions);
+  if (store.page === "contacts") return store.loadContacts();
+  if (store.page === "quotes") return store.loadQuotes();
+  if (store.page === "products") return store.refreshProductsSource().catch((error) => store.toast(String(error), "error"));
+}
+
+watch([teamTodayMode, teamTodayScope], () => {
+  const scope = teamTodayScope();
+  const team = teamTodayMode();
+  store.resetTodaySource();
+  if (workspaceOpen.value && (store.page === "today" || scope)) {
+    void store.loadToday().then(() => {
+      if (scope === teamTodayScope() && team === teamTodayMode()) return store.loadSession();
+    });
+  }
+});
+
+let todayRealtimeAvailable = false;
+watch([teamClient, teamTodayScope, () => teamSession.value?.user.id], ([client, scope, user], _, cleanup) => {
+  if (!client || !scope || !user) return;
+  const workspace = teamWorkspace.value;
+  let refreshTimer: number | undefined;
+  const refresh = () => {
+    if (scope !== teamTodayScope() || (store.page !== "today" && !store.session?.session_id)) return;
+    window.clearTimeout(refreshTimer);
+    refreshTimer = window.setTimeout(() => void store.loadToday(), 250);
+  };
+  const filter = `workspace_id=eq.${workspace}`;
+  let active = true;
+  const channel = client.channel(`today:${workspace}`)
+    .on("postgres_changes", { event: "*", schema: "public", table: "team_today_decisions", filter }, refresh)
+    .on("postgres_changes", { event: "*", schema: "public", table: "team_contacts", filter }, refresh)
+    .subscribe((status) => {
+      if (!active || scope !== teamTodayScope()) return;
+      todayRealtimeAvailable = status === "SUBSCRIBED";
+      if (todayRealtimeAvailable) refresh();
+    });
+  cleanup(() => {
+    active = false;
+    todayRealtimeAvailable = false;
+    window.clearTimeout(refreshTimer);
+    void client.removeChannel(channel);
+  });
+});
+
+watch([teamProject, teamUser, teamWorkspace], () => {
+  store.resetContactsSource();
+  store.resetQuoteSource();
+  store.resetProductsSource();
+  store.resetStorePagesSource();
+  resetTeamQuoteIndicators();
+  if (startupReady.value && teamSession.value && !teamRestoring.value) resetTeamConnectionStatus();
+  if (!workspaceOpen.value) return;
+  if (store.page !== "today") void refreshTeamScreen();
+  const pageKind = KIND_BY_PAGE[store.page];
+  if (pageKind) void store.loadStorePages(pageKind);
+  if (store.page !== "products") void store.reload().catch((error) => store.toast(String(error), "error"));
+});
+
+async function refreshGscOutcomes() {
+  if (TOOL_PAGES.includes(store.page) || store.outcomeSummary) await store.loadOutcomes();
+  else await teamOutcomeInputs();
+}
+
+watch([teamGscMode, teamMeasurementScope], () => {
+  store.opportunity = null;
+  store.outcomeSummary = null;
+  store.outcomeBadges = {};
+  store.opportunityError = "";
+  if (!workspaceOpen.value) return;
+  void store.loadOpportunityCache();
+  void refreshGscOutcomes().catch(console.warn);
+});
+
+let checkingConnection = false;
+let checkAgain = false;
+let nextCatalogCheck = 0;
+async function checkTeamConnection(force = false) {
+  if (!startupReady.value || !teamUser.value) return;
+  if (checkingConnection) {
+    checkAgain ||= force;
+    return;
+  }
+  checkingConnection = true;
+  try {
+    if (!teamSession.value && navigator.onLine) await restoreTeamSession();
+    if (force && !teamWorkspace.value) await resolveTeamWorkspace();
+    if (!teamUser.value || !teamWorkspace.value) return;
+    const wasReachable = teamReachable.value;
+    const hadAccessIssue = teamAccessIssue.value;
+    const reachable = await probeTeamConnection();
+    if (!reachable) {
+      if (workspaceOpen.value && (force || wasReachable !== false)) await refreshTeamScreen();
+      return;
+    }
+    if (teamAccessIssue.value) return;
+    void flushTeamGsc().catch(console.warn);
+    const measurements = flushTeamGscSnapshots().catch(console.warn);
+    const reports = flushGscReports().catch(console.warn);
+    void flushTeamStorePages().catch(console.warn);
+    void flushTeamIdeasoftReceipts().catch(console.warn);
+    const pendingContacts = contactSync.value.pending;
+    const pendingSeo = teamSeoSync.value.pending;
+    const queued = pendingContacts || teamQuoteQueue.value.pending || pendingSeo
+      || (teamTodaySync.value.scope === teamTodayScope() && teamTodaySync.value.pending);
+    if (!force && wasReachable === true && !hadAccessIssue && !queued && store.page === "today" && !todayRealtimeAvailable) {
+      await store.loadToday(true, true);
+      return;
+    }
+    if (force || wasReachable !== true || hadAccessIssue || queued) {
+      // A queued quote can refer to a customer that must be sent first.
+      for (const flush of [flushTeamContacts, flushTeamQuotes, flushTeamProductSeo]) {
+        try {
+          await flush();
+        } catch (error) {
+          store.toast(String(error), "error");
+        }
+      }
+      const todayChanged = await flushTeamToday().catch((error) => { console.warn(error); return false; });
+      const reuseTodayInputs = wasReachable === true && !hadAccessIssue && !todayChanged &&
+        pendingContacts === contactSync.value.pending && pendingSeo === teamSeoSync.value.pending;
+      await refreshTeamScreen(reuseTodayInputs, force || !todayRealtimeAvailable);
+      if (store.page !== "today" && store.session?.session_id && !reuseTodayInputs) await store.loadToday();
+      if (wasReachable !== true || hadAccessIssue) {
+        const pageKind = KIND_BY_PAGE[store.page];
+        await Promise.allSettled([
+          store.page !== "contacts" ? teamContacts.list("", true, "", "") : undefined,
+          store.page !== "quotes" ? teamQuotes.list() : undefined,
+          refreshTeamCatalog(),
+          measurements.then(refreshGscOutcomes),
+          reports.then(() => store.loadOpportunityCache()),
+          pageKind ? flushTeamStorePages().then(() => store.loadStorePages(pageKind)) : undefined,
+        ]);
+      }
+    } else if (store.page === "products" && Date.now() >= nextCatalogCheck) {
+      nextCatalogCheck = Date.now() + 60_000;
+      await store.refreshOpenCatalog().catch(console.warn);
+    }
+  } finally {
+    checkingConnection = false;
+    if (checkAgain) {
+      checkAgain = false;
+      void checkTeamConnection(true);
+    }
+  }
+}
+
+watch([() => teamSession.value?.user.id, teamWorkspace], () => { void checkTeamConnection(true); });
+watch(teamConnectionRetry, () => { void checkTeamConnection(true); });
+let syncTimer: number | undefined;
+function connected() {
+  void checkTeamConnection(true);
+}
+function disconnected() {
+  markTeamDisconnected();
+  if (workspaceOpen.value) void refreshTeamScreen();
+}
+
 onMounted(() => {
-  store.init();
+  void Promise.allSettled([store.loadAppearance(), restoreTeamSession()]).then(() => {
+    startupReady.value = true;
+    if (navigator.onLine && teamUser.value) connected();
+  });
+  window.addEventListener("online", connected);
+  window.addEventListener("offline", disconnected);
+  window.addEventListener("focus", connected);
+  syncTimer = window.setInterval(() => {
+    if (teamUser.value) void checkTeamConnection();
+  }, 12_000);
   window.addEventListener("keydown", onKey);
 });
-onUnmounted(() => window.removeEventListener("keydown", onKey));
+onUnmounted(() => {
+  window.removeEventListener("online", connected);
+  window.removeEventListener("offline", disconnected);
+  window.removeEventListener("focus", connected);
+  window.clearInterval(syncTimer);
+  window.removeEventListener("keydown", onKey);
+});
 </script>
 
 <template>
-  <div class="app">
+  <TeamSignIn v-if="!workspaceOpen" :checking="!startupReady" />
+  <div v-else class="app">
     <Sidebar />
 
     <main class="main">
@@ -146,7 +338,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
         </div>
         <div v-if="isProducts" class="topbar-right">
           <div class="sync-info">
-            <span class="last">Son güncelleme: {{ fmtSync() }}</span>
+            <span v-if="!teamUser || !teamWorkspace" class="last">Son güncelleme: {{ fmtSync() }}</span>
             <div v-if="store.allRows.length" class="progress" :title="`${store.counts.tamamlandi} ürün tamamlandı`">
               <div class="pbar">
                 <div class="pfill" :style="{ width: donePct + '%' }"></div>
@@ -156,7 +348,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
           </div>
           <button class="sync" :disabled="store.syncing" @click="store.sync()">
             <Icon name="refresh" :size="16" :class="{ spin: store.syncing }" />
-            <span>{{ store.syncing ? "Güncelleniyor…" : "Manuel Güncelle" }}</span>
+            <span>{{ store.syncing ? "Güncelleniyor…" : teamUser && teamWorkspace ? "Kataloğu Yenile" : "Manuel Güncelle" }}</span>
           </button>
         </div>
       </header>

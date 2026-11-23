@@ -105,9 +105,86 @@ fn details_system_prompt() -> &'static str {
      Yalnızca yeniden yazılmış metinlerden oluşan JSON string dizisini döndür."
 }
 
+enum DetailsTransport<'a> {
+    Direct(&'a str),
+    Workspace(&'a WorkspaceGemini),
+}
+
+impl<'a> DetailsTransport<'a> {
+    fn direct(key: &'a str) -> Result<Self, String> {
+        let key = key.trim();
+        if key.is_empty() {
+            return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".into());
+        }
+        Ok(Self::Direct(key))
+    }
+
+    fn client(&self) -> Result<reqwest::Client, String> {
+        let mut client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(90));
+        if matches!(self, Self::Workspace(_)) {
+            client = client.redirect(reqwest::redirect::Policy::none());
+        }
+        client.build().map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))
+    }
+
+    async fn send(
+        &self,
+        client: &reqwest::Client,
+        model: &str,
+        body: &serde_json::Value,
+        chain: &ChainCtx<'_>,
+    ) -> Result<String, (bool, String)> {
+        match self {
+            Self::Direct(key) => post_generate(client, key, model, body, chain).await,
+            Self::Workspace(connection) => post_workspace_generate(client, connection, model, body, chain).await,
+        }
+    }
+}
+
+pub async fn generate_product_details(
+    api_key: &str,
+    ctx: &ProductContext<'_>,
+    details_html: &str,
+    images: &[String],
+    target_keyword: &str,
+    chain: &ChainCtx<'_>,
+) -> Result<Produced<String>, String> {
+    produce_details(&DetailsTransport::direct(api_key)?, ctx, details_html, images, target_keyword, chain).await
+}
+
+pub async fn generate_team_product_details(
+    connection: &WorkspaceGemini,
+    ctx: &ProductContext<'_>,
+    details_html: &str,
+    images: &[String],
+    target_keyword: &str,
+    chain: &ChainCtx<'_>,
+) -> Result<Produced<String>, String> {
+    produce_details(&DetailsTransport::Workspace(connection), ctx, details_html, images, target_keyword, chain).await
+}
+
+async fn produce_details(
+    transport: &DetailsTransport<'_>,
+    ctx: &ProductContext<'_>,
+    details_html: &str,
+    images: &[String],
+    target_keyword: &str,
+    chain: &ChainCtx<'_>,
+) -> Result<Produced<String>, String> {
+    if !has_rewritable_content(details_html) {
+        return generate_details_scratch_with(transport, ctx, images, target_keyword, chain).await;
+    }
+    // Düzenli HTML önce semantik yapıya çevrilir. Gerekirse metin mevcut yapıda güncellenir.
+    let optimized = optimize_details_with(transport, ctx, details_html, target_keyword, chain).await?;
+    match optimized.value {
+        Some(value) => Ok(Produced { value, model: optimized.model }),
+        None => generate_details_with(transport, ctx, details_html, target_keyword, chain).await,
+    }
+}
+
 async fn call_details_model(
     client: &reqwest::Client,
-    api_key: &str,
+    transport: &DetailsTransport<'_>,
     model: &str,
     prompt: &str,
     expected: usize,
@@ -122,7 +199,7 @@ async fn call_details_model(
             "temperature": 0.7
         }
     });
-    let inner = post_generate(client, api_key, model, &body, chain).await?;
+    let inner = transport.send(client, model, &body, chain).await?;
     let arr: Vec<String> = serde_json::from_str(&inner)
         .map_err(|e| (false, format!("Üretilen dizi okunamadı: {e}")))?;
     let _ = expected; // uzunluk uyuşmazlığı çağıran tarafta best-effort ele alınır
@@ -183,10 +260,16 @@ pub async fn generate_details(
     target_keyword: &str,
     chain: &ChainCtx<'_>,
 ) -> Result<Produced<String>, String> {
-    let key = api_key.trim();
-    if key.is_empty() {
-        return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
-    }
+    generate_details_with(&DetailsTransport::direct(api_key)?, ctx, details_html, target_keyword, chain).await
+}
+
+async fn generate_details_with(
+    transport: &DetailsTransport<'_>,
+    ctx: &ProductContext<'_>,
+    details_html: &str,
+    target_keyword: &str,
+    chain: &ChainCtx<'_>,
+) -> Result<Produced<String>, String> {
     let segs = extract_segments(details_html);
     if segs.is_empty() {
         return Err("Bu üründe yeniden yazılacak açıklama metni bulunamadı.".to_string());
@@ -217,14 +300,11 @@ pub async fn generate_details(
         serde_json::to_string(&items).unwrap_or_default(),
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(90))
-        .build()
-        .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
+    let client = transport.client()?;
 
     let mut last_err = String::from("Bilinmeyen hata");
     for model in &chain.models {
-        match call_details_model(&client, key, model, &prompt, segs.len(), chain).await {
+        match call_details_model(&client, transport, model, &prompt, segs.len(), chain).await {
             Ok(mut arr) => {
                 // Uzunluk uyuşmazsa aynı modelle tek retry
                 if arr.len() != segs.len() {
@@ -232,7 +312,7 @@ pub async fn generate_details(
                         "{prompt}\n\nÖNEMLİ: Tam olarak {} parça döndür, ne eksik ne fazla.",
                         segs.len()
                     );
-                    if let Ok(arr2) = call_details_model(&client, key, model, &corr, segs.len(), chain).await
+                    if let Ok(arr2) = call_details_model(&client, transport, model, &corr, segs.len(), chain).await
                     {
                         arr = arr2;
                     }
@@ -266,7 +346,7 @@ pub async fn generate_details(
                 if let Some(d) = density_out_of_range(&result, target_keyword) {
                     let corr =
                         format!("{prompt}\n\nÖNEMLİ DÜZELTME: {}", density_correction(d, target_keyword));
-                    if let Ok(arr2) = call_details_model(&client, key, model, &corr, segs.len(), chain).await {
+                    if let Ok(arr2) = call_details_model(&client, transport, model, &corr, segs.len(), chain).await {
                         if arr2.len() == segs.len() {
                             let result2 = build(&arr2);
                             if extract_img_srcs(&result2) == original_imgs
@@ -310,7 +390,7 @@ fn scratch_system_prompt() -> &'static str {
 
 async fn call_scratch_model(
     client: &reqwest::Client,
-    api_key: &str,
+    transport: &DetailsTransport<'_>,
     model: &str,
     prompt: &str,
     chain: &ChainCtx<'_>,
@@ -331,7 +411,7 @@ async fn call_scratch_model(
             "temperature": 0.7
         }
     });
-    let inner = post_generate(client, api_key, model, &body, chain).await?;
+    let inner = transport.send(client, model, &body, chain).await?;
     let arr: Vec<serde_json::Value> = serde_json::from_str(&inner)
         .map_err(|e| (false, format!("Üretilen dizi okunamadı: {e}")))?;
     Ok(arr
@@ -400,10 +480,16 @@ pub async fn generate_details_scratch(
     target_keyword: &str,
     chain: &ChainCtx<'_>,
 ) -> Result<Produced<String>, String> {
-    let key = api_key.trim();
-    if key.is_empty() {
-        return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
-    }
+    generate_details_scratch_with(&DetailsTransport::direct(api_key)?, ctx, images, target_keyword, chain).await
+}
+
+async fn generate_details_scratch_with(
+    transport: &DetailsTransport<'_>,
+    ctx: &ProductContext<'_>,
+    images: &[String],
+    target_keyword: &str,
+    chain: &ChainCtx<'_>,
+) -> Result<Produced<String>, String> {
     if images.is_empty() {
         return Err("Sıfırdan açıklama için ürün görseli gerekli.".to_string());
     }
@@ -419,14 +505,11 @@ pub async fn generate_details_scratch(
         images.len(),
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(90))
-        .build()
-        .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
+    let client = transport.client()?;
 
     let mut last_err = String::from("Bilinmeyen hata");
     for model in &chain.models {
-        match call_scratch_model(&client, key, model, &prompt, chain).await {
+        match call_scratch_model(&client, transport, model, &prompt, chain).await {
             Ok(mut sections) => {
                 // Bölüm sayısı görselden azsa tek retry (tam sayıyı iste)
                 if sections.len() < images.len() {
@@ -434,7 +517,7 @@ pub async fn generate_details_scratch(
                         "{prompt}\n\nÖNEMLİ: Tam olarak {} bölüm döndür.",
                         images.len()
                     );
-                    if let Ok(s2) = call_scratch_model(&client, key, model, &corr, chain).await {
+                    if let Ok(s2) = call_scratch_model(&client, transport, model, &corr, chain).await {
                         if s2.len() > sections.len() {
                             sections = s2;
                         }
@@ -448,7 +531,7 @@ pub async fn generate_details_scratch(
                 if let Some(d) = density_out_of_range(&result, target_keyword) {
                     let corr =
                         format!("{prompt}\n\nÖNEMLİ DÜZELTME: {}", density_correction(d, target_keyword));
-                    if let Ok(s2) = call_scratch_model(&client, key, model, &corr, chain).await {
+                    if let Ok(s2) = call_scratch_model(&client, transport, model, &corr, chain).await {
                         if !s2.is_empty() {
                             let result2 = assemble_scratch(ctx.name, &s2, images);
                             if density_dist(&result2, target_keyword)
@@ -626,10 +709,16 @@ pub async fn optimize_details(
     target_keyword: &str,
     chain: &ChainCtx<'_>,
 ) -> Result<Produced<Option<String>>, String> {
-    let key = api_key.trim();
-    if key.is_empty() {
-        return Err("Gemini API anahtarı ayarlı değil. Ayarlar'dan ekleyin.".to_string());
-    }
+    optimize_details_with(&DetailsTransport::direct(api_key)?, ctx, details_html, target_keyword, chain).await
+}
+
+async fn optimize_details_with(
+    transport: &DetailsTransport<'_>,
+    ctx: &ProductContext<'_>,
+    details_html: &str,
+    target_keyword: &str,
+    chain: &ChainCtx<'_>,
+) -> Result<Produced<Option<String>>, String> {
     let blocks = match extract_blocks(details_html) {
         Some(b) if !b.is_empty() => b,
         _ => return Ok(Produced { value: None, model: String::new() }),
@@ -659,18 +748,15 @@ pub async fn optimize_details(
         serde_json::to_string(&items).unwrap_or_default(),
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(90))
-        .build()
-        .map_err(|e| format!("HTTP istemcisi oluşturulamadı: {e}"))?;
+    let client = transport.client()?;
 
     let mut last_err = String::from("Bilinmeyen hata");
     for model in &chain.models {
-        match call_scratch_model(&client, key, model, &prompt, chain).await {
+        match call_scratch_model(&client, transport, model, &prompt, chain).await {
             Ok(mut texts) => {
                 if texts.len() != blocks.len() {
                     let corr = format!("{prompt}\n\nÖNEMLİ: Tam olarak {} bölüm döndür.", blocks.len());
-                    if let Ok(t2) = call_scratch_model(&client, key, model, &corr, chain).await {
+                    if let Ok(t2) = call_scratch_model(&client, transport, model, &corr, chain).await {
                         if t2.len() == blocks.len() {
                             texts = t2;
                         }
@@ -687,7 +773,7 @@ pub async fn optimize_details(
                 if let Some(d) = density_out_of_range(&result, target_keyword) {
                     let corr =
                         format!("{prompt}\n\nÖNEMLİ DÜZELTME: {}", density_correction(d, target_keyword));
-                    if let Ok(t2) = call_scratch_model(&client, key, model, &corr, chain).await {
+                    if let Ok(t2) = call_scratch_model(&client, transport, model, &corr, chain).await {
                         if t2.len() == blocks.len() {
                             let result2 = assemble_optimized(ctx.name, &blocks, &t2);
                             if extract_img_srcs(&result2) == orig_imgs

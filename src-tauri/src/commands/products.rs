@@ -27,6 +27,58 @@ pub fn get_last_sync(state: State<'_, AppState>) -> Result<Option<sync::SyncSumm
     sync::last_sync(&conn)
 }
 
+pub(super) const SHARED_PRODUCTS: &str = r#"
+WITH products AS (
+  SELECT json_extract(item.value,'$.sku') AS sku, json_extract(item.value,'$.name') AS name,
+         json_extract(item.value,'$.facts.brand') AS brand,
+         json_extract(item.value,'$.facts.main_category') AS main_category,
+         json_extract(item.value,'$.facts.category') AS category,
+         json_extract(item.value,'$.facts.quantity') AS quantity,
+         json_extract(item.value,'$.facts.url') AS url,
+         json_extract(item.value,'$.facts.img_url') AS img_url,
+         json_extract(item.value,'$.facts.picture2') AS picture2,
+         json_extract(item.value,'$.facts.picture3') AS picture3,
+         json_extract(item.value,'$.facts.picture4') AS picture4,
+         json_extract(item.value,'$.facts.title') AS title,
+         json_extract(item.value,'$.facts.descriptions') AS descriptions,
+         json_extract(item.value,'$.facts.keywords') AS keywords,
+         json_extract(item.value,'$.facts.search_keywords') AS search_keywords,
+         json_extract(item.value,'$.facts.details') AS details,
+         local.feed_fp, local.feed_changed, local.sku IS NULL AS catalog_only
+  FROM json_each(:catalog) item
+  LEFT JOIN main.products local ON local.sku = json_extract(item.value,'$.sku')
+), shared_seo AS (
+  SELECT p.sku, json_extract(cloud.value, '$.revision') AS revision,
+         json_extract(cloud.value, '$.draft.meta_status') AS meta_status,
+         json_extract(cloud.value, '$.draft.details_status') AS details_status,
+         json_extract(cloud.value, '$.draft.target_keyword') AS target_keyword,
+         json_extract(cloud.value, '$.draft.draft_title') AS draft_title,
+         json_extract(cloud.value, '$.draft.draft_descriptions') AS draft_descriptions,
+         json_extract(cloud.value, '$.draft.draft_keywords') AS draft_keywords,
+         json_extract(cloud.value, '$.draft.draft_search_keywords') AS draft_search_keywords,
+         json_extract(cloud.value, '$.draft.draft_details') AS draft_details,
+         json_extract(cloud.value, '$.draft.tech_status') AS tech_status,
+         json_extract(cloud.value, '$.draft.tech_specs_json') AS tech_specs_json,
+         json_extract(cloud.value, '$.draft.image_check_json') AS image_check_json,
+         json_extract(cloud.value, '$.draft.image_check_fp') AS image_check_fp,
+         json_extract(cloud.value, '$.draft.reviewed_fp') AS reviewed_fp,
+         json_extract(cloud.value, '$.draft.reviewed_facts_json') AS reviewed_facts_json,
+         json_extract(cloud.value, '$.draft.ideasoft_pushed_at') AS ideasoft_pushed_at,
+         json_extract(cloud.value, '$.draft.ideasoft_product_id') AS ideasoft_product_id,
+         json_extract(cloud.value, '$.draft.ideasoft_seo_rule') AS ideasoft_seo_rule,
+         json_extract(cloud.value, '$.draft.tech_source_text') AS tech_source_text,
+         json_extract(cloud.value, '$.draft.tech_history_json') AS tech_history_json,
+         json_extract(cloud.value, '$.draft.meta_model') AS meta_model,
+         json_extract(cloud.value, '$.draft.details_model') AS details_model,
+         json_extract(cloud.value, '$.draft.tech_model') AS tech_model,
+         json_extract(cloud.value, '$.draft.meta_history_json') AS meta_history_json,
+         json_extract(cloud.value, '$.draft.details_history_json') AS details_history_json,
+         json_extract(cloud.value, '$.draft.research_json') AS research_json
+  FROM products p
+  LEFT JOIN json_each(:seo) cloud ON json_extract(cloud.value, '$.sku') = p.sku
+)
+"#;
+
 #[tauri::command]
 pub fn list_products(
     state: State<'_, AppState>,
@@ -34,9 +86,19 @@ pub fn list_products(
     search: Option<String>,
 ) -> Result<Vec<ProductRow>, String> {
     let conn = state.conn.lock().unwrap();
-    let mut stmt = conn
-        .prepare(
-            "SELECT p.sku, p.name, p.brand, p.img_url, p.title, p.descriptions, p.details,
+    read_product_rows(&conn, filter, search, None)
+}
+
+#[tauri::command]
+pub fn list_team_products(state: State<'_, AppState>, products: serde_json::Value, seo_records: Option<serde_json::Value>) -> Result<Vec<ProductRow>, String> {
+    let conn = state.conn.lock().unwrap();
+    read_product_rows(&conn, None, None, Some((&products.to_string(), &seo_records.unwrap_or_else(|| serde_json::json!([])).to_string())))
+}
+
+fn read_product_rows(
+    conn: &Connection, filter: Option<String>, search: Option<String>, catalog: Option<(&str, &str)>,
+) -> Result<Vec<ProductRow>, String> {
+    let query = "SELECT p.sku, p.name, p.brand, p.img_url, p.title, p.descriptions, p.details,
                     COALESCE(s.meta_status,'pending'), COALESCE(s.details_status,'pending'),
                     s.target_keyword, s.draft_title, s.draft_descriptions, s.draft_details,
                     COALESCE(s.tech_status,'pending'), s.tech_specs_json,
@@ -44,11 +106,15 @@ pub fn list_products(
                     p.feed_fp, s.reviewed_fp, p.feed_changed,
                     s.ideasoft_pushed_at, s.image_check_json
              FROM products p LEFT JOIN seo_status s ON s.sku = p.sku
-             ORDER BY p.name COLLATE NOCASE",
-        )
+             ORDER BY p.name COLLATE NOCASE";
+    let sql = if catalog.is_some() { format!("{SHARED_PRODUCTS}{}", query.replace("LEFT JOIN seo_status", "LEFT JOIN shared_seo")) } else { query.to_owned() };
+    let mut stmt = conn.prepare(&sql)
         .map_err(|e| format!("Ürün listesi hazırlanamadı: {e}"))?;
+    let bindings: &[(&str, &dyn rusqlite::ToSql)] = if let Some((ref products, ref seo)) = catalog {
+        &[(":catalog", products), (":seo", seo)]
+    } else { &[] };
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(bindings, |row| {
             Ok(RowData {
                 sku: row.get(0)?,
                 name: row.get(1)?,
@@ -167,6 +233,13 @@ pub fn get_product(state: State<'_, AppState>, sku: String) -> Result<ProductDet
 }
 
 #[tauri::command]
+pub fn get_team_product(state: State<'_, AppState>, product: serde_json::Value, seo_records: Option<serde_json::Value>) -> Result<ProductDetail, String> {
+    let sku = product["sku"].as_str().ok_or("Ortak katalog kaydında SKU yok.")?.to_owned();
+    let conn = state.conn.lock().unwrap();
+    read_product_detail(&conn, &sku, Some((&serde_json::json!([product]).to_string(), &seo_records.unwrap_or_else(|| serde_json::json!([])).to_string())))
+}
+
+#[tauri::command]
 pub fn set_target_keyword(state: State<'_, AppState>, sku: String, kw: String) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
     ensure_seo_row(&conn, &sku)?;
@@ -208,7 +281,20 @@ pub fn save_meta_draft(
 #[tauri::command]
 pub fn get_jsonld(state: State<'_, AppState>, sku: String) -> Result<String, String> {
     let conn = state.conn.lock().unwrap();
-    let d = read_detail(&conn, &sku)?;
+    product_jsonld(read_detail(&conn, &sku)?)
+}
+
+#[tauri::command]
+pub fn get_team_jsonld(
+    state: State<'_, AppState>,
+    product: serde_json::Value,
+    seo_records: Vec<serde_json::Value>,
+) -> Result<String, String> {
+    let detail = get_team_product(state, product, Some(serde_json::Value::Array(seo_records)))?;
+    product_jsonld(detail)
+}
+
+fn product_jsonld(d: ProductDetail) -> Result<String, String> {
     let facts = jsonld::ProductFacts {
         name: d.name,
         sku: d.sku,
@@ -364,6 +450,59 @@ pub fn mark_details_done(state: State<'_, AppState>, sku: String) -> Result<Stri
 mod tests {
     use super::*;
     use seo_core::fingerprint::FeedFacts;
+
+    #[test]
+    fn shared_catalog_ignores_local_drafts_and_preserves_database_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        db::init(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO products (sku, name, quantity) VALUES ('A', 'Local A', 1), ('OLD', 'Local only', 1);
+             INSERT INTO seo_status (sku, draft_title, meta_status) VALUES ('A', 'Local draft', 'done');",
+        ).unwrap();
+        let catalog = r#"[
+            {"sku":"A","name":"Shared A","facts":{"quantity":9}},
+            {"sku":"B","name":"Shared B","facts":{"brand":"Test"}}
+        ]"#;
+        let rows = read_product_rows(&conn, None, None, Some((catalog, "[]"))).unwrap();
+        assert_eq!(rows.iter().map(|row| row.sku.as_str()).collect::<Vec<_>>(), ["A", "B"]);
+        assert!(!rows[0].meta_done);
+        let selected = read_product_detail(&conn, "A", Some((catalog, "[]"))).unwrap();
+        assert_eq!(selected.quantity, Some(9));
+        assert_eq!(selected.draft_title, None);
+        assert!(!selected.catalog_only);
+        let seo = r#"[{"sku":"A","revision":2,"draft":{"draft_title":"Cloud title","tech_status":"done"}}]"#;
+        let shared = read_product_detail(&conn, "A", Some((catalog, seo))).unwrap();
+        assert_eq!(shared.seo_revision, Some(2));
+        assert_eq!(shared.draft_title.as_deref(), Some("Cloud title"));
+        let shared_rows = read_product_rows(&conn, None, None, Some((catalog, seo))).unwrap();
+        assert!(!shared_rows[0].meta_done);
+        assert_eq!(read_detail(&conn, "A").unwrap().draft_title.as_deref(), Some("Local draft"));
+        assert!(read_product_detail(&conn, "B", Some((catalog, "[]"))).unwrap().catalog_only);
+        assert_eq!(read_detail(&conn, "A").unwrap().name, "Local A");
+        assert!(read_detail(&conn, "OLD").is_ok());
+        assert!(read_detail(&conn, "B").is_err());
+    }
+
+    #[test]
+    fn shared_jsonld_uses_only_the_shared_catalog_and_shared_draft() {
+        let conn = Connection::open_in_memory().unwrap();
+        db::init(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO products (sku, name) VALUES ('A', 'Local A');
+             INSERT INTO seo_status (sku, draft_descriptions) VALUES ('A', 'Local description');",
+        ).unwrap();
+        let catalog = r#"[{"sku":"A","name":"Shared A","facts":{"url":"https://example.com/a","descriptions":"Catalog description"}}]"#;
+        let detail = read_product_detail(&conn, "A", Some((catalog, "[]"))).unwrap();
+        let code = product_jsonld(detail).unwrap();
+        assert!(code.contains("Catalog description"));
+        assert!(!code.contains("Local description"));
+
+        let seo = r#"[{"sku":"A","revision":1,"draft":{"draft_descriptions":"Shared description","tech_specs_json":[{"group":"Screen","rows":[{"label":"Resolution","value":"1080p"}]}]}}]"#;
+        let detail = read_product_detail(&conn, "A", Some((catalog, seo))).unwrap();
+        let code = product_jsonld(detail).unwrap();
+        assert!(code.contains("Shared description"));
+        assert!(code.contains("1080p"));
+    }
 
     fn facts() -> FeedFacts {
         FeedFacts {

@@ -15,7 +15,7 @@
  */
 import { computed, onMounted, ref, watch } from "vue";
 import { useRowFocus } from "../../useRowFocus";
-import { api } from "../../api";
+import { listTeamStorePages } from "../../teamStorePages";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../../store";
 import ToolShell from "./ToolShell.vue";
@@ -172,7 +172,7 @@ async function envanteriYukle() {
   const m = new Map<string, StorePageDetail>();
   for (const tip of ["category", "brand", "blog"]) {
     try {
-      for (const p of await api.listStorePages(tip)) m.set(p.slug.toLowerCase(), p);
+      for (const p of await listTeamStorePages(tip)) m.set(p.slug.toLowerCase(), p);
     } catch {
       // IdeaSoft kapalı ya da envanter yok — eylem sunulmaz, ekran çalışmaya devam eder.
     }

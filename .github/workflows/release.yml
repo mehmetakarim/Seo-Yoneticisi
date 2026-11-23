@@ -1,97 +1,224 @@
 name: release
 
-# v* etiketiyle (ör. v0.1.0) tetiklenir; macOS (.dmg) + Windows (.exe) derleyip
-# GitHub Release'e yükler.
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Sürüm işlemi
+        type: choice
+        required: true
+        default: verify
+        options:
+          - verify
+          - publish
+
+concurrency:
+  group: ${{ github.ref_type == 'tag' && 'stable-desktop-release' || format('desktop-verification-{0}', github.ref_name) }}
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
-    strategy:
+  verify:
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.mode == 'verify'
+    permissions:
+      contents: read
+    strategy: &desktop-matrix
       fail-fast: false
       matrix:
         include:
           - platform: macos-latest
-            args: '--target universal-apple-darwin'
+            args: '--target universal-apple-darwin -- --locked'
             rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
           - platform: windows-latest
-            args: ''
+            args: '-- --locked'
             rust_targets: ''
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Node kur
-        uses: actions/setup-node@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
         with:
           node-version: lts/*
-
-      - name: Rust kur
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust_targets }}
-
-      # rustls (aws-lc-rs) + jsonwebtoken (ring) Windows'ta assembly için NASM ister
       - name: NASM kur (Windows)
         if: matrix.platform == 'windows-latest'
         uses: ilammy/setup-nasm@v1
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-
       - name: Frontend bağımlılıkları
         run: npm ci
-
-      # Sürüm notları CHANGELOG.md'den gelir. tauri-action bunu HEM GitHub Release gövdesine
-      # HEM de latest.json'ın `notes` alanına yazıyor — yani kullanıcının uygulama içindeki
-      # güncelleme ekranında gördüğü metin buradan çıkıyor. Tek kaynak, iki yerde görünür.
-      - name: Sürüm notlarını CHANGELOG'dan çıkar
-        id: notes
+      - name: Uygulama testleri
+        run: node --test 'tests/*.test.*' 'supabase/functions/*/handler.test.ts'
+      - name: Masaüstü testleri
+        run: cargo test --locked --workspace --lib --manifest-path src-tauri/Cargo.toml
+      - name: Aday paketlerini yerelde oluştur
         shell: bash
         run: |
-          TAG="${{ github.ref_name }}"
-          # "## v0.5.6" satırından bir sonraki "## " başlığına kadar olan bölüm
-          BODY=$(awk -v tag="## $TAG" '
-            $0 == tag { found = 1; next }
-            found && /^## / { exit }
-            found { print }
-          ' CHANGELOG.md)
-          # baştaki/sondaki boş satırları at
-          BODY=$(printf '%s\n' "$BODY" | sed -e '/./,$!d' -e ':a' -e '/^\n*$/{$d;N;ba' -e '}')
-          if [ -z "$BODY" ]; then
-            # Bölüm yoksa release ASLA bu yüzden kırılmasın — anlamlı bir metne düş.
-            echo "::warning::CHANGELOG.md içinde '## $TAG' bölümü bulunamadı"
-            BODY="Bu sürümde yapılan değişiklikler için depodaki CHANGELOG.md dosyasına bakabilirsiniz."
-          fi
-          {
-            echo "body<<CHANGELOG_EOF"
-            echo "$BODY"
-            echo "CHANGELOG_EOF"
-          } >> "$GITHUB_OUTPUT"
-          echo "--- çıkarılan notlar ---"
-          echo "$BODY"
+          node --input-type=module <<'JS'
+          import { writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          const config = { bundle: { createUpdaterArtifacts: false } };
+          writeFileSync(join(process.env.RUNNER_TEMP, "tauri-verification.json"), JSON.stringify(config));
+          JS
+          npm run tauri -- build --ci --no-sign --config "$RUNNER_TEMP/tauri-verification.json" ${{ matrix.args }}
 
-      - name: Derle + Release yükle
+  prepare:
+    if: github.ref_type == 'tag' && (github.event_name == 'push' || inputs.mode == 'publish')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release-id: ${{ steps.draft.outputs.release-id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Kararlı sürüm etiketini ve notlarını doğrula
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' > "$RUNNER_TEMP/published-tags.txt"
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          import assert from "node:assert/strict";
+
+          const tag = process.env.RELEASE_TAG;
+          const stableTag = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+          const match = stableTag.exec(tag);
+          assert(match, "Yalnızca kararlı vX.Y.Z etiketleri yayımlanabilir.");
+          const version = tag.slice(1);
+          const compare = (a, b) => {
+            for (let i = 0; i < 3; i++) {
+              if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
+            }
+            return 0;
+          };
+          const candidate = match.slice(1).map(BigInt);
+          const tags = readFileSync(join(process.env.RUNNER_TEMP, "published-tags.txt"), "utf8").split(/\r?\n/);
+          for (const published of tags) {
+            const parsed = stableTag.exec(published);
+            if (parsed) assert(compare(candidate, parsed.slice(1).map(BigInt)) > 0, `Bu sürüm yayımdaki ${published} etiketinden yeni olmalı.`);
+          }
+
+          const json = (path) => JSON.parse(readFileSync(path, "utf8"));
+          assert.equal(json("package.json").version, version);
+          const lock = json("package-lock.json");
+          assert.equal(lock.version, version);
+          assert.equal(lock.packages[""].version, version);
+          assert.equal(json("src-tauri/tauri.conf.json").version, version);
+          for (const path of ["src-tauri/Cargo.toml", "src-tauri/core/Cargo.toml"]) {
+            assert.equal(/^version = "([^"]+)"/m.exec(readFileSync(path, "utf8"))?.[1], version, path);
+          }
+
+          const lines = readFileSync("CHANGELOG.md", "utf8").split(/\r?\n/);
+          const heading = lines.indexOf(`## ${tag}`);
+          assert(heading >= 0, `CHANGELOG.md içinde ## ${tag} bulunamadı.`);
+          const next = lines.findIndex((line, index) => index > heading && line.startsWith("## "));
+          const notes = lines.slice(heading + 1, next < 0 ? undefined : next).join("\n").trim();
+          assert(notes, "Sürüm notları boş.");
+          writeFileSync(join(process.env.RUNNER_TEMP, "release-notes.md"), notes + "\n");
+          JS
+      - name: Paketler için yayın taslağını hazırla
+        id: draft
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          drafts=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | [.id, .draft, .prerelease] | @tsv")
+          if [[ -z "$drafts" ]]; then
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "SEO Yöneticisi $RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+          release_id=$(gh release view "$RELEASE_TAG" --json databaseId,isDraft,isPrerelease \
+            --jq 'select(.isDraft and (.isPrerelease | not)) | .databaseId')
+          [[ "$release_id" =~ ^[0-9]+$ ]]
+          printf 'release-id=%s\n' "$release_id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    permissions:
+      contents: write
+    strategy: *desktop-matrix
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+      - name: NASM kur (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: ilammy/setup-nasm@v1
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+      - name: Frontend bağımlılıkları
+        run: npm ci
+      - name: Masaüstü testleri
+        run: cargo test --locked --workspace --lib --manifest-path src-tauri/Cargo.toml
+      - name: İmzalı paketleri yayın taslağına yükle
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Faz 10: otomatik güncelleme imzası (kod imzalamadan bağımsız, ücretsiz minisign)
+          GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          releaseId: ${{ needs.prepare.outputs.release-id }}
           tagName: ${{ github.ref_name }}
-          releaseName: 'SEO Yöneticisi ${{ github.ref_name }}'
-          releaseBody: ${{ steps.notes.outputs.body }}
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
-          # latest.json üretilip Release'e eklenir → uygulama buradan güncelleme kontrolü yapar
-          includeUpdaterJson: true
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Paket imzalarını ve güncelleme manifestini doğrula
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_RELEASE_ID: ${{ needs.prepare.outputs.release-id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-assets"
+          gh release view "$RELEASE_TAG" --json databaseId,tagName,isDraft,isPrerelease,body,assets > "$RUNNER_TEMP/release.json"
+          jq -e --arg id "$EXPECTED_RELEASE_ID" \
+            '(.databaseId | tostring) == $id and .isDraft and (.isPrerelease | not)' "$RUNNER_TEMP/release.json" > /dev/null
+          gh release download "$RELEASE_TAG" --dir "$RUNNER_TEMP/release-assets" \
+            --pattern '*.sig' --pattern '*_x64-setup.exe' --pattern '*_x64_*.msi' --pattern '*_universal.app.tar.gz'
+          node --test tests/release-updater-manifest.test.mjs
+          node scripts/release-updater-manifest.mjs --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" \
+            --release "$RUNNER_TEMP/release.json" --assets "$RUNNER_TEMP/release-assets" --output "$RUNNER_TEMP/latest.json"
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/latest.json" --clobber
+      - name: Doğrulanan sürümü yayımla
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_RELEASE_ID: ${{ needs.prepare.outputs.release-id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_id=$(gh release view "$RELEASE_TAG" --json databaseId,isDraft,isPrerelease \
+            --jq 'select(.isDraft and (.isPrerelease | not)) | .databaseId')
+          [[ "$release_id" == "$EXPECTED_RELEASE_ID" ]]
+          gh release edit "$RELEASE_TAG" --draft=false --latest
