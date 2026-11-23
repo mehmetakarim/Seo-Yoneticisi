@@ -60,6 +60,41 @@ jobs:
         run: node --test 'tests/*.test.*' 'supabase/functions/*/handler.test.ts'
       - name: Masaüstü testleri
         run: cargo test --locked --workspace --lib --manifest-path src-tauri/Cargo.toml
+      - name: macOS Anahtar Zinciri oturum testi
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          keychain_paths() { sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//'; }
+          original_default=$(security default-keychain -d user 2>/dev/null | keychain_paths) || true
+          original_search=()
+          while IFS= read -r path; do
+            if [[ -n "$path" ]]; then original_search+=("$path"); fi
+          done < <(security list-keychains -d user | keychain_paths)
+          test_dir=$(mktemp -d "$RUNNER_TEMP/team-session.XXXXXX")
+          test_keychain="$test_dir/session.keychain-db"
+          cleanup() {
+            if [[ ${#original_search[@]} -gt 0 ]]; then
+              security list-keychains -d user -s "${original_search[@]}" || true
+            fi
+            if [[ -n "$original_default" ]]; then
+              security default-keychain -d user -s "$original_default" || true
+            fi
+            security delete-keychain "$test_keychain" || true
+            rm -f "$test_dir/result.log"
+            rmdir "$test_dir" || true
+          }
+          trap cleanup EXIT
+          password=$(openssl rand -hex 24)
+          security create-keychain -p "$password" "$test_keychain"
+          security set-keychain-settings -lut 600 "$test_keychain"
+          security unlock-keychain -p "$password" "$test_keychain"
+          security list-keychains -d user -s "$test_keychain"
+          security default-keychain -d user -s "$test_keychain"
+          test_name=commands::team_auth::macos_session::tests::macos_team_session_keychain_round_trip
+          cargo test --locked -p seo-yoneticisi --lib --manifest-path src-tauri/Cargo.toml \
+            "$test_name" -- --ignored --exact | tee "$test_dir/result.log"
+          grep -F "test $test_name ... ok" "$test_dir/result.log"
       - name: Aday paketlerini yerelde oluştur
         shell: bash
         run: |

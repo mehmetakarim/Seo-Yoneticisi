@@ -26,7 +26,7 @@ pub fn read_team_session(
     #[cfg(target_os = "macos")]
     {
         let _ = state;
-        macos_session::read(&app, &profile)
+        macos_session::read(&app.config().identifier, &profile)
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
@@ -63,7 +63,7 @@ pub fn write_team_session(
     #[cfg(target_os = "macos")]
     {
         let _ = state;
-        macos_session::write(&app, &profile, value.as_deref())
+        macos_session::write(&app.config().identifier, &profile, value.as_deref())
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
@@ -101,21 +101,19 @@ mod macos_session {
         delete_generic_password_options, generic_password, set_generic_password_options,
         PasswordOptions,
     };
-    use tauri::AppHandle;
-
     // Security.framework errSecItemNotFound makes an absent session a normal state.
     const ITEM_NOT_FOUND: i32 = -25_300;
 
-    fn options(app: &AppHandle, profile: &str) -> Result<PasswordOptions, String> {
+    fn options(identifier: &str, profile: &str) -> Result<PasswordOptions, String> {
         validate_profile(profile)?;
-        let service = format!("{}.team-session", app.config().identifier);
+        let service = format!("{identifier}.team-session");
         let mut options = PasswordOptions::new_generic_password(&service, profile);
         options.set_access_synchronized(Some(false));
         Ok(options)
     }
 
-    pub(super) fn read(app: &AppHandle, profile: &str) -> Result<Option<String>, String> {
-        match generic_password(options(app, profile)?) {
+    pub(super) fn read(identifier: &str, profile: &str) -> Result<Option<String>, String> {
+        match generic_password(options(identifier, profile)?) {
             Ok(bytes) => String::from_utf8(bytes)
                 .map(Some)
                 .map_err(|_| "Kayıtlı ekip oturumu çözülemedi.".into()),
@@ -124,8 +122,8 @@ mod macos_session {
         }
     }
 
-    pub(super) fn write(app: &AppHandle, profile: &str, value: Option<&str>) -> Result<bool, String> {
-        let options = options(app, profile)?;
+    pub(super) fn write(identifier: &str, profile: &str, value: Option<&str>) -> Result<bool, String> {
+        let options = options(identifier, profile)?;
         if let Some(value) = value {
             validate_session(value)?;
             set_generic_password_options(value.as_bytes(), options)
@@ -138,6 +136,90 @@ mod macos_session {
             }
         }
         Ok(true)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{read, validate_profile, write};
+        use std::{
+            env,
+            process::{self, Command},
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        const NAMESPACE: &str = "com.kurumsalit.seo-yoneticisi.keychain-test";
+        const PHASE: &str = "SEO_MACOS_KEYCHAIN_TEST_PHASE";
+        const PROFILE: &str = "SEO_MACOS_KEYCHAIN_TEST_PROFILE";
+        const INITIAL: &str = r#"{"refreshToken":"synthetic-initial","workspace":"Test"}"#;
+        const UPDATED: &str = r#"{"refreshToken":"synthetic-updated","workspace":"Deneme alanı"}"#;
+
+        struct Entry {
+            identifier: String,
+            profile: String,
+        }
+
+        impl Entry {
+            fn new(profile: String) -> Self {
+                validate_profile(&profile).unwrap();
+                Self { identifier: format!("{NAMESPACE}.{profile}"), profile }
+            }
+
+            fn run(&self, phase: &str) {
+                let module = module_path!().split_once("::").unwrap().1;
+                let name = format!("{module}::macos_team_session_keychain_round_trip");
+                let output = Command::new(env::current_exe().unwrap())
+                    .args(["--ignored", "--exact", "--nocapture", &name])
+                    .env(PHASE, phase)
+                    .env(PROFILE, &self.profile)
+                    .output()
+                    .unwrap_or_else(|error| panic!("Mac Keychain test process failed to start: {error}"));
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert!(
+                    output.status.success() && stdout.contains(&format!("Keychain phase {phase} complete")),
+                    "Mac Keychain phase {phase} failed:\n{stdout}\n{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+        }
+
+        struct Cleanup(Entry);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = write(&self.0.identifier, &self.0.profile, None);
+            }
+        }
+
+        #[test]
+        #[ignore = "requires an unlocked isolated macOS Keychain"]
+        fn macos_team_session_keychain_round_trip() {
+            if let Ok(phase) = env::var(PHASE) {
+                let entry = Entry::new(env::var(PROFILE).unwrap());
+                let identifier = &entry.identifier;
+                let profile = &entry.profile;
+                match phase.as_str() {
+                    "missing" => assert_eq!(read(identifier, profile).unwrap(), None),
+                    "write" => assert!(write(identifier, profile, Some(INITIAL)).unwrap()),
+                    "read" => assert_eq!(read(identifier, profile).unwrap().as_deref(), Some(INITIAL)),
+                    "update" => assert!(write(identifier, profile, Some(UPDATED)).unwrap()),
+                    "read_updated" => assert_eq!(read(identifier, profile).unwrap().as_deref(), Some(UPDATED)),
+                    "delete" => assert!(write(identifier, profile, None).unwrap()),
+                    _ => panic!("Unexpected Mac Keychain test phase"),
+                }
+                println!("Keychain phase {phase} complete");
+                return;
+            }
+
+            let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+            let hex = format!("{:032x}", (nanos << 32) | u128::from(process::id()));
+            let profile = format!(
+                "{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..]
+            );
+            let entry = Cleanup(Entry::new(profile));
+            // Each operation runs in a fresh process, just as it does after a desktop restart.
+            for phase in ["missing", "write", "read", "update", "read_updated", "delete", "missing", "delete"] {
+                entry.0.run(phase);
+            }
+        }
     }
 }
 
