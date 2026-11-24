@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 const stableTag = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const previewTag = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-preview\.[1-9]\d*$/;
 
 function base64(value, label) {
   const bytes = Buffer.from(value ?? "", "base64");
@@ -48,16 +49,18 @@ function oneAsset(assets, matches, label) {
   return files[0];
 }
 
-export async function buildUpdaterManifest({ repo, tag, release, publicKey, readAsset }) {
-  if (!/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(repo) || !stableTag.test(tag)) {
-    throw new Error("Geçerli bir GitHub deposu ve kararlı sürüm etiketi gerekli.");
+export async function buildUpdaterManifest({ repo, tag, release, publicKey, readAsset, preview = false }) {
+  const versionParts = (preview ? previewTag : stableTag).exec(tag);
+  if (!/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(repo) || !versionParts) {
+    throw new Error(preview ? "Geçerli bir GitHub deposu ve ön sürüm etiketi gerekli."
+      : "Geçerli bir GitHub deposu ve kararlı sürüm etiketi gerekli.");
   }
-  if (release?.tagName !== tag || release.isDraft !== true || release.isPrerelease !== false ||
+  if (release?.tagName !== tag || release.isDraft !== true || release.isPrerelease !== preview ||
       !Array.isArray(release.assets) || typeof release.body !== "string" || !release.body.trim()) {
     throw new Error("Beklenen sürüm için notları olan bir GitHub yayın taslağı gerekli.");
   }
 
-  const version = tag.slice(1);
+  const version = versionParts.slice(1).join(".");
   const msiSuffix = new RegExp(`_${version.replaceAll(".", "\\.")}_x64_[a-z0-9-]+\\.msi$`, "i");
   const msi = oneAsset(release.assets, (name) => msiSuffix.test(name), "Windows MSI");
   const nsis = oneAsset(release.assets, (name) => name.endsWith(`_${version}_x64-setup.exe`), "Windows NSIS");
@@ -108,6 +111,7 @@ async function main() {
       release: { type: "string" },
       assets: { type: "string" },
       output: { type: "string" },
+      preview: { type: "boolean", default: false },
     },
   });
   if (!values.repo || !values.tag || !values.release || !values.assets || !values.output) {
@@ -121,6 +125,7 @@ async function main() {
     repo: values.repo,
     tag: values.tag,
     release,
+    preview: values.preview,
     publicKey: config.plugins.updater.pubkey,
     readAsset: (name) => readFile(join(values.assets, name)),
   });

@@ -113,12 +113,14 @@ jobs:
       contents: write
     outputs:
       release-id: ${{ steps.draft.outputs.release-id }}
+      preview: ${{ steps.version.outputs.preview }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
-      - name: Kararlı sürüm etiketini ve notlarını doğrula
+      - name: Sürüm etiketini ve notlarını doğrula
+        id: version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}
@@ -132,9 +134,11 @@ jobs:
 
           const tag = process.env.RELEASE_TAG;
           const stableTag = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-          const match = stableTag.exec(tag);
-          assert(match, "Yalnızca kararlı vX.Y.Z etiketleri yayımlanabilir.");
-          const version = tag.slice(1);
+          const previewTag = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-preview\.[1-9]\d*$/;
+          const preview = previewTag.test(tag);
+          const match = (preview ? previewTag : stableTag).exec(tag);
+          assert(match, "Sürüm etiketi vX.Y.Z veya vX.Y.Z-preview.N biçiminde olmalı.");
+          const version = match.slice(1).join(".");
           const compare = (a, b) => {
             for (let i = 0; i < 3; i++) {
               if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
@@ -159,27 +163,35 @@ jobs:
           }
 
           const lines = readFileSync("CHANGELOG.md", "utf8").split(/\r?\n/);
-          const heading = lines.indexOf(`## ${tag}`);
-          assert(heading >= 0, `CHANGELOG.md içinde ## ${tag} bulunamadı.`);
+          const heading = lines.indexOf(`## v${version}`);
+          assert(heading >= 0, `CHANGELOG.md içinde ## v${version} bulunamadı.`);
           const next = lines.findIndex((line, index) => index > heading && line.startsWith("## "));
           const notes = lines.slice(heading + 1, next < 0 ? undefined : next).join("\n").trim();
           assert(notes, "Sürüm notları boş.");
           writeFileSync(join(process.env.RUNNER_TEMP, "release-notes.md"), notes + "\n");
+          writeFileSync(process.env.GITHUB_OUTPUT, `preview=${preview}\n`, { flag: "a" });
           JS
       - name: Paketler için yayın taslağını hazırla
         id: draft
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+          PREVIEW: ${{ steps.version.outputs.preview }}
           GH_TOKEN: ${{ github.token }}
         run: |
           drafts=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
             --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | [.id, .draft, .prerelease] | @tsv")
           if [[ -z "$drafts" ]]; then
-            gh release create "$RELEASE_TAG" --draft --verify-tag --title "Inside Manager $RELEASE_TAG" \
+            options=()
+            title="Inside Manager $RELEASE_TAG"
+            if [[ "$PREVIEW" == true ]]; then
+              options+=(--prerelease --latest=false)
+              title="Inside Manager ${RELEASE_TAG%%-preview.*} Ön Sürüm"
+            fi
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "$title" "${options[@]}" \
               --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
           release_id=$(gh release view "$RELEASE_TAG" --json databaseId,isDraft,isPrerelease \
-            --jq 'select(.isDraft and (.isPrerelease | not)) | .databaseId')
+            --jq "select(.isDraft and .isPrerelease == $PREVIEW) | .databaseId")
           [[ "$release_id" =~ ^[0-9]+$ ]]
           printf 'release-id=%s\n' "$release_id" >> "$GITHUB_OUTPUT"
 
@@ -205,6 +217,9 @@ jobs:
           workspaces: './src-tauri -> target'
       - name: Frontend bağımlılıkları
         run: npm ci
+      - name: Ön sürüm uygulama testleri
+        if: needs.prepare.outputs.preview == 'true'
+        run: node --test 'tests/*.test.*' 'supabase/functions/*/handler.test.ts'
       - name: Masaüstü testleri
         run: cargo test --locked --workspace --lib --manifest-path src-tauri/Cargo.toml
       - name: İmzalı paketleri yayın taslağına yükle
@@ -217,7 +232,7 @@ jobs:
           releaseId: ${{ needs.prepare.outputs.release-id }}
           tagName: ${{ github.ref_name }}
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ needs.prepare.outputs.preview }}
           includeUpdaterJson: false
           args: ${{ matrix.args }}
 
@@ -226,6 +241,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      EXPECTED_RELEASE_ID: ${{ needs.prepare.outputs.release-id }}
+      PREVIEW: ${{ needs.prepare.outputs.preview }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -233,27 +252,31 @@ jobs:
           node-version: lts/*
       - name: Paket imzalarını ve güncelleme manifestini doğrula
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
-          EXPECTED_RELEASE_ID: ${{ needs.prepare.outputs.release-id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/release-assets"
           gh release view "$RELEASE_TAG" --json databaseId,tagName,isDraft,isPrerelease,body,assets > "$RUNNER_TEMP/release.json"
-          jq -e --arg id "$EXPECTED_RELEASE_ID" \
-            '(.databaseId | tostring) == $id and .isDraft and (.isPrerelease | not)' "$RUNNER_TEMP/release.json" > /dev/null
+          jq -e --arg id "$EXPECTED_RELEASE_ID" --argjson preview "$PREVIEW" \
+            '(.databaseId | tostring) == $id and .isDraft and .isPrerelease == $preview' "$RUNNER_TEMP/release.json" > /dev/null
           gh release download "$RELEASE_TAG" --dir "$RUNNER_TEMP/release-assets" \
             --pattern '*.sig' --pattern '*_x64-setup.exe' --pattern '*_x64_*.msi' --pattern '*_universal.app.tar.gz'
           node --test tests/release-updater-manifest.test.mjs
+          options=()
+          if [[ "$PREVIEW" == true ]]; then options+=(--preview); fi
           node scripts/release-updater-manifest.mjs --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" \
-            --release "$RUNNER_TEMP/release.json" --assets "$RUNNER_TEMP/release-assets" --output "$RUNNER_TEMP/latest.json"
-          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/latest.json" --clobber
+            --release "$RUNNER_TEMP/release.json" --assets "$RUNNER_TEMP/release-assets" --output "$RUNNER_TEMP/latest.json" "${options[@]}"
+          if [[ "$PREVIEW" == false ]]; then
+            gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/latest.json" --clobber
+          fi
       - name: Doğrulanan sürümü yayımla
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
-          EXPECTED_RELEASE_ID: ${{ needs.prepare.outputs.release-id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           release_id=$(gh release view "$RELEASE_TAG" --json databaseId,isDraft,isPrerelease \
-            --jq 'select(.isDraft and (.isPrerelease | not)) | .databaseId')
+            --jq "select(.isDraft and .isPrerelease == $PREVIEW) | .databaseId")
           [[ "$release_id" == "$EXPECTED_RELEASE_ID" ]]
-          gh release edit "$RELEASE_TAG" --draft=false --latest
+          if [[ "$PREVIEW" == true ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          fi

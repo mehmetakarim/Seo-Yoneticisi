@@ -13,6 +13,10 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.22.3
+- **Renkli ekip durumları.** Müsait yeşil, Meşgul sarı, Toplantıda kırmızı, Molada mavi ve çevrimdışı gri görünür. Üye listesi ve sohbet başlığı aynı durum bilgisini gösterir.
+- **Teklif eşitleme çakışmasını inceleyin.** Bu cihazdaki taslağı güncel ortak sürümle karşılaştırın. Ortak sürümü seçtiğinizde yerel taslak cihazda saklanır.
+
 ## v0.22.2
 - **Inside Manager.** Uygulamanın yeni adı pencere başlığında görünüyor. Sol menü doğrudan çalışma ekranlarıyla başlıyor.
 - **Ekip durumunuzu paylaşın.** Müsait, Meşgul, Toplantıda veya Molada seçeneklerinden birini seçin. Çevrimdışı ekip üyelerinin son görülme tarihini ve saatini görün.

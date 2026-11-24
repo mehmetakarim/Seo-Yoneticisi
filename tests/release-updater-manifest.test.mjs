@@ -109,3 +109,17 @@ test("requires an unpublished stable draft for the exact tag and a single artifa
   input.release.assets.push(duplicate);
   await assert.rejects(buildUpdaterManifest(input), /Windows NSIS/);
 });
+
+test("verifies preview packages only for an explicit prerelease draft", async () => {
+  const input = fixture();
+  const tag = `${input.tag}-preview.1`;
+  const release = { ...input.release, tagName: tag, isPrerelease: true };
+  const manifest = await buildUpdaterManifest({ ...input, tag, release, preview: true });
+  assert.equal(manifest.version, "0.22.0");
+  assert.equal(manifest.platforms["windows-x86_64"].url,
+    `https://github.com/${repo}/releases/download/${tag}/${msi}`);
+  await assert.rejects(buildUpdaterManifest({ ...input, tag, release }), /kararlı sürüm etiketi/);
+  await assert.rejects(buildUpdaterManifest({ ...input, preview: true }), /ön sürüm etiketi/);
+  await assert.rejects(buildUpdaterManifest({ ...input, tag, preview: true,
+    release: { ...release, isPrerelease: false } }), /yayın taslağı/);
+});
