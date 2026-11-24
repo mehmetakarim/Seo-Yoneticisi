@@ -175,7 +175,7 @@ jobs:
           drafts=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
             --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | [.id, .draft, .prerelease] | @tsv")
           if [[ -z "$drafts" ]]; then
-            gh release create "$RELEASE_TAG" --draft --verify-tag --title "SEO Yöneticisi $RELEASE_TAG" \
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "Inside Manager $RELEASE_TAG" \
               --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
           release_id=$(gh release view "$RELEASE_TAG" --json databaseId,isDraft,isPrerelease \

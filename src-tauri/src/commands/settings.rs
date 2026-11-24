@@ -622,7 +622,7 @@ pub fn import_db(state: State<'_, AppState>, path: String) -> Result<(), String>
         })
         .ok()
         .filter(|n| *n > 0)
-        .ok_or("Bu dosya geçerli bir SEO Yöneticisi yedeği değil.")?;
+        .ok_or("Bu dosya geçerli bir Inside Manager yedeği değil.")?;
         {
             let backup = rusqlite::backup::Backup::new(&src, &mut conn)
                 .map_err(|e| format!("Geri yükleme başlatılamadı: {e}"))?;
@@ -640,7 +640,7 @@ fn import_json(conn: &mut Connection, text: &str) -> Result<(), String> {
     let root: Value = serde_json::from_str(text).map_err(|e| format!("JSON çözümlenemedi: {e}"))?;
     let obj = root.as_object().ok_or("Beklenmeyen JSON biçimi.")?;
     if !obj.contains_key("products") {
-        return Err("Bu dosya geçerli bir SEO Yöneticisi yedeği değil.".to_string());
+        return Err("Bu dosya geçerli bir Inside Manager yedeği değil.".to_string());
     }
     let tx = conn.transaction().map_err(|e| format!("İşlem başlatılamadı: {e}"))?;
     tx.execute_batch(

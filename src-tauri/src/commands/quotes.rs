@@ -50,6 +50,7 @@ pub struct Quote {
     pub note: String,
     pub close_reason: String,
     pub created_at: String,
+    pub updated_at: String,
     pub sent_at: Option<String>,
     pub items: Vec<QuoteItem>,
     pub subtotal: f64,
@@ -138,7 +139,7 @@ fn read_quote(conn: &Connection, id: i64) -> Result<Quote, String> {
     conn.query_row(
         "SELECT q.id, q.no, q.contact_id, COALESCE(c.name,''), q.status, q.currency,
                 q.fx_rate, q.fx_date, q.valid_until, q.note, q.close_reason, q.created_at,
-                q.sent_at,
+                q.sent_at, q.updated_at,
                 (SELECT COUNT(*) FROM quote_versions v WHERE v.quote_id = q.id)
          FROM quotes q LEFT JOIN contacts c ON c.id = q.contact_id
          WHERE q.id = ?1",
@@ -160,7 +161,8 @@ fn read_quote(conn: &Connection, id: i64) -> Result<Quote, String> {
                 close_reason: r.get(10)?,
                 created_at: r.get(11)?,
                 sent_at: r.get(12)?,
-                version_count: r.get(13)?,
+                updated_at: r.get(13)?,
+                version_count: r.get(14)?,
                 margin: quote::quote_margin(&lines),
                 items: items.clone(),
                 subtotal,
@@ -180,8 +182,8 @@ pub fn list_quotes(state: State<'_, AppState>, status: String) -> Result<Vec<Quo
     let mut stmt = conn
         .prepare(
             "SELECT id FROM quotes WHERE (?1 = '' OR status = ?1)
-             ORDER BY CASE status WHEN 'draft' THEN 0 WHEN 'sent' THEN 1 ELSE 2 END,
-                      updated_at DESC",
+             ORDER BY max(coalesce(julianday(updated_at), 0), coalesce(julianday(sent_at), 0),
+                          coalesce(julianday(created_at), 0)) DESC, id DESC",
         )
         .map_err(|e| format!("Teklifler okunamadı: {e}"))?;
     let ids: Vec<i64> = stmt
@@ -191,6 +193,10 @@ pub fn list_quotes(state: State<'_, AppState>, status: String) -> Result<Vec<Quo
         .collect();
     drop(stmt);
     Ok(ids.into_iter().filter_map(|id| read_quote(&conn, id).ok()).collect())
+}
+
+fn quote_activity_now() -> String {
+    chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string()
 }
 
 #[tauri::command]
@@ -218,7 +224,7 @@ pub fn create_quote(
         )
         .ok();
     let no = quote::next_quote_no(yil, son.as_deref());
-    let now = now_str();
+    let now = quote_activity_now();
     let gecerlilik = super::setting_i64(&conn, "quote_valid_days", 15);
     let valid_until =
         (chrono::Local::now() + chrono::Duration::days(gecerlilik)).format("%Y-%m-%d").to_string();
@@ -234,9 +240,7 @@ pub fn create_quote(
 
 /// Teklif başlığını günceller (kişi, para birimi, kur, geçerlilik, not).
 ///
-/// ⚠️ Para birimi değişirse satır fiyatları **dokunulmadan** kalıyor: 100 USD'lik satır
-/// TRY'ye geçince 100 TL olmaz. Ekran bunu söylüyor ve satırların yeniden eklenmesini
-/// istiyor — sessizce yanlış bir fiyat üretmektense açıkça uyarmak doğru.
+/// Kaydedilen kalemler teklif para birimindeki tutarları taşır. Para birimi boş teklifte seçilir.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn save_quote(
@@ -250,9 +254,10 @@ pub fn save_quote(
     note: String,
 ) -> Result<(), String> {
     let conn = state.conn.lock().unwrap();
-    conn.execute(
+    let updated = conn.execute(
         "UPDATE quotes SET contact_id=?2, currency=?3, fx_rate=?4, fx_date=?5,
-             valid_until=?6, note=?7, updated_at=?8 WHERE id=?1",
+             valid_until=?6, note=?7, updated_at=?8 WHERE id=?1
+             AND (currency = ?3 OR NOT EXISTS (SELECT 1 FROM quote_items WHERE quote_id = ?1))",
         params![
             id,
             contact_id,
@@ -261,10 +266,11 @@ pub fn save_quote(
             fx_date,
             valid_until,
             note,
-            now_str()
+            quote_activity_now()
         ],
     )
     .map_err(|e| format!("Teklif kaydedilemedi: {e}"))?;
+    if updated == 0 { return Err("Teklif bulunamadı veya kalemleri varken para birimi değiştirilemez.".into()); }
     Ok(())
 }
 
@@ -287,9 +293,27 @@ pub fn add_quote_item_from_catalog(
     quote_id: i64,
     sku: String,
     qty: f64,
+    pricing: Option<CatalogQuotePricing>,
 ) -> Result<(), String> {
-    let conn = state.conn.lock().unwrap();
-    let (currency, fx): (String, Option<f64>) = conn
+    let mut conn = state.conn.lock().unwrap();
+    insert_catalog_quote_item(&mut conn, quote_id, &sku, qty, pricing)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogQuotePricing {
+    currency: String,
+    fx_rate: Option<f64>,
+    fx_date: Option<String>,
+    expected_currency: String,
+    expected_fx_rate: Option<f64>,
+}
+
+fn insert_catalog_quote_item(
+    conn: &mut Connection, quote_id: i64, sku: &str, qty: f64, pricing: Option<CatalogQuotePricing>,
+) -> Result<(), String> {
+    let tx = conn.transaction().map_err(|e| format!("Teklif açılamadı: {e}"))?;
+    let (saved_currency, saved_rate): (String, Option<f64>) = tx
         .query_row(
             "SELECT currency, fx_rate FROM quotes WHERE id = ?1",
             params![quote_id],
@@ -297,22 +321,47 @@ pub fn add_quote_item_from_catalog(
         )
         .map_err(|e| format!("Teklif bulunamadı: {e}"))?;
 
-    let (name, birim, kdv, maliyet) = catalog_quote_line(&conn, &sku, &currency, fx)?;
-    let sira: i64 = conn
+    let (currency, fx) = match &pricing {
+        Some(input) => {
+            if input.expected_currency != saved_currency || input.expected_fx_rate != saved_rate {
+                return Err("Teklifin para birimi veya kuru değişti. Teklifi yeniden açın.".into());
+            }
+            if !matches!(input.currency.as_str(), "TRY" | "USD")
+                || input.fx_rate.is_some_and(|rate| !rate.is_finite() || rate <= 0.0)
+                || (input.currency == "TRY" && (input.fx_rate.is_some() || input.fx_date.is_some()))
+            {
+                return Err("Teklifin para birimini ve USD/TRY kurunu kontrol edin.".into());
+            }
+            (input.currency.as_str(), input.fx_rate)
+        }
+        None => (saved_currency.as_str(), saved_rate),
+    };
+    let (has_items, sira): (bool, i64) = tx
         .query_row(
-            "SELECT COALESCE(MAX(sort),0)+1 FROM quote_items WHERE quote_id = ?1",
+            "SELECT COUNT(*) > 0, COALESCE(MAX(sort),0)+1 FROM quote_items WHERE quote_id = ?1",
             params![quote_id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
-        .unwrap_or(1);
-    conn.execute(
+        .map_err(|e| format!("Teklif kalemleri okunamadı: {e}"))?;
+    if has_items && Currency::parse(currency) != Currency::parse(&saved_currency) {
+        return Err("Teklifte kalem varken para birimi değiştirilemez.".into());
+    }
+    let (name, birim, kdv, maliyet) = catalog_quote_line(&tx, sku, currency, fx)?;
+    tx.execute(
         "INSERT INTO quote_items (quote_id, sku, name, qty, unit_price, tax_rate, cost, sort)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
         params![quote_id, sku, name, qty.max(1.0), birim, kdv, maliyet, sira],
     )
     .map_err(|e| format!("Satır eklenemedi: {e}"))?;
-    dokun(&conn, quote_id);
-    Ok(())
+    if let Some(input) = pricing {
+        tx.execute(
+            "UPDATE quotes SET currency = ?2, fx_rate = ?3, fx_date = ?4, updated_at = ?5 WHERE id = ?1",
+            params![quote_id, input.currency, input.fx_rate, input.fx_date, quote_activity_now()],
+        ).map_err(|e| format!("Teklif kuru kaydedilemedi: {e}"))?;
+    } else {
+        dokun(&tx, quote_id);
+    }
+    tx.commit().map_err(|e| format!("Teklif kalemi kaydedilemedi: {e}"))
 }
 
 type CatalogQuoteLine = (String, f64, f64, Option<f64>);
@@ -365,13 +414,14 @@ fn price_catalog_quote_line(
         fx,
     )
     .ok_or_else(|| {
-        // ⚠️ Sessizce 0 fiyat yazmıyoruz: eksik olan şey söyleniyor.
-        format!(
-            "{name} için {} cinsinden fiyat hesaplanamadı. Ürünün para birimi {} — \
-             USD teklifte kur girmeniz gerekiyor.",
-            currency,
-            ccy.as_deref().unwrap_or("?")
-        )
+        if Currency::parse(currency) == Currency::Usd
+            && ccy.as_deref().is_some_and(|value| !value.trim().eq_ignore_ascii_case("USD"))
+            && fx.is_none_or(|rate| !rate.is_finite() || rate <= 0.0)
+        {
+            format!("{name} ürününü USD teklife eklemek için geçerli bir USD/TRY kuru girin.")
+        } else {
+            format!("{name} için {currency} cinsinden katalog fiyatı hesaplanamadı. Ürünün mağaza fiyatını kontrol edin.")
+        }
     })?;
 
     Ok((name, birim, kdv, maliyet))
@@ -462,7 +512,7 @@ pub fn delete_quote_item(state: State<'_, AppState>, item_id: i64) -> Result<(),
 fn dokun(conn: &Connection, quote_id: i64) {
     let _ = conn.execute(
         "UPDATE quotes SET updated_at = ?2 WHERE id = ?1",
-        params![quote_id, now_str()],
+        params![quote_id, quote_activity_now()],
     );
 }
 
@@ -496,12 +546,12 @@ pub fn set_quote_status(
     let now = now_str();
     let kapandi = matches!(status.as_str(), "won" | "lost" | "expired");
     conn.execute(
-        "UPDATE quotes SET status=?2, updated_at=?3,
+        "UPDATE quotes SET status=?2, updated_at=?6,
              sent_at = CASE WHEN ?2='sent' AND sent_at IS NULL THEN ?3 ELSE sent_at END,
              closed_at = CASE WHEN ?4 THEN ?3 ELSE NULL END,
              close_reason = CASE WHEN ?4 THEN ?5 ELSE '' END
          WHERE id=?1",
-        params![id, status, now, kapandi, reason],
+        params![id, status, now, kapandi, reason, quote_activity_now()],
     )
     .map_err(|e| format!("Durum yazılamadı: {e}"))?;
 
@@ -932,68 +982,30 @@ mod tests {
         conn.last_insert_rowid()
     }
 
-    fn ekle(conn: &Connection, qid: i64, sku: &str) -> Result<(), String> {
-        // Komut gövdesinin veritabanı kısmı; `State` olmadan aynı yolu izliyor.
-        let (currency, fx): (String, Option<f64>) = conn
-            .query_row("SELECT currency, fx_rate FROM quotes WHERE id=?1", params![qid], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
-            .unwrap();
-        let (name, ccy, p1, cost, tax, tl): (
-            String,
-            Option<String>,
-            Option<f64>,
-            Option<f64>,
-            Option<f64>,
-            Option<f64>,
-        ) = conn
-            .query_row(
-                "SELECT name, currency_abbr, price1, buying_price, tax_rate, price_tl
-                 FROM products WHERE sku=?1",
-                params![sku],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
-            )
-            .unwrap();
-        let kdv = tax.unwrap_or(20.0);
-        let (birim, maliyet) = quote::catalog_line(
-            Currency::parse(&currency),
-            ccy.as_deref().unwrap_or("USD"),
-            p1,
-            cost,
-            kdv,
-            tl,
-            fx,
-        )
-        .ok_or("fiyat hesaplanamadı")?;
-        conn.execute(
-            "INSERT INTO quote_items (quote_id, sku, name, qty, unit_price, tax_rate, cost, sort)
-             VALUES (?1,?2,?3,1,?4,?5,?6,1)",
-            params![qid, sku, name, birim, kdv, maliyet],
-        )
-        .unwrap();
-        Ok(())
+    fn ekle(conn: &mut Connection, qid: i64, sku: &str) -> Result<(), String> {
+        insert_catalog_quote_item(conn, qid, sku, 1.0, None)
     }
 
     /// 🔴 Ölçüm: katalogda USD 273 · EUR 8 · TL 1. USD teklifte EUR ürün kur olmadan
     /// eklenemez — **sessizce 0 fiyat yazmak** en kötü davranış olurdu.
     #[test]
     fn usd_teklifte_eur_urun_kur_istiyor() {
-        let conn = db();
+        let mut conn = db();
         let q = teklif(&conn, "USD", None);
-        assert!(ekle(&conn, q, "USD.1").is_ok(), "USD ürün kursuz eklenebilir");
-        assert!(ekle(&conn, q, "EUR.1").is_err(), "EUR ürün kur olmadan eklenemez");
+        assert!(ekle(&mut conn, q, "USD.1").is_ok(), "USD ürün kursuz eklenebilir");
+        assert!(ekle(&mut conn, q, "EUR.1").is_err(), "EUR ürün kur olmadan eklenemez");
 
         let q2 = teklif(&conn, "USD", Some(47.5911));
-        assert!(ekle(&conn, q2, "EUR.1").is_ok(), "kur verilince eklenebilir");
+        assert!(ekle(&mut conn, q2, "EUR.1").is_ok(), "kur verilince eklenebilir");
     }
 
     /// TL teklifte hiçbir ürün kur istemiyor: mağazanın kendi TL fiyatı kullanılıyor.
     #[test]
     fn tl_teklifte_kur_gerekmiyor() {
-        let conn = db();
+        let mut conn = db();
         let q = teklif(&conn, "TRY", None);
-        ekle(&conn, q, "USD.1").unwrap();
-        ekle(&conn, q, "EUR.1").unwrap();
+        ekle(&mut conn, q, "USD.1").unwrap();
+        ekle(&mut conn, q, "EUR.1").unwrap();
 
         let items = read_items(&conn, q);
         assert_eq!(items.len(), 2);
@@ -1004,10 +1016,51 @@ mod tests {
         assert!((m.pct - 9.4).abs() < 0.2, "marj {}", m.pct);
     }
 
+    #[test]
+    fn catalog_rate_is_recorded_with_tl_line_in_one_transaction() {
+        let mut conn = db();
+        conn.execute(
+            "INSERT INTO products (sku, name, currency_abbr, price1, buying_price, tax_rate, price_tl)
+             VALUES ('TL.1', 'Snapmaker', 'TL', 60000, 45000, 20, 72000)",
+            [],
+        ).unwrap();
+        let try_id = teklif(&conn, "TRY", None);
+        ekle(&mut conn, try_id, "TL.1").unwrap();
+        assert_eq!(read_items(&conn, try_id)[0].unit_price, 60000.0);
+
+        let id = teklif(&conn, "USD", None);
+        let pricing = || CatalogQuotePricing {
+            currency: "USD".into(), fx_rate: Some(40.0), fx_date: Some("2026-11-24".into()),
+            expected_currency: "USD".into(), expected_fx_rate: None,
+        };
+        let rate = |conn: &Connection| -> Option<f64> {
+            conn.query_row("SELECT fx_rate FROM quotes WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+        };
+        assert!(insert_catalog_quote_item(&mut conn, id, "missing", 1.0, Some(pricing())).is_err());
+        assert_eq!(rate(&conn), None);
+        assert!(read_items(&conn, id).is_empty());
+
+        conn.execute_batch(
+            "CREATE TRIGGER reject_rate BEFORE UPDATE OF fx_rate ON quotes
+             BEGIN SELECT RAISE(ABORT, 'test rate error'); END;",
+        ).unwrap();
+        assert!(insert_catalog_quote_item(&mut conn, id, "TL.1", 1.0, Some(pricing())).is_err());
+        assert!(read_items(&conn, id).is_empty());
+        conn.execute_batch("DROP TRIGGER reject_rate").unwrap();
+
+        insert_catalog_quote_item(&mut conn, id, "TL.1", 1.0, Some(pricing())).unwrap();
+        assert_eq!(rate(&conn), Some(40.0));
+        let items = read_items(&conn, id);
+        assert_eq!(items[0].unit_price, 1500.0);
+        assert_eq!(items[0].cost, Some(1125.0));
+        assert!(insert_catalog_quote_item(&mut conn, id, "TL.1", 1.0, Some(pricing())).is_err());
+        assert_eq!(read_items(&conn, id).len(), 1);
+    }
+
     /// Kapanmış teklif yeniden açılmıyor ve her geçiş kişinin çizelgesine yazılıyor.
     #[test]
     fn durum_gecisi_kisinin_cizelgesine_yaziliyor() {
-        let conn = db();
+        let mut conn = db();
         conn.execute(
             "INSERT INTO contacts (id, name, created_at, updated_at) VALUES (5,'Ahmet',?1,?1)",
             params![now_str()],
@@ -1015,7 +1068,7 @@ mod tests {
         .unwrap();
         let q = teklif(&conn, "USD", None);
         conn.execute("UPDATE quotes SET contact_id=5 WHERE id=?1", params![q]).unwrap();
-        ekle(&conn, q, "USD.1").unwrap();
+        ekle(&mut conn, q, "USD.1").unwrap();
 
         assert!(quote::can_transition("draft", "sent"));
         assert!(!quote::can_transition("won", "draft"), "kapanmış teklif geri açılmaz");

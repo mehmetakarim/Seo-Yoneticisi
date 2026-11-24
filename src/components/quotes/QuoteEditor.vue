@@ -6,18 +6,19 @@
  * çıktıda (Faz T2) maliyet **alanı bile yok**. Ölçüm bu uyarının gerekçesi: katalogda 7 ürün
  * zararına, 31 ürün %10'un altında.
  *
- * ⚠️ Para birimi değiştirilirse satır fiyatları dokunulmadan kalıyor — 100 USD'lik satır
- * TRY'ye geçince 100 TL olmaz. Ekran bunu söylüyor; sessizce yanlış fiyat üretmek en kötüsü.
+ * Teklifin para birimi ilk kalem eklenmeden seçilir. Kalemlerin fiyatı ekleme anında hesaplanır.
  */
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { api } from "../../api";
 import { useStore } from "../../store";
-import { teamUser, teamWorkspace } from "../../teamConnection";
+import { teamAccessIssue, teamProject, teamUser, teamWorkspace } from "../../teamConnection";
 import { searchTeamCatalog } from "../../teamCatalog";
 import { teamQuoteCanEdit, teamQuoteConflicts, teamQuotesOffline, teamQuoteSaving } from "../../teamQuotes";
 import type { CatalogMatch, Contact, ContactId, Quote, QuoteItem } from "../../types";
 import Icon from "../Icon.vue";
 import QuoteDocModal from "./QuoteDocModal.vue";
+import QuoteHistoryModal from "./QuoteHistoryModal.vue";
+import QuoteLifecycleDialog from "./QuoteLifecycleDialog.vue";
 
 const store = useStore();
 const quoteContacts = ref<Contact[]>([]);
@@ -37,8 +38,8 @@ const q = computed(() => store.quote);
 const central = computed(() => typeof q.value?.id === "string");
 const conflict = computed(() => q.value && central.value && teamQuoteConflicts.value.has(q.value.id));
 const locked = computed(() => central.value && (!teamQuoteCanEdit.value || q.value?.status !== "draft" || !!conflict.value));
-const statusLocked = computed(() => central.value && (teamQuotesOffline.value || !teamQuoteCanEdit.value
-  || !!conflict.value || teamQuoteSaving.value));
+const statusLocked = computed(() => satirEkleniyor.value || central.value && (teamQuotesOffline.value || !teamQuoteCanEdit.value
+  || !!conflict.value || teamQuoteSaving.value || store.quoteLifecycleBusy));
 
 /**
  * ⚠️ Bu üç ref aşağıdaki `watch`tan ÖNCE tanımlı olmak ZORUNDA: `immediate: true` olan
@@ -52,6 +53,12 @@ const statusLocked = computed(() => central.value && (teamQuotesOffline.value ||
 const urunArama = ref("");
 const urunSonuc = ref<CatalogMatch[]>([]);
 const urunAramaHatasi = ref("");
+const urunSecimi = ref<CatalogMatch | null>(null);
+const kurAlani = ref<HTMLInputElement | null>(null);
+const satirEkleniyor = ref(false);
+const satirKilidi = computed(() => locked.value || satirEkleniyor.value || (central.value && teamQuoteSaving.value));
+let aramaIstegi = 0;
+let zaman: ReturnType<typeof setTimeout> | null = null;
 
 /** Başlık düzenleme kopyası — kaydetmeden store değişmesin. */
 const f = ref(formdan(null));
@@ -60,7 +67,7 @@ const f = ref(formdan(null));
 function formdan(v: Quote | null) {
   return {
     contactId: v?.contact_id ?? null,
-    currency: v?.currency ?? "USD",
+    currency: v?.currency ?? "TRY",
     fxRate: v?.fx_rate ? String(v.fx_rate) : "",
     validUntil: v?.valid_until?.slice(0, 10) ?? "",
     note: v?.note ?? "",
@@ -70,15 +77,34 @@ function formdan(v: Quote | null) {
 watch(
   () => store.quote,
   (v, previous) => {
-    if (v?.id !== previous?.id || JSON.stringify(formdan(v)) !== JSON.stringify(formdan(previous ?? null))) {
-      f.value = formdan(v);
+    const incoming = formdan(v);
+    if (v?.id !== previous?.id) {
+      f.value = incoming;
+      return;
     }
-    urunArama.value = "";
-    urunSonuc.value = [];
-    urunAramaHatasi.value = "";
+    const saved = formdan(previous ?? null);
+    // Keep edits to unrelated fields when adding a line also saves currency or FX.
+    const keepEdit = <K extends keyof typeof saved>(field: K) =>
+      f.value[field] === saved[field] ? incoming[field] : f.value[field];
+    const currency = v?.items.length ? incoming.currency : keepEdit("currency");
+    f.value = {
+      contactId: keepEdit("contactId"), currency,
+      fxRate: currency === f.value.currency ? keepEdit("fxRate") : incoming.fxRate,
+      validUntil: keepEdit("validUntil"), note: keepEdit("note"),
+    };
   },
   { immediate: true },
 );
+
+watch([() => q.value?.id, teamProject, teamUser, teamWorkspace, teamAccessIssue], () => {
+  ++aramaIstegi;
+  if (zaman) clearTimeout(zaman);
+  urunArama.value = "";
+  urunSonuc.value = [];
+  urunAramaHatasi.value = "";
+  urunSecimi.value = null;
+});
+onBeforeUnmount(() => { if (zaman) clearTimeout(zaman); });
 
 /**
  * Geri alma yedekleri **yalnızca başka teklife geçilince** siliniyor.
@@ -106,41 +132,59 @@ const kirli = computed(
   () => JSON.stringify(f.value) !== JSON.stringify(formdan(store.quote)),
 );
 
+const yazilanKur = computed(() => {
+  const text = f.value.fxRate.trim();
+  if (!/^(?:\d+(?:[.,]\d+)?|[.,]\d+)$/.test(text)) return null;
+  const rate = Number(text.replace(",", "."));
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
+});
+const gecersizKur = computed(() => f.value.currency === "USD" && Boolean(f.value.fxRate.trim()) && yazilanKur.value === null);
+const paraBirimiDegisti = computed(() => Boolean(q.value && f.value.currency !== q.value.currency));
+const urunKurIstiyor = computed(() => {
+  const currency = urunSecimi.value?.currency_abbr?.trim().toUpperCase();
+  return f.value.currency === "USD" && Boolean(currency && currency !== "USD");
+});
+
+function teklifFiyati(v: Quote) {
+  const currency = f.value.currency;
+  const fxRate = currency === "USD" ? yazilanKur.value : null;
+  const fxDate = fxRate === null ? null : fxRate === v.fx_rate ? v.fx_date : new Date().toISOString().slice(0, 10);
+  return { currency, fxRate, fxDate };
+}
+
 /** Kaydedilmemiş başlık değişikliklerini geri alır. */
 function vazgec() {
   f.value = formdan(store.quote);
 }
 
-function kaydet() {
+async function kaydet() {
   const v = q.value;
-  if (!v) return;
-  const kur = parseFloat(f.value.fxRate.replace(",", "."));
-  void store.saveQuote({
+  if (!v || gecersizKur.value || satirEkleniyor.value) return;
+  const form = JSON.stringify(f.value);
+  const saved = await store.saveQuote({
     id: v.id,
     contactId: f.value.contactId,
     contactName: quoteContacts.value.find((contact) => contact.id === f.value.contactId)?.name,
-    currency: f.value.currency,
-    fxRate: Number.isFinite(kur) && kur > 0 ? kur : null,
-    fxDate: Number.isFinite(kur) && kur > 0 ? new Date().toISOString().slice(0, 10) : null,
+    ...teklifFiyati(v),
     validUntil: f.value.validUntil || null,
     note: f.value.note,
   });
+  if (saved && q.value?.id === v.id && JSON.stringify(f.value) === form) f.value = formdan(q.value);
 }
 
 // --- Satır ekleme: katalog araması EOL/CRM ile aynı uçtan ---
 const elleAd = ref("");
-let zaman: ReturnType<typeof setTimeout> | null = null;
 
 function urunAra(v: string) {
+  const request = ++aramaIstegi;
   urunArama.value = v;
   urunAramaHatasi.value = "";
+  urunSecimi.value = null;
+  urunSonuc.value = [];
   if (zaman) clearTimeout(zaman);
-  if (v.trim().length < 3) {
-    urunSonuc.value = [];
-    return;
-  }
+  if (v.trim().length < 3) return;
   const id = q.value?.id;
-  const current = () => v === urunArama.value && id === q.value?.id;
+  const current = () => request === aramaIstegi && id === q.value?.id;
   zaman = setTimeout(async () => {
     try {
       const results = typeof id === "string" ? await searchTeamCatalog(v) : await api.searchLiveProducts(v);
@@ -154,18 +198,45 @@ function urunAra(v: string) {
   }, 220);
 }
 
-async function katalogdanEkle(m: CatalogMatch) {
-  // ⚠️ `slug` DEĞİL `sku`: slug adresin son parçası. Karıştırılınca arka uç ürünü bulamıyor
-  // ("Ürün bulunamadı: Query returned no rows" — saha hatası, 2026-08-12).
-  await store.addQuoteLine(m.sku, m.name);
-  urunArama.value = "";
+async function urunSec(product: CatalogMatch) {
+  ++aramaIstegi;
   urunSonuc.value = [];
+  urunSecimi.value = product;
+  if (urunKurIstiyor.value && yazilanKur.value === null) {
+    await nextTick();
+    kurAlani.value?.focus();
+  } else if (!gecersizKur.value) {
+    await katalogdanEkle();
+  }
+}
+
+async function katalogdanEkle() {
+  const product = urunSecimi.value;
+  const quote = q.value;
+  if (!product || !quote || satirKilidi.value || gecersizKur.value
+    || (urunKurIstiyor.value && yazilanKur.value === null)) return;
+  const pricing = teklifFiyati(quote);
+  satirEkleniyor.value = true;
+  try {
+    const added = await store.addQuoteLine(product.sku, product.name, pricing);
+    if (!added || urunSecimi.value?.sku !== product.sku || q.value?.id !== quote.id) return;
+    f.value.currency = pricing.currency;
+    f.value.fxRate = pricing.fxRate === null ? "" : String(pricing.fxRate);
+    urunArama.value = "";
+    urunSecimi.value = null;
+  } finally {
+    satirEkleniyor.value = false;
+  }
 }
 
 async function elleEkle() {
-  if (!elleAd.value.trim()) return;
-  await store.addQuoteLine(null, elleAd.value);
-  elleAd.value = "";
+  if (!elleAd.value.trim() || satirKilidi.value || paraBirimiDegisti.value) return;
+  satirEkleniyor.value = true;
+  try {
+    if (await store.addQuoteLine(null, elleAd.value)) elleAd.value = "";
+  } finally {
+    satirEkleniyor.value = false;
+  }
 }
 
 /**
@@ -182,6 +253,7 @@ const geriAlYedegi = ref<Record<QuoteItem["id"], Pick<QuoteItem, "name" | "qty" 
 
 /** Satır alanı düzenlendiğinde kaydet — her tuşta değil, odak çıkışında. */
 function satirKaydet(it: QuoteItem, alan: Partial<QuoteItem>) {
+  if (satirKilidi.value) return;
   const yeni = {
     name: (alan.name ?? it.name) as string,
     qty: Number(alan.qty ?? it.qty),
@@ -204,6 +276,7 @@ function satirKaydet(it: QuoteItem, alan: Partial<QuoteItem>) {
 }
 
 async function satirGeriAl(it: QuoteItem) {
+  if (satirKilidi.value) return;
   const y = geriAlYedegi.value[it.id];
   if (!y) return;
   await store.updateQuoteLine(it.id, y.name, y.qty, y.unit_price, y.tax_rate);
@@ -217,6 +290,54 @@ const bicim = (v: number) =>
 
 const belgeAcik = ref(false);
 const kapatmaNedeni = ref("");
+const historyTrigger = ref<HTMLButtonElement | null>(null);
+const historyQuote = ref<{ id: string; number: string } | null>(null);
+const canViewHistory = computed(() => typeof q.value?.id === "string" && !!teamUser.value && !!teamWorkspace.value && !teamAccessIssue.value);
+const lifecycle = ref<{ action: "revise" | "trash"; id: string; number: string } | null>(null);
+const reviseTrigger = ref<HTMLButtonElement | null>(null);
+const trashTrigger = ref<HTMLButtonElement | null>(null);
+const canManageQuote = computed(() => canViewHistory.value && teamQuoteCanEdit.value);
+
+watch([() => q.value?.id, teamProject, teamUser, teamWorkspace, teamAccessIssue], () => {
+  historyQuote.value = null;
+  lifecycle.value = null;
+}, { flush: "sync" });
+
+function openHistory() {
+  const quote = q.value;
+  if (canViewHistory.value && typeof quote?.id === "string") historyQuote.value = { id: quote.id, number: quote.no };
+}
+
+async function closeHistory() {
+  const current = historyQuote.value;
+  historyQuote.value = null;
+  await nextTick();
+  if (!historyQuote.value && current?.id === q.value?.id && canViewHistory.value) historyTrigger.value?.focus();
+}
+
+function openLifecycle(action: "revise" | "trash") {
+  const quote = q.value;
+  if (canManageQuote.value && !statusLocked.value && typeof quote?.id === "string") {
+    lifecycle.value = { action, id: quote.id, number: quote.no };
+  }
+}
+
+async function closeLifecycle() {
+  const current = lifecycle.value;
+  if (store.quoteLifecycleBusy || !current) return;
+  lifecycle.value = null;
+  await nextTick();
+  if (q.value?.id !== current.id || lifecycle.value) return;
+  const trigger = current.action === "revise" ? reviseTrigger.value : trashTrigger.value;
+  (trigger ?? historyTrigger.value)?.focus();
+}
+
+async function confirmLifecycle() {
+  const current = lifecycle.value;
+  if (!current || !canManageQuote.value || statusLocked.value || q.value?.id !== current.id) return;
+  const completed = await (current.action === "revise" ? store.reviseQuote() : store.deleteQuote(current.id));
+  if (completed && lifecycle.value === current) await closeLifecycle();
+}
 
 /**
  * Gönderim akışı: önce durum yazılıyor, sonra **takip tarihi öneriliyor** (Faz C bağı).
@@ -277,7 +398,8 @@ const DURUM_EYLEM: Record<string, { to: string; label: string; neden?: boolean }
   ],
   expired: [{ to: "sent", label: "Yeniden gönderildi" }],
 };
-const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
+const eylemler = computed(() => (DURUM_EYLEM[q.value?.status ?? ""] ?? [])
+  .filter(({ to }) => !central.value || to !== "draft"));
 </script>
 
 <template>
@@ -292,8 +414,15 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
         </div>
       </div>
       <div class="head-btns">
-        <button class="ghost" @click="belgeAcik = true">
-          <Icon name="eye" :size="14" :stroke-width="2" /> Belge
+        <button class="ghost with-icon" @click="belgeAcik = true">
+          <Icon name="eye" :size="14" :stroke-width="2" aria-hidden="true" /> Belge
+        </button>
+        <button v-if="canViewHistory" ref="historyTrigger" type="button" class="ghost with-icon" aria-haspopup="dialog" @click="openHistory">
+          <Icon name="clock" :size="14" aria-hidden="true" /> Gönderim geçmişi
+        </button>
+        <button v-if="canManageQuote && q.status !== 'draft'" ref="reviseTrigger" type="button" class="ghost with-icon"
+          :disabled="statusLocked" aria-haspopup="dialog" @click="openLifecycle('revise')">
+          <Icon name="fileEdit" :size="14" aria-hidden="true" /> Düzenle
         </button>
         <button v-if="q.status === 'draft'" class="ghost" :disabled="statusLocked || kirli" @click="gonderildi">
           Gönderildi olarak işaretle
@@ -310,7 +439,11 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
         <!-- Vazgeç yalnızca değişiklik VARKEN görünüyor: hep duran bir düğme, hiçbir şey
              yapmadığı anlarda gürültüdür. -->
         <button v-if="kirli" class="ghost" @click="vazgec">Vazgeç</button>
-        <button v-if="!locked" class="primary" :disabled="!kirli || (central && teamQuoteSaving)" @click="kaydet">Kaydet</button>
+        <button v-if="!locked" class="primary" :disabled="!kirli || gecersizKur || satirEkleniyor || (central && teamQuoteSaving)" @click="kaydet">Kaydet</button>
+        <button v-if="canManageQuote" ref="trashTrigger" type="button" class="ghost with-icon quote-trash-action"
+          :disabled="statusLocked" aria-haspopup="dialog" @click="openLifecycle('trash')">
+          <Icon name="archive" :size="14" aria-hidden="true" /> Sil
+        </button>
       </div>
     </div>
 
@@ -357,24 +490,31 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
       </label>
       <label>
         Para birimi
-        <select v-model="f.currency" class="fx" :disabled="locked">
-          <option value="USD">USD</option>
+        <select
+          v-model="f.currency"
+          class="fx"
+          :disabled="locked || q.items.length > 0 || satirEkleniyor"
+          :title="q.items.length ? 'Para birimi ilk kalem eklenmeden seçilir.' : undefined"
+        >
           <option value="TRY">TRY</option>
+          <option value="USD">USD</option>
         </select>
       </label>
-      <label>
+      <label v-if="f.currency === 'USD' && !urunSecimi">
         USD/TRY kuru
-        <input v-model="f.fxRate" class="fx" :readonly="locked" placeholder="ör. 47,59" />
+        <input
+          v-model="f.fxRate"
+          class="fx"
+          inputmode="decimal"
+          :readonly="locked || satirEkleniyor"
+          :aria-invalid="gecersizKur || undefined"
+          placeholder="Örn. 47,59"
+        />
       </label>
       <label>Geçerlilik <input v-model="f.validUntil" class="fx" type="date" :readonly="locked" /></label>
     </div>
 
-    <!-- Kur yalnızca bu durumda gerekiyor; her zaman uyarı göstermek gürültü olurdu. -->
-    <p v-if="f.currency === 'USD'" class="hint">
-      <Icon name="info" :size="13" />
-      Kataloğunuzda USD dışı ürünler de var (EUR, TL). USD teklifte onların fiyatı ancak
-      <b>kur girilirse</b> hesaplanabiliyor; TRY teklifte kur gerekmiyor.
-    </p>
+    <p v-if="gecersizKur && !urunSecimi" class="hint" role="status">Geçerli bir pozitif USD/TRY kuru girin.</p>
 
     <!-- Satırlar -->
     <div class="tablo om-scroll-x">
@@ -405,7 +545,7 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
             <td>
               <input
                 class="hucre"
-                :readonly="locked"
+                :readonly="satirKilidi"
                 :value="it.name"
                 @change="satirKaydet(it, { name: ($event.target as HTMLInputElement).value })"
               />
@@ -414,7 +554,7 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
             <td class="sag">
               <input
                 class="hucre num"
-                :readonly="locked"
+                :readonly="satirKilidi"
                 type="number"
                 min="0"
                 step="1"
@@ -425,7 +565,7 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
             <td class="sag">
               <input
                 class="hucre num"
-                :readonly="locked"
+                :readonly="satirKilidi"
                 type="number"
                 min="0"
                 step="0.01"
@@ -436,7 +576,7 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
             <td class="sag">
               <input
                 class="hucre num"
-                :readonly="locked"
+                :readonly="satirKilidi"
                 type="number"
                 min="0"
                 step="1"
@@ -459,12 +599,13 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
                 v-if="geriAlYedegi[it.id]"
                 class="sil geri"
                 title="Bu satırdaki son değişikliği geri al"
+                :disabled="satirKilidi"
                 @click="satirGeriAl(it)"
               >
                 <Icon name="undo" :size="12" :stroke-width="2.2" />
               </button>
               <span v-else class="yer"></span>
-              <button class="sil" title="Satırı sil" @click="store.deleteQuoteLine(it.id)">
+              <button class="sil" title="Satırı sil" :disabled="satirKilidi" @click="store.deleteQuoteLine(it.id)">
                 <Icon name="x" :size="12" :stroke-width="2.4" />
               </button>
             </td>
@@ -483,23 +624,52 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
         <input
           class="fx"
           :value="urunArama"
+          :readonly="satirKilidi"
+          aria-label="Teklife ürün eklemek için katalogda ara"
           :placeholder="central ? 'Ortak katalogda ürün ara' : 'Katalogdan ürün ara (en az 3 harf)'"
           @input="urunAra(($event.target as HTMLInputElement).value)"
         />
         <p v-if="urunAramaHatasi" class="hint" role="status">{{ urunAramaHatasi }}</p>
         <div v-if="urunSonuc.length" class="sonuc om-scroll">
-          <button v-for="m in urunSonuc" :key="m.slug" class="s-sat" @click="katalogdanEkle(m)">
+          <button v-for="m in urunSonuc" :key="m.sku" type="button" class="s-sat" :disabled="satirKilidi" @click="urunSec(m)">
             {{ m.name }}
           </button>
         </div>
+        <form v-if="urunSecimi" class="kur-ekle" @submit.prevent="katalogdanEkle">
+          <strong>{{ urunSecimi.name }}</strong>
+          <p v-if="urunKurIstiyor" class="hint">Mağazanın TL fiyatı girdiğiniz USD/TRY kuruyla çevrilir.</p>
+          <label v-if="f.currency === 'USD'">
+            USD/TRY kuru
+            <input
+              ref="kurAlani"
+              v-model="f.fxRate"
+              class="fx"
+              inputmode="decimal"
+              placeholder="Örn. 47,59"
+              :readonly="satirKilidi"
+              :aria-invalid="gecersizKur || undefined"
+            />
+          </label>
+          <p v-if="gecersizKur" class="hint" role="status">Geçerli bir pozitif USD/TRY kuru girin.</p>
+          <div class="kur-ekle-islemleri">
+            <button type="button" class="ghost" :disabled="satirEkleniyor" @click="urunSecimi = null">Vazgeç</button>
+            <button
+              type="submit"
+              class="primary"
+              :disabled="satirKilidi || gecersizKur || (urunKurIstiyor && yazilanKur === null)"
+            >{{ satirEkleniyor ? 'Ekleniyor…' : 'Ürünü ekle' }}</button>
+          </div>
+        </form>
       </div>
       <div class="ek-alan">
         <input
           v-model="elleAd"
           class="fx"
+          :readonly="satirKilidi || paraBirimiDegisti"
           placeholder="Elle satır (montaj, nakliye…)"
           @keyup.enter="elleEkle"
         />
+        <p v-if="paraBirimiDegisti" class="hint">Elle kalem eklemeden önce para birimini kaydedin.</p>
       </div>
     </div>
 
@@ -533,11 +703,20 @@ const eylemler = computed(() => DURUM_EYLEM[q.value?.status ?? ""] ?? []);
     <Teleport to="body">
       <QuoteDocModal :open="belgeAcik" :quote-id="q.id" @close="belgeAcik = false" />
     </Teleport>
+    <QuoteHistoryModal
+      v-if="historyQuote"
+      :key="historyQuote.id"
+      :quote-id="historyQuote.id"
+      :quote-number="historyQuote.number"
+      @close="closeHistory"
+    />
+    <QuoteLifecycleDialog v-if="lifecycle" :action="lifecycle.action" :number="lifecycle.number" :busy="store.quoteLifecycleBusy"
+      @close="closeLifecycle" @confirm="confirmLifecycle" />
   </section>
 
   <section v-else class="bos-sec">
     <Icon name="fileEdit" :size="30" :stroke-width="1.6" />
-    <div>Soldan bir teklif seçin</div>
+    <div>{{ store.quoteTrashOpen ? "Silinen teklifler" : "Soldan bir teklif seçin" }}</div>
   </section>
 </template>
 
@@ -572,10 +751,14 @@ h2 {
 .head-btns {
   display: flex;
   gap: 8px;
-  flex: none;
+  min-width: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.head > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.with-icon { display: inline-flex; align-items: center; gap: 6px; }
+.with-icon:hover { background: var(--c-hover); }
+.with-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .primary,
 .ghost {
   height: 32px;
@@ -832,6 +1015,26 @@ tbody tr:last-child td {
 }
 .ek-alan {
   position: relative;
+  min-width: 0;
+}
+.kur-ekle {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-card);
+  font-size: 12.5px;
+}
+.kur-ekle .hint {
+  margin: 0;
+}
+.kur-ekle-islemleri {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 .sonuc {
   position: absolute;
@@ -856,6 +1059,7 @@ tbody tr:last-child td {
   font-size: 12.5px;
   cursor: pointer;
 }
+.quote-trash-action { color: var(--badge-eksik-c); }
 .s-sat:hover {
   background: var(--c-hover);
 }

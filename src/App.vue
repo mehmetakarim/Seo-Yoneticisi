@@ -49,6 +49,60 @@ watch(workspaceOpen, (open) => { if (open) void store.init(); });
 const teamPanelOpen = ref(false);
 const teamPanelPinned = ref(false);
 const teamPanelButton = ref<HTMLButtonElement | null>(null);
+const teamUnread = ref(0);
+const teamNotice = ref<{ id: string; senderName: string } | null>(null);
+const teamPanelLabel = computed(() => teamUnread.value ? `Ekip paneli · ${teamUnread.value} okunmamış mesaj` : "Ekip paneli");
+let teamNoticeTimer: number | undefined;
+let teamAudio: AudioContext | undefined;
+let nextChimeAt = 0;
+
+function enableTeamSound() {
+  if (!workspaceOpen.value || typeof AudioContext === "undefined") return;
+  try {
+    const audio = teamAudio ??= new AudioContext();
+    if (audio.state === "suspended") void audio.resume().catch(() => {});
+  } catch { /* Görsel bildirim ses çıkışı olmasa da görünür. */ }
+}
+
+function playTeamSound() {
+  if (!teamAudio) enableTeamSound();
+  const audio = teamAudio;
+  if (!audio || audio.state !== "running" || audio.currentTime < nextChimeAt) return;
+  const start = audio.currentTime;
+  nextChimeAt = start + 1.2;
+  for (const [pitch, offset] of [[659.25, 0], [880, 0.095]]) {
+    const at = start + offset;
+    const tone = audio.createOscillator();
+    const volume = audio.createGain();
+    tone.frequency.setValueAtTime(pitch, at);
+    volume.gain.setValueAtTime(0.0001, at);
+    volume.gain.exponentialRampToValueAtTime(0.075, at + 0.016);
+    volume.gain.exponentialRampToValueAtTime(0.0001, at + 0.18);
+    tone.connect(volume);
+    volume.connect(audio.destination);
+    tone.onended = () => { tone.disconnect(); volume.disconnect(); };
+    tone.start(at);
+    tone.stop(at + 0.19);
+  }
+}
+
+function resetTeamNotice() {
+  window.clearTimeout(teamNoticeTimer);
+  teamNotice.value = null;
+}
+
+function showTeamNotice(notice: { id: string; senderName: string }) {
+  if (!workspaceOpen.value || teamNotice.value?.id === notice.id) return;
+  window.clearTimeout(teamNoticeTimer);
+  teamNotice.value = notice;
+  teamNoticeTimer = window.setTimeout(resetTeamNotice, 3800);
+  try { playTeamSound(); } catch { /* Görsel bildirim bağımsız çalışır. */ }
+}
+
+watch([teamProject, teamUser, teamWorkspace, teamAccessIssue], () => {
+  teamUnread.value = 0;
+  resetTeamNotice();
+}, { flush: "sync" });
 
 function setTeamPanelOpen(open: boolean) {
   teamPanelOpen.value = open;
@@ -334,6 +388,8 @@ onMounted(() => {
     if (teamUser.value) void checkTeamConnection();
   }, 12_000);
   window.addEventListener("keydown", onKey);
+  window.addEventListener("click", enableTeamSound, { capture: true, passive: true });
+  window.addEventListener("keydown", enableTeamSound, { capture: true, passive: true });
 });
 onUnmounted(() => {
   window.removeEventListener("online", connected);
@@ -341,6 +397,10 @@ onUnmounted(() => {
   window.removeEventListener("focus", connected);
   window.clearInterval(syncTimer);
   window.removeEventListener("keydown", onKey);
+  window.removeEventListener("click", enableTeamSound, true);
+  window.removeEventListener("keydown", enableTeamSound, true);
+  resetTeamNotice();
+  if (teamAudio) void teamAudio.close().catch(() => {});
 });
 </script>
 
@@ -375,13 +435,14 @@ onUnmounted(() => {
             ref="teamPanelButton"
             class="team-panel-trigger"
             type="button"
-            aria-label="Ekip paneli"
+            :aria-label="teamPanelLabel"
+            :title="teamPanelLabel"
             aria-controls="team-chat-panel"
             :aria-expanded="teamPanelOpen"
             @click="setTeamPanelOpen(!teamPanelOpen)"
           >
-            <Icon name="users" :size="16" aria-hidden="true" />
-            <span>Ekip</span>
+            <Icon name="users" :size="18" aria-hidden="true" />
+            <span v-if="teamUnread" class="team-unread" aria-hidden="true">{{ teamUnread > 99 ? "99+" : teamUnread }}</span>
           </button>
         </div>
       </header>
@@ -405,11 +466,23 @@ onUnmounted(() => {
             </Transition>
           </div>
         </div>
-        <TeamChatPanel v-model:pinned="teamPanelPinned" :open="teamPanelOpen" @update:open="setTeamPanelOpen" />
+        <TeamChatPanel
+          v-model:pinned="teamPanelPinned"
+          :open="teamPanelOpen"
+          @update:open="setTeamPanelOpen"
+          @unread-change="teamUnread = $event"
+          @incoming-message="showTeamNotice"
+        />
       </div>
     </main>
 
     <div class="toasts">
+      <div role="status" aria-atomic="true" :class="teamNotice ? 'toast info team-message-toast' : 'empty-team-notice'">
+        <template v-if="teamNotice">
+          <Icon name="message" :size="15" aria-hidden="true" />
+          <span>{{ teamNotice.senderName }} yeni bir mesaj gönderdi.</span>
+        </template>
+      </div>
       <div v-for="t in store.toasts" :key="t.id" class="toast" :class="t.kind">
         {{ t.text }}
       </div>
@@ -485,20 +558,18 @@ onUnmounted(() => {
   gap: 16px;
 }
 .team-panel-trigger {
+  position: relative;
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  width: 38px;
   height: 38px;
-  padding: 0 13px;
+  padding: 0;
   border: 1px solid var(--c-border);
   border-radius: 9px;
   background: var(--c-bg);
   color: var(--c-text);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 590;
-  white-space: nowrap;
   cursor: pointer;
 }
 .team-panel-trigger:hover { background: var(--c-hover); }
@@ -508,6 +579,21 @@ onUnmounted(() => {
   color: var(--accent);
 }
 .team-panel-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.team-unread {
+  position: absolute;
+  inset: -5px -5px auto auto;
+  min-width: 17px;
+  padding: 0 3px;
+  height: 17px;
+  line-height: 15px;
+  border: 1px solid var(--c-bg);
+  border-radius: 999px;
+  color: #fff;
+  background: var(--accent);
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
 .sync-info {
   display: flex;
   flex-direction: column;
@@ -600,4 +686,8 @@ onUnmounted(() => {
 .toast.info {
   background: var(--accent);
 }
+.empty-team-notice { position: absolute; }
+.team-message-toast { display: flex; align-items: center; gap: 8px; }
+.team-message-toast svg { flex-shrink: 0; }
+@media (prefers-reduced-motion: reduce) { .team-message-toast { animation: none; } }
 </style>

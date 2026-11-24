@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { api } from "./api";
 import { flushTeamContacts, teamContactProgress } from "./teamContacts";
-import { teamAccessIssue, teamReachable, teamRestoring, teamUser, teamWorkspace } from "./teamConnection";
+import { teamAccessIssue, teamProject, teamReachable, teamRestoring, teamUser, teamWorkspace } from "./teamConnection";
 import { getTeamProduct, listTeamProducts, prepareTeamCatalogLine, readOnlineTeamCatalogRevision } from "./teamCatalog";
 import { flushTeamGscSnapshots, seedTeamGscHistory, teamGscAnalysis, teamGscMode, teamMeasurementScope, teamOutcomeInputs } from "./teamGsc";
 import { listTeamStorePages } from "./teamStorePages";
@@ -11,7 +11,7 @@ import { flushTeamProductSeo, getTeamProductSeo, patchTeamProductSeo, readTeamPr
 import { assembleTeamProductTech, restoreTeamProductTech, structureTeamProductTech, teamTechSourceChanges } from "./teamProductTech";
 import { generateTeamProductDetails, restoreTeamProductDetails } from "./teamProductDetails";
 import { generateTeamProductMeta, restoreTeamProductMeta } from "./teamProductMeta";
-import { summarizeTeamQuotes, teamQuoteQueue, teamQuotes } from "./teamQuotes";
+import { summarizeTeamQuotes, teamQuoteQueue, teamQuotes, type TeamTrashedQuote } from "./teamQuotes";
 import { SOURCES, buildContext, sourceByKey } from "./assistantSources";
 import type { ContextSource, SourceData } from "./assistantSources";
 import type {
@@ -55,12 +55,14 @@ let contactsRequest = 0;
 let contactRequest = 0;
 let quotesRequest = 0;
 let quoteRequest = 0;
+let quoteLifecycleRequest = 0;
 let productsRequest = 0;
 let productRequest = 0;
 let storePagesRequest = 0;
 let todayRequest = 0;
 let todayInputs: TeamTodayInputs | undefined;
 const todaySource = () => teamTodayMode() ? teamTodayScope() ?? "" : undefined;
+const quoteSource = () => JSON.stringify([teamProject.value, teamUser.value, teamWorkspace.value, teamAccessIssue.value]);
 
 type ProductMetaEdits = Partial<Record<"draft_title" | "draft_descriptions" | "draft_search_keywords" | "target_keyword", string>>;
 type MetaAutosave = { changes: ProductMetaEdits; timer?: number; saving?: Promise<boolean> };
@@ -192,6 +194,10 @@ interface State {
   quotes: Quote[];
   quotesBusy: boolean;
   quoteStatusFilter: string;
+  quoteTrashOpen: boolean;
+  quoteTrash: TeamTrashedQuote[];
+  quoteTrashError: string;
+  quoteLifecycleBusy: boolean;
   quote: Quote | null;
   /** Kazanma/kaybetme özeti — kayıp nedenleri raporlanabilsin diye (fazın bitiş şartı). */
   quoteSummary: QuoteSummary | null;
@@ -292,6 +298,10 @@ export const useStore = defineStore("app", {
     quotes: [],
     quotesBusy: false,
     quoteStatusFilter: "",
+    quoteTrashOpen: false,
+    quoteTrash: [],
+    quoteTrashError: "",
+    quoteLifecycleBusy: false,
     quote: null,
     quoteSummary: null,
     focus: null,
@@ -1829,28 +1839,63 @@ export const useStore = defineStore("app", {
     resetQuoteSource() {
       quotesRequest++;
       quoteRequest++;
+      quoteLifecycleRequest++;
       this.quotes = [];
       this.quote = null;
       this.quoteSummary = null;
       this.quotesBusy = false;
+      this.quoteTrashOpen = false;
+      this.quoteTrash = [];
+      this.quoteTrashError = "";
+      this.quoteLifecycleBusy = false;
     },
 
     async loadQuotes() {
       const request = ++quotesRequest;
+      const central = !!teamUser.value;
+      const trash = central && this.quoteTrashOpen;
       this.quotesBusy = true;
+      if (trash) this.quoteTrashError = "";
       try {
+        if (trash) {
+          const trashed = await teamQuotes.trash();
+          if (request === quotesRequest) this.quoteTrash = trashed;
+          return;
+        }
         const status = this.quoteStatusFilter;
-        const central = !!teamUser.value;
         const quotes = central ? await teamQuotes.list() : await api.listQuotes(status);
         const summary = central ? summarizeTeamQuotes(quotes) : await api.quoteSummary();
         if (request !== quotesRequest) return;
         this.quotes = central && status ? quotes.filter((q) => q.status === status) : quotes;
         this.quoteSummary = summary;
       } catch (e) {
-        if (request === quotesRequest) this.toast(String(e), "error");
+        if (request !== quotesRequest) return;
+        if (trash) {
+          this.quoteTrash = [];
+          this.quoteTrashError = e instanceof Error ? e.message : String(e);
+        } else this.toast(String(e), "error");
       } finally {
         if (request === quotesRequest) this.quotesBusy = false;
       }
+    },
+
+    async setQuoteTrashOpen(open: boolean) {
+      if ((open && !teamUser.value) || this.quoteTrashOpen === open) return;
+      quoteRequest++;
+      this.quote = null;
+      this.quoteTrashOpen = open;
+      this.quoteTrashError = "";
+      await this.loadQuotes();
+    },
+
+    async observeQuoteTrash(value: unknown) {
+      const marker = await teamQuotes.observeTrash(value);
+      if (!marker) return;
+      if (marker.trashed && this.quote?.id === marker.quote_id && (this.quote.revision ?? 0) <= marker.revision) {
+        quoteRequest++;
+        this.quote = null;
+      }
+      if (this.page === "quotes") await this.loadQuotes();
     },
 
     async openQuote(id: Quote["id"]) {
@@ -1863,7 +1908,7 @@ export const useStore = defineStore("app", {
       }
     },
 
-    async createQuote(contactId: number | null, currency: string) {
+    async createQuote(contactId: number | null = null, currency = "TRY") {
       try {
         if (teamUser.value) {
           const defaults = await api.getQuoteDefaults();
@@ -1895,10 +1940,15 @@ export const useStore = defineStore("app", {
     async saveQuote(q: Omit<Parameters<typeof api.saveQuote>[0], "id" | "contactId"> & {
       id: Quote["id"]; contactId: ContactId | null; contactName?: string;
     }) {
+      const request = quoteRequest;
+      const source = quoteSource();
       try {
+        if (this.quote?.id === q.id && this.quote.items.length && this.quote.currency !== q.currency) {
+          throw new Error("Teklifte kalem varken para birimi değiştirilemez.");
+        }
         if (typeof q.id === "string") {
           const quote = this.quote;
-          if (!quote || quote.id !== q.id || quote.revision == null) return;
+          if (!quote || quote.id !== q.id || quote.revision == null) return false;
           await teamQuotes.save({
             ...quote, contact_id: q.contactId,
             contact_name: q.contactName ?? (quote.contact_id === q.contactId ? quote.contact_name : ""),
@@ -1909,46 +1959,121 @@ export const useStore = defineStore("app", {
           const { contactName: _, ...draft } = q;
           await api.saveQuote({ ...draft, id: q.id, contactId: typeof q.contactId === "number" ? q.contactId : null });
         }
-        await this.openQuote(q.id);
-        await this.loadQuotes();
+        if (source !== quoteSource()) return false;
+        if (request === quoteRequest && this.quote?.id === q.id) await this.openQuote(q.id);
+        if (source === quoteSource()) await this.loadQuotes();
+        if (source !== quoteSource()) return false;
         this.toast(typeof q.id === "string" && (teamQuoteQueue.value.pending || teamQuoteQueue.value.conflicts)
           ? "Teklif bu cihazda kaydedildi. Eşitleme durumunu listeden izleyebilirsiniz."
           : "Teklif kaydedildi.", "ok");
+        return true;
       } catch (e) {
-        this.toast(String(e), "error");
+        if (source === quoteSource()) this.toast(String(e), "error");
+        return false;
       }
     },
 
-    async deleteQuote(id: Quote["id"]) {
-      if (typeof id === "string") return;
+    async reviseQuote(): Promise<boolean> {
+      const quote = this.quote;
+      if (!quote || typeof quote.id !== "string" || this.quoteLifecycleBusy) return false;
+      const request = ++quoteLifecycleRequest;
+      this.quoteLifecycleBusy = true;
       try {
-        await api.deleteQuote(id);
-        if (this.quote?.id === id) this.quote = null;
+        await teamQuotes.revise(quote);
+        if (request !== quoteLifecycleRequest) return false;
+        if (this.quote?.id === quote.id) await this.openQuote(quote.id);
         await this.loadQuotes();
-        this.toast("Teklif silindi.", "ok");
+        if (request !== quoteLifecycleRequest) return false;
+        this.toast("Teklif düzenleme için taslağa alındı.", "ok");
+        return true;
       } catch (e) {
-        this.toast(String(e), "error");
+        if (request === quoteLifecycleRequest) this.toast(e instanceof Error ? e.message : String(e), "error");
+        return false;
+      } finally {
+        if (request === quoteLifecycleRequest) this.quoteLifecycleBusy = false;
       }
     },
 
-    /** ⚠️ Hata mesajı olduğu gibi gösteriliyor: "kur girin" gibi eyleme dönük bilgi taşıyor. */
-    async addQuoteLine(sku: string | null, name: string) {
-      const q = this.quote;
-      if (!q) return;
+    async deleteQuote(id: Quote["id"]): Promise<boolean> {
+      if (this.quoteLifecycleBusy) return false;
+      const request = ++quoteLifecycleRequest;
+      this.quoteLifecycleBusy = true;
       try {
+        if (typeof id === "string") {
+          const quote = this.quote?.id === id ? this.quote : this.quotes.find((item) => item.id === id);
+          if (!quote) throw new Error("Teklifi listeden yeniden açın.");
+          await teamQuotes.remove(quote);
+        } else await api.deleteQuote(id);
+        if (request !== quoteLifecycleRequest) return false;
+        if (this.quote?.id === id) {
+          quoteRequest++;
+          this.quote = null;
+        }
+        await this.loadQuotes();
+        if (request !== quoteLifecycleRequest) return false;
+        this.toast(typeof id === "string" ? "Teklif çöp kutusuna taşındı." : "Teklif silindi.", "ok");
+        return true;
+      } catch (e) {
+        if (request === quoteLifecycleRequest) this.toast(e instanceof Error ? e.message : String(e), "error");
+        return false;
+      } finally {
+        if (request === quoteLifecycleRequest) this.quoteLifecycleBusy = false;
+      }
+    },
+
+    async restoreQuote(id: string): Promise<boolean> {
+      const quote = this.quoteTrash.find((item) => item.id === id);
+      if (!quote || this.quoteLifecycleBusy) return false;
+      const request = ++quoteLifecycleRequest;
+      this.quoteLifecycleBusy = true;
+      try {
+        await teamQuotes.restore(quote);
+        if (request !== quoteLifecycleRequest) return false;
+        await this.loadQuotes();
+        if (request !== quoteLifecycleRequest) return false;
+        this.toast("Teklif geri yüklendi.", "ok");
+        return true;
+      } catch (e) {
+        if (request === quoteLifecycleRequest) this.toast(e instanceof Error ? e.message : String(e), "error");
+        return false;
+      } finally {
+        if (request === quoteLifecycleRequest) this.quoteLifecycleBusy = false;
+      }
+    },
+
+    async addQuoteLine(sku: string | null, name: string, pricing?: {
+      currency: string; fxRate: number | null; fxDate: string | null;
+    }) {
+      const q = this.quote;
+      if (!q) return false;
+      const request = quoteRequest;
+      const source = quoteSource();
+      const selected = () => request === quoteRequest && this.quote?.id === q.id && source === quoteSource();
+      const currency = pricing?.currency ?? q.currency;
+      const fxRate = pricing ? pricing.fxRate : q.fx_rate;
+      try {
+        if (q.items.length && currency !== q.currency) throw new Error("Teklifte kalem varken para birimi değiştirilemez.");
         if (typeof q.id === "string") {
-          if (q.revision == null) return;
+          if (q.revision == null) return false;
           const item = sku
-            ? await prepareTeamCatalogLine(sku, q.currency, q.fx_rate)
+            ? await prepareTeamCatalogLine(sku, currency, fxRate)
             : { sku: null, name: name.trim(), qty: 1, unit_price: 0,
               tax_rate: (await api.getQuoteDefaults()).tax_rate, cost: null };
-          if (!item.name) return;
-          await teamQuotes.save({ ...q, items: [...q.items, { ...item, id: crypto.randomUUID(), net: 0, margin: null }] }, q.revision);
-        } else if (sku) await api.addQuoteItemFromCatalog(q.id, sku, 1);
+          if (!item.name || !selected() || this.quote?.revision !== q.revision) return false;
+          await teamQuotes.save({
+            ...q, currency, fx_rate: fxRate, fx_date: pricing ? pricing.fxDate : q.fx_date,
+            items: [...q.items, { ...item, id: crypto.randomUUID(), net: 0, margin: null }],
+          }, q.revision);
+        } else if (sku) await api.addQuoteItemFromCatalog(q.id, sku, 1, pricing && {
+          ...pricing, expectedCurrency: q.currency, expectedFxRate: q.fx_rate,
+        });
         else await api.addQuoteItemManual(q.id, name);
-        await this.openQuote(q.id);
+        if (selected()) await this.openQuote(q.id);
+        if (source === quoteSource()) await this.loadQuotes();
+        return true;
       } catch (e) {
-        this.toast(String(e), "error");
+        if (selected()) this.toast(String(e), "error");
+        return false;
       }
     },
 
@@ -1961,27 +2086,35 @@ export const useStore = defineStore("app", {
     ) {
       const q = this.quote;
       if (!q) return;
+      const request = quoteRequest;
+      const source = quoteSource();
       try {
         if (typeof itemId === "string" && q.revision != null) {
           await teamQuotes.save({ ...q, items: q.items.map((item) => item.id === itemId
             ? { ...item, name, qty, unit_price: unitPrice, tax_rate: taxRate } : item) }, q.revision);
         } else if (typeof itemId === "number") await api.updateQuoteItem(itemId, name, qty, unitPrice, taxRate);
-        await this.openQuote(q.id);
+        if (source !== quoteSource()) return;
+        if (request === quoteRequest && this.quote?.id === q.id) await this.openQuote(q.id);
+        if (source === quoteSource()) await this.loadQuotes();
       } catch (e) {
-        this.toast(String(e), "error");
+        if (source === quoteSource()) this.toast(String(e), "error");
       }
     },
 
     async deleteQuoteLine(itemId: Quote["items"][number]["id"]) {
       const q = this.quote;
       if (!q) return;
+      const request = quoteRequest;
+      const source = quoteSource();
       try {
         if (typeof itemId === "string" && q.revision != null) {
           await teamQuotes.save({ ...q, items: q.items.filter((item) => item.id !== itemId) }, q.revision);
         } else if (typeof itemId === "number") await api.deleteQuoteItem(itemId);
-        await this.openQuote(q.id);
+        if (source !== quoteSource()) return;
+        if (request === quoteRequest && this.quote?.id === q.id) await this.openQuote(q.id);
+        if (source === quoteSource()) await this.loadQuotes();
       } catch (e) {
-        this.toast(String(e), "error");
+        if (source === quoteSource()) this.toast(String(e), "error");
       }
     },
 
@@ -1989,18 +2122,22 @@ export const useStore = defineStore("app", {
     async setQuoteStatus(status: string, reason = "") {
       const q = this.quote;
       if (!q) return;
+      const request = quoteRequest;
+      const source = quoteSource();
       try {
         if (typeof q.id === "string") await teamQuotes.transition(q, status, reason);
         else await api.setQuoteStatus(q.id, status, reason);
-        await this.openQuote(q.id);
-        await this.loadQuotes();
+        if (source !== quoteSource()) return;
+        if (request === quoteRequest && this.quote?.id === q.id) await this.openQuote(q.id);
+        if (source === quoteSource()) await this.loadQuotes();
+        if (source !== quoteSource()) return;
         if (q.contact_id) {
           void this.loadContacts();
           if (this.contact?.id === q.contact_id) void this.openContact(q.contact_id);
         }
         return true;
       } catch (e) {
-        this.toast(String(e), "error");
+        if (source === quoteSource()) this.toast(String(e), "error");
       }
     },
 

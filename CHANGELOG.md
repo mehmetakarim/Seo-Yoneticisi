@@ -13,6 +13,15 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.22.2
+- **Inside Manager.** Uygulamanın yeni adı pencere başlığında görünüyor. Sol menü doğrudan çalışma ekranlarıyla başlıyor.
+- **Ekip durumunuzu paylaşın.** Müsait, Meşgul, Toplantıda veya Molada seçeneklerinden birini seçin. Çevrimdışı ekip üyelerinin son görülme tarihini ve saatini görün.
+- **Profil fotoğrafı.** Sistem → Ekip ekranında fotoğrafınızı ekleyin veya değiştirin. Fotoğrafınız sağ ekip panelinde görünür.
+- **Mesajlar.** Enter ile gönderin, Shift+Enter ile yeni satır açın. Okunmamış mesajları Ekip ikonundan takip edin ve yeni mesajı uygulama içi bildirimle ve kısa bir sesle fark edin.
+- **Gönderim geçmişi ve teklif düzenleme.** Gönderilen teklifi yeniden taslağa alın, önceki sürümleri görün ve kaldırdığınız teklifleri Silinenler’den geri yükleyin.
+- **Güncel teklifler üstte.** Yeni veya güncellenen teklif animasyonla listenin başına taşınır.
+- **Katalog fiyatlarıyla teklif hazırlayın.** Yeni teklifler TL ile açılır. USD teklifinde eksik kuru, katalog ürününü seçtiğiniz yerde girebilirsiniz.
+
 ## v0.22.1
 - **Ekip paneli.** Her çalışma ekranından ekip üyelerinizi ve çevrimiçi durumlarını görün.
 - **Birebir mesajlaşma.** Bir ekip üyesini seçerek konuşmayı açın. Mesaj geçmişine yalnızca konuşmanın katılımcıları erişebilir.

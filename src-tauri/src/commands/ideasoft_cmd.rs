@@ -550,6 +550,7 @@ pub struct CatalogMatch {
     pub status: i64,
     pub stock: f64,
     pub canonical: String,
+    pub currency_abbr: Option<String>,
 }
 
 /// Verilen slug'ları yerel katalog tablosunda arar — ağ çağrısı YOK.
@@ -576,6 +577,7 @@ pub fn lookup_catalog(
                     status: r.get(3)?,
                     stock: r.get(4)?,
                     canonical: r.get(5)?,
+                    currency_abbr: None,
                 })
             },
         );
@@ -681,7 +683,7 @@ pub fn search_live_products(
     let conn = state.conn.lock().unwrap();
     let mut stmt = conn
         .prepare(
-            "SELECT sku, name, url FROM products
+            "SELECT sku, name, url, currency_abbr FROM products
              WHERE url IS NOT NULL AND url <> ''
                AND (lower(name) LIKE ?1 OR lower(sku) LIKE ?1)
              ORDER BY name LIMIT 25",
@@ -703,6 +705,7 @@ pub fn search_live_products(
                 status: 1,
                 stock: 0.0,
                 canonical: String::new(),
+                currency_abbr: r.get(3)?,
             })
         })
         .map_err(|e| format!("Ürünler okunamadı: {e}"))?

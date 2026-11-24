@@ -48,16 +48,6 @@ const connection = computed(() => {
 
 <template>
   <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-logo">
-        <Icon name="search" :size="17" :stroke-width="2.2" style="color:#fff" />
-      </div>
-      <div>
-        <div class="brand-title">SEO Yöneticisi</div>
-        <div class="brand-sub">Katalog Feed</div>
-      </div>
-    </div>
-
     <nav class="nav om-scroll" aria-label="Ana menü">
       <div v-for="(g, index) in groups" :key="g.group ?? ''" class="nav-group">
         <button
@@ -122,34 +112,7 @@ const connection = computed(() => {
   border-right: 1px solid var(--c-border);
   display: flex;
   flex-direction: column;
-  padding: 20px 14px;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 8px 22px;
-}
-.brand-logo {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-}
-.brand-title {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--c-text);
-}
-.brand-sub {
-  font-size: 11px;
-  color: var(--c-soft);
-  margin-top: 1px;
+  padding: 15px 14px 20px;
 }
 .nav {
   display: flex;

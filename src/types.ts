@@ -367,6 +367,7 @@ export interface CatalogMatch {
   status: number;
   stock: number;
   canonical: string;
+  currency_abbr?: string | null;
 }
 
 /** Asistan sohbetindeki tek mesaj. `role` Gemini'nin beklediği adlandırma. */
@@ -736,6 +737,7 @@ export interface Quote {
   note: string;
   close_reason: string;
   created_at: string;
+  updated_at?: string | null;
   sent_at: string | null;
   items: QuoteItem[];
   subtotal: number;

@@ -52,7 +52,7 @@ const syncResult = ref<SyncSummary | null>(null);
 const syncError = ref("");
 
 const TITLES = [
-  "SEO Yöneticisi'ne hoş geldiniz",
+  "Inside Manager’a hoş geldiniz",
   "Ürün feed'iniz",
   "Gemini API anahtarı",
   "İsteğe bağlı entegrasyonlar",

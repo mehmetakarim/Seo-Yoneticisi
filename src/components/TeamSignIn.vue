@@ -47,8 +47,8 @@ async function login(event: SubmitEvent) {
       :closable="false"
       :width="460"
       icon="search"
-      :label="teamUser && !checking ? 'Ekip çalışma alanı' : 'SEO Yöneticisi’ne hoş geldiniz'"
-      :title="teamUser && !checking ? 'Ekip çalışma alanı' : 'SEO Yöneticisi’ne hoş geldiniz'"
+      :label="teamUser && !checking ? 'Ekip çalışma alanı' : 'Inside Manager’a hoş geldiniz'"
+      :title="teamUser && !checking ? 'Ekip çalışma alanı' : 'Inside Manager’a hoş geldiniz'"
       :sub="canSignIn ? 'Ekip hesabınızla oturum açın.' : undefined"
     >
       <p v-if="checking || teamWorkspaceLoading" class="welcome-status" role="status">

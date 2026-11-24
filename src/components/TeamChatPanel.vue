@@ -1,42 +1,74 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from "vue";
-import { useTeamChat } from "../teamChat";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { useTeamChat, type TeamAvailability } from "../teamChat";
 import { teamProject, teamUser, teamWorkspace } from "../teamConnection";
+import { refreshTeamAvatars, teamAvatarOnline, teamAvatarSources } from "../teamProfile";
 import Icon from "./Icon.vue";
+import TeamAvatar from "./TeamAvatar.vue";
 
 const props = defineProps<{ open: boolean; pinned?: boolean }>();
-const emit = defineEmits<{ "update:open": [boolean]; "update:pinned": [boolean] }>();
+const emit = defineEmits<{
+  "update:open": [boolean];
+  "update:pinned": [boolean];
+  "unread-change": [total: number];
+  "incoming-message": [notice: { id: string; senderId: string; senderName: string }];
+}>();
 const pinLabel = computed(() => props.pinned ? "Sabitlemeyi kaldır" : "Sabitle");
+const messagePane = ref<HTMLElement | null>(null);
+let readingMember: string | undefined;
+
+function isReading(memberId: string) {
+  const pane = messagePane.value;
+  return props.open && readingMember === memberId && pane?.dataset.chatMember === memberId
+    && pane.isConnected && pane.clientHeight > 0 && !pane.closest("[inert]")
+    && pane.getAttribute("aria-busy") !== "true" && nearLatest()
+    && typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus();
+}
 
 const {
   members, selectedMember, messages, availability, loadingMessages, loadingOlder, hasOlder, sending, error,
+  unreadTotal, unreadByMember, incomingNotice, markRead,
+  memberStatusAvailable, memberStatusSaving, memberStatusError, setMemberStatus,
   selectMember, backToMembers, loadOlder, sendMessage, retry,
-} = useTeamChat();
+} = useTeamChat({ isReading });
+type ChatMember = (typeof members.value)[number];
 
 const presenceLabels = {
   online: "Çevrimiçi",
   offline: "Çevrimdışı",
   unknown: "Durum bilinmiyor",
 };
+const statusLabels = {
+  available: "Müsait",
+  busy: "Meşgul",
+  in_meeting: "Toplantıda",
+  on_break: "Molada",
+} satisfies Record<TeamAvailability, string>;
+const statusChoices = Object.entries(statusLabels);
 const maxLength = 2000;
 const closeButton = ref<HTMLButtonElement | null>(null);
 const backButton = ref<HTMLButtonElement | null>(null);
 const memberList = ref<HTMLElement | null>(null);
-const messagePane = ref<HTMLElement | null>(null);
 const historyButton = ref<HTMLButtonElement | null>(null);
 const drafts = reactive(new Map<string, string>());
 const newMessage = ref(false);
 const sendError = ref("");
 const latestNotice = ref("");
+const requestedStatus = ref<TeamAvailability | null>(null);
 const scopeVersion = ref(0);
 const leavingSurfaces = new Set<HTMLElement>();
+const composingInputs = new WeakSet<EventTarget>();
 
 watch([teamProject, teamUser, teamWorkspace], () => {
   scopeVersion.value += 1;
   for (const surface of leavingSurfaces) surface.style.display = "none";
   drafts.clear();
   sendError.value = "";
+  requestedStatus.value = null;
 }, { flush: "sync" });
+watch([() => props.open, teamAvatarOnline, teamProject, teamUser, teamWorkspace], ([open, online]) => {
+  if (open && online) void refreshTeamAvatars();
+}, { immediate: true });
 
 const draft = computed({
   get: () => drafts.get(selectedMember.value?.id ?? "") ?? "",
@@ -50,8 +82,29 @@ const selectedMemberId = computed(() => selectedMember.value?.id);
 const composerId = computed(() => `team-chat-message-${scopeVersion.value}-${selectedMemberId.value}`);
 const lastMessage = computed(() => messages.value[messages.value.length - 1]);
 const canSend = computed(() => availability.value === "online" && !sending.value && Boolean(draft.value.trim()));
+const visibleError = computed(() => error.value || sendError.value);
+const showConnection = computed(() => availability.value === "offline"
+  || (availability.value === "unavailable" && !visibleError.value));
+const unreadBadge = (memberId: string) => Math.min(100, unreadByMember.value.get(memberId) ?? 0);
+watch(selectedMemberId, (memberId) => { readingMember = memberId; }, { immediate: true, flush: "sync" });
+watch(unreadTotal, (total) => emit("unread-change", total), { immediate: true });
+watch(incomingNotice, (notice) => { if (notice) emit("incoming-message", notice); }, { flush: "sync" });
+watch(loadingMessages, (busy) => { if (!busy) markVisibleConversationRead(); }, { flush: "post" });
+
+onMounted(() => {
+  document.addEventListener("visibilitychange", markVisibleConversationRead);
+  window.addEventListener("focus", markVisibleConversationRead);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener("visibilitychange", markVisibleConversationRead);
+  window.removeEventListener("focus", markVisibleConversationRead);
+  emit("unread-change", 0);
+});
 const dayFormat = new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium" });
 const timeFormat = new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" });
+const lastSeenFormat = new Intl.DateTimeFormat("tr-TR", {
+  day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
 const messageRows = computed(() => {
   let previousDay = "";
   return messages.value.map((message) => {
@@ -64,8 +117,36 @@ const messageRows = computed(() => {
   });
 });
 
-function initials(name: string) {
-  return name.trim().split(/\s+/).slice(0, 2).map((word) => Array.from(word)[0] ?? "").join("").toLocaleUpperCase("tr-TR");
+function onlineStatus(member: ChatMember) {
+  return !member.self && member.presence === "online" && memberStatusAvailable.value ? member.status : undefined;
+}
+
+function memberStatusLabel(member: ChatMember) {
+  const status = onlineStatus(member);
+  return status ? statusLabels[status] : presenceLabels[member.presence];
+}
+
+function showLastSeen(member: ChatMember) {
+  return member.presence !== "online" && (memberStatusAvailable.value || Boolean(member.lastSeenAt));
+}
+
+function lastSeenText(value: string | null) {
+  const date = new Date(value ?? "");
+  return Number.isFinite(date.getTime()) ? lastSeenFormat.format(date) : "";
+}
+
+async function changeStatus(event: Event) {
+  const control = event.currentTarget as HTMLSelectElement;
+  const value = control.value as TeamAvailability;
+  if (!memberStatusAvailable.value || requestedStatus.value || memberStatusSaving.value || availability.value !== "online"
+    || !Object.prototype.hasOwnProperty.call(statusLabels, value)) return;
+  const scope = scopeVersion.value;
+  requestedStatus.value = value;
+  try {
+    await setMemberStatus(value);
+  } finally {
+    if (scope === scopeVersion.value) requestedStatus.value = null;
+  }
 }
 
 function close() {
@@ -85,13 +166,24 @@ function finishLeavingSurface(surface: Element) {
 
 function nearLatest() {
   const pane = messagePane.value;
-  return !pane || pane.scrollHeight - pane.clientHeight - pane.scrollTop < 56;
+  return !pane || pane.scrollHeight - pane.clientHeight - pane.scrollTop <= 16;
+}
+
+function markVisibleConversationRead() {
+  const memberId = selectedMemberId.value;
+  if (memberId && messagePane.value?.querySelector("[data-chat-message]") && isReading(memberId)) markRead(memberId);
+}
+
+function onMessageScroll() {
+  if (!nearLatest()) return;
+  newMessage.value = false;
+  markVisibleConversationRead();
 }
 
 function scrollToLatest() {
   const pane = messagePane.value;
   if (pane) pane.scrollTop = pane.scrollHeight;
-  newMessage.value = false;
+  onMessageScroll();
 }
 
 watch([() => props.open, scopeVersion], async ([open, scope]) => {
@@ -154,6 +246,21 @@ async function showOlder() {
   }
 }
 
+function onComposerKeydown(event: KeyboardEvent) {
+  const target = event.currentTarget;
+  if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey
+    || event.isComposing || event.keyCode === 229 || (target && composingInputs.has(target))) return;
+  event.preventDefault();
+  if (!event.repeat) void submit();
+}
+
+function setComposerComposition(event: CompositionEvent) {
+  const target = event.currentTarget;
+  if (!target) return;
+  if (event.type === "compositionstart") composingInputs.add(target);
+  else composingInputs.delete(target);
+}
+
 async function submit() {
   const member = selectedMember.value;
   const original = draft.value;
@@ -201,27 +308,31 @@ async function submit() {
         >
           <Icon name="arrowRight" :size="16" aria-hidden="true" />
         </button>
-        <span v-if="selectedMember" class="avatar" aria-hidden="true">{{ initials(selectedMember.name) }}</span>
+        <TeamAvatar v-if="selectedMember" class="avatar" :name="selectedMember.name" :source="teamAvatarSources.get(selectedMember.id)" />
         <span v-else class="icon-badge" aria-hidden="true"><Icon name="users" :size="17" /></span>
         <div class="header-copy">
           <h2 id="team-chat-title" :title="selectedMember?.name">{{ selectedMember?.name ?? "Ekip" }}</h2>
-          <span v-if="selectedMember" class="member-status">
-            <span class="presence-dot" :data-presence="selectedMember.presence" aria-hidden="true"></span>
-            {{ presenceLabels[selectedMember.presence] }}
+          <span
+            v-if="selectedMember"
+            class="member-status"
+            :class="{ 'presence-pending': selectedMember.presence === 'unknown' }"
+          >
+            <span class="presence-dot" :data-presence="selectedMember.presence" :data-status="onlineStatus(selectedMember)" aria-hidden="true"></span>
+            <span v-if="onlineStatus(selectedMember)" class="screen-reader-only">Çevrimiçi, </span>
+            {{ memberStatusLabel(selectedMember) }}
           </span>
           <span v-else-if="members.length" class="member-status">{{ members.length }} ekip üyesi</span>
         </div>
         <div class="panel-actions">
           <button
             type="button"
-            class="pin-action"
+            class="icon-action pin-action"
             aria-label="Ekip panelini sabitle"
             :aria-pressed="Boolean(pinned)"
             :title="pinLabel"
             @click="emit('update:pinned', !pinned)"
           >
-            <Icon name="pin" :size="14" aria-hidden="true" />
-            <span>{{ pinned ? "Sabit" : "Sabitle" }}</span>
+            <Icon name="pin" :size="15" aria-hidden="true" />
           </button>
           <button ref="closeButton" type="button" class="icon-action" aria-label="Ekip panelini kapat" title="Ekip panelini kapat" @click="close">
             <Icon name="x" :size="17" aria-hidden="true" />
@@ -229,16 +340,16 @@ async function submit() {
         </div>
       </header>
 
-      <div v-if="availability !== 'online' && (availability !== 'unavailable' || !error)" class="connection-note" :class="{ warning: availability !== 'connecting' }">
-        <Icon :name="availability === 'connecting' ? 'loader' : 'alert'" :size="15" :class="{ spin: availability === 'connecting' }" aria-hidden="true" />
+      <div v-if="showConnection" class="connection-note">
+        <Icon name="alert" :size="15" aria-hidden="true" />
         <span role="status">
-          {{ availability === "connecting" ? "Ekip bağlantısı kuruluyor…" : availability === "offline" ? "Çevrimdışısınız. Mesaj göndermek için bağlantı gerekli." : "Ekip bağlantısı şu anda kullanılamıyor." }}
+          {{ availability === "offline" ? "Çevrimdışısınız. Mesaj göndermek için bağlantı gerekli." : "Ekip bağlantısı şu anda kullanılamıyor." }}
         </span>
         <button v-if="availability === 'unavailable'" type="button" class="text-action" @click="retry()">Yenile</button>
       </div>
-      <div v-if="error || sendError" class="error-note" role="alert">
+      <div v-if="visibleError" class="error-note" role="alert">
         <Icon name="alert" :size="15" aria-hidden="true" />
-        <span>{{ error || sendError }}</span>
+        <span>{{ visibleError }}</span>
         <button v-if="availability !== 'offline' && !sendError" type="button" class="text-action" @click="retry()">Tekrar dene</button>
       </div>
 
@@ -251,28 +362,60 @@ async function submit() {
             class="chat-view member-list om-scroll"
             :data-chat-scope="scopeVersion"
             aria-label="Ekip üyeleri"
+            :aria-busy="availability === 'connecting'"
           >
             <ul v-if="members.length">
               <li v-for="member in members" :key="member.id">
                 <div v-if="member.self" class="member-row">
-                  <span class="avatar" aria-hidden="true">{{ initials(member.name) }}</span>
+                  <TeamAvatar :name="member.name" :source="teamAvatarSources.get(member.id)" />
                   <div class="member-copy">
                     <span class="member-name" :title="member.name">{{ member.name }} <span class="self-tag">Sen</span></span>
                     <span class="member-status">
                       <span class="presence-dot" :data-presence="member.presence" aria-hidden="true"></span>{{ presenceLabels[member.presence] }}
                     </span>
+                    <span v-if="showLastSeen(member)" class="member-last-seen">
+                      <template v-if="member.lastSeenAt">Son görülme · <time :datetime="member.lastSeenAt">{{ lastSeenText(member.lastSeenAt) }}</time></template>
+                      <template v-else>Son görülme kaydı yok</template>
+                    </span>
+                  </div>
+                  <div v-if="memberStatusAvailable" class="status-control">
+                    <select
+                      id="team-chat-status"
+                      class="status-select"
+                      aria-label="Ekip durumum"
+                      :aria-describedby="memberStatusError ? 'team-chat-status-error' : undefined"
+                      :aria-busy="Boolean(requestedStatus || memberStatusSaving)"
+                      :disabled="Boolean(requestedStatus || memberStatusSaving) || availability !== 'online'"
+                      :value="requestedStatus ?? member.status"
+                      @change="changeStatus"
+                    >
+                      <option v-for="[value, label] in statusChoices" :key="value" :value="value">{{ label }}</option>
+                    </select>
                   </div>
                 </div>
                 <button v-else class="member-row member-action" type="button" :data-team-member="member.id" @click="openConversation(member.id)">
-                  <span class="avatar" aria-hidden="true">{{ initials(member.name) }}</span>
+                  <TeamAvatar :name="member.name" :source="teamAvatarSources.get(member.id)" />
                   <span class="member-copy">
                     <span class="member-name" :title="member.name">{{ member.name }}</span>
                     <span class="member-status">
-                      <span class="presence-dot" :data-presence="member.presence" aria-hidden="true"></span>{{ presenceLabels[member.presence] }}
+                      <span class="presence-dot" :data-presence="member.presence" :data-status="onlineStatus(member)" aria-hidden="true"></span>
+                      <span v-if="onlineStatus(member)" class="screen-reader-only">Çevrimiçi, </span>
+                      {{ memberStatusLabel(member) }}
+                    </span>
+                    <span v-if="showLastSeen(member)" class="member-last-seen">
+                      <template v-if="member.lastSeenAt">Son görülme · <time :datetime="member.lastSeenAt">{{ lastSeenText(member.lastSeenAt) }}</time></template>
+                      <template v-else>Son görülme kaydı yok</template>
                     </span>
                   </span>
-                  <Icon name="message" :size="17" class="member-message" aria-hidden="true" />
+                  <template v-if="unreadBadge(member.id)">
+                    <span class="member-unread" aria-hidden="true">{{ unreadBadge(member.id) === 100 ? "99+" : unreadBadge(member.id) }}</span>
+                    <span class="screen-reader-only">{{ unreadByMember.get(member.id) }} okunmamış mesaj</span>
+                  </template>
+                  <Icon v-else name="message" :size="17" class="member-message" aria-hidden="true" />
                 </button>
+                <p v-if="member.self && memberStatusAvailable && memberStatusError" id="team-chat-status-error" class="status-error" role="alert">
+                  {{ memberStatusError }}
+                </p>
               </li>
             </ul>
             <div v-else-if="availability === 'online' && !error" class="empty-state">
@@ -286,10 +429,11 @@ async function submit() {
             <section
               ref="messagePane"
               class="message-pane om-scroll"
+              :data-chat-member="selectedMember.id"
               aria-label="Konuşma geçmişi"
               :aria-busy="loadingMessages"
               tabindex="0"
-              @scroll="nearLatest() && (newMessage = false)"
+              @scroll="onMessageScroll"
             >
               <div v-if="hasOlder || loadingOlder" class="history-row">
                 <button ref="historyButton" class="secondary-action" type="button" :disabled="loadingOlder" @click="showOlder">
@@ -297,11 +441,7 @@ async function submit() {
                   {{ loadingOlder ? "Yükleniyor…" : "Önceki mesajları yükle" }}
                 </button>
               </div>
-              <div v-if="loadingMessages && !messages.length" class="empty-state" role="status">
-                <Icon name="loader" :size="18" class="spin" />
-                <p>Mesajlar yükleniyor…</p>
-              </div>
-              <div v-else-if="!messages.length && !error && availability === 'online'" class="empty-state">
+              <div v-if="!loadingMessages && !messages.length && !visibleError && availability === 'online'" class="empty-state">
                 <span class="icon-badge"><Icon name="message" :size="19" /></span>
                 <strong>Konuşmayı başlat</strong>
               </div>
@@ -324,7 +464,10 @@ async function submit() {
             </div>
 
             <form class="composer" @submit.prevent="submit">
-              <label :for="composerId">Mesaj</label>
+              <div class="composer-label">
+                <label :for="composerId">Mesaj</label>
+                <span :id="`${composerId}-shortcut`" class="message-shortcut">Enter ile gönder · Shift+Enter ile satır ekle</span>
+              </div>
               <textarea
                 :id="composerId"
                 v-model="draft"
@@ -332,7 +475,10 @@ async function submit() {
                 rows="3"
                 :maxlength="maxLength"
                 placeholder="Mesajını yaz…"
-                :aria-describedby="`${composerId}-length`"
+                :aria-describedby="`${composerId}-shortcut ${composerId}-length`"
+                @keydown="onComposerKeydown"
+                @compositionstart="setComposerComposition"
+                @compositionend="setComposerComposition"
               ></textarea>
               <div class="composer-footer">
                 <span :id="`${composerId}-length`" class="message-length">{{ draft.length }} / {{ maxLength }}</span>
@@ -395,28 +541,9 @@ async function submit() {
   cursor: pointer;
 }
 .icon-action:hover, .member-action:hover { background: var(--c-hover); color: var(--c-text); }
-.pin-action {
-  flex: none;
-  min-height: 32px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--c-mid);
-  cursor: pointer;
-  font-size: 11.5px;
-  font-weight: 590;
-  line-height: 1.2;
-  text-align: left;
-}
-.pin-action svg { flex: none; }
-.pin-action:hover { background: var(--c-hover); color: var(--c-text); }
 .pin-action[aria-pressed="true"] { background: var(--accent-tint); color: var(--badge-bekliyor-c); }
 .back-action svg { transform: rotate(180deg); }
-.team-chat button:focus-visible, .message-pane:focus-visible {
+.team-chat button:focus-visible, .message-pane:focus-visible, .status-select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -432,7 +559,7 @@ async function submit() {
   font-size: 12px;
   line-height: 1.4;
 }
-.connection-note.warning { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
+.connection-note { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
 .error-note { color: var(--badge-eksik-c); background: var(--badge-eksik-bg); }
 .connection-note > svg, .error-note > svg { flex: none; }
 .connection-note span, .error-note span { min-width: 0; overflow-wrap: anywhere; }
@@ -476,19 +603,6 @@ async function submit() {
 }
 .member-action { cursor: pointer; }
 .member-action:hover { border-color: var(--c-border-soft); }
-.avatar {
-  flex: none;
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--c-border-soft);
-  border-radius: 10px;
-  background: var(--accent-tint);
-  color: var(--badge-bekliyor-c);
-  font-size: 12px;
-  font-weight: 650;
-}
 .member-name {
   display: block;
   overflow: hidden;
@@ -508,7 +622,48 @@ async function submit() {
 }
 .presence-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--c-faint); }
 .presence-dot[data-presence="online"] { background: var(--green); box-shadow: 0 0 0 2px var(--ok-soft-bg); }
+.presence-dot[data-status="busy"] { background: var(--badge-eksik-c); box-shadow: 0 0 0 2px var(--badge-eksik-bg); }
+.presence-dot[data-status="in_meeting"] { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-tint); }
+.presence-dot[data-status="on_break"] { background: var(--amber); box-shadow: 0 0 0 2px var(--warn-bg); }
 .presence-dot[data-presence="unknown"] { border: 1px solid var(--c-soft); background: transparent; }
+.member-last-seen {
+  display: block;
+  margin-top: 3px;
+  color: var(--c-mid);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.member-last-seen time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.status-control { position: relative; flex: none; }
+.status-control::after {
+  position: absolute;
+  top: calc(50% - 5px);
+  right: 11px;
+  width: 6px;
+  height: 6px;
+  border: solid var(--c-mid);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+  pointer-events: none;
+  content: "";
+}
+.status-select {
+  min-height: 31px;
+  appearance: none;
+  padding: 0 25px 0 9px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-input);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 590;
+  cursor: pointer;
+}
+.status-select:hover:enabled { border-color: var(--c-soft); }
+.status-select:disabled { color: var(--c-mid); cursor: default; }
+html[data-theme="dark"] .status-select { color-scheme: dark; }
+.status-error { margin: 0 9px 8px; padding-left: 44px; color: var(--badge-eksik-c); font-size: 11.5px; line-height: 1.35; }
 .self-tag {
   margin-left: 3px;
   padding: 2px 5px;
@@ -520,6 +675,19 @@ async function submit() {
 }
 .member-message { flex: none; color: var(--c-soft); }
 .member-action:hover .member-message { color: var(--accent); }
+.presence-pending { visibility: hidden; }
+.member-unread {
+  flex: none;
+  min-width: 21px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--badge-bekliyor-c);
+  font-size: 11px;
+  font-weight: 650;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 .conversation { display: flex; flex-direction: column; }
 .message-pane {
   position: relative;
@@ -543,7 +711,6 @@ async function submit() {
 }
 .empty-state .icon-badge { margin-bottom: 4px; }
 .empty-state strong { font-weight: 630; }
-.empty-state p { margin: 0; color: var(--c-mid); font-size: 12px; line-height: 1.45; }
 .history-row { display: flex; justify-content: center; margin-bottom: 10px; }
 .message-list { display: grid; gap: 8px; }
 .day-divider {
@@ -573,7 +740,9 @@ async function submit() {
 .bubble time { display: block; margin-top: 4px; text-align: right; color: var(--c-mid); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .jump-row { display: flex; justify-content: center; padding: 5px 8px; border-top: 1px solid var(--c-border); background: var(--c-list); }
 .composer { flex: none; display: grid; gap: 7px; padding: 12px 14px 14px; border-top: 1px solid var(--c-border); }
+.composer-label { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 8px; }
 .composer label { font-size: 12px; font-weight: 600; }
+.message-shortcut { color: var(--c-mid); font-size: 10.5px; line-height: 1.35; }
 .message-input {
   width: 100%;
   min-height: 62px;
@@ -623,8 +792,7 @@ async function submit() {
 }
 @media (max-width: 380px) {
   .panel-header { gap: 6px; padding-inline: 8px; }
-  .panel-header .avatar { width: 30px; height: 30px; }
+  .panel-header .avatar { --team-avatar-size: 30px; }
   .panel-header .icon-action { width: 28px; }
-  .pin-action { padding-inline: 5px; }
 }
 </style>

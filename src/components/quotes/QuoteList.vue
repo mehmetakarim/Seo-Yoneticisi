@@ -2,14 +2,13 @@
 /**
  * Teklif listesi (Faz T).
  *
- * Sıralama: **taslaklar önce, sonra gönderilenler**, sonra kapananlar — liste "hangi teklif
- * benden bir şey bekliyor" sorusuna göre dizili (Kişiler ekranındaki sonraki-adım sıralaması
- * ile aynı fikir).
+ * Sıralama teklifin son işlemine göre yapılır. Durum süzgeci aynı sıraya uygulanır.
  *
  * Kroma (`.list-panel`, `.search`, `.filters`) `styles.css`ten.
  */
-import { computed, onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useStore } from "../../store";
+import { quoteActivity } from "../../quoteOrder";
 import { teamClient, teamSession, teamUser, teamWorkspace } from "../../teamConnection";
 import { teamQuoteCanEdit, teamQuoteQueue, teamQuoteSaving, teamQuotesOffline } from "../../teamQuotes";
 import Icon from "../Icon.vue";
@@ -24,7 +23,13 @@ watch([teamClient, teamSession, teamWorkspace], ([client, session, workspace], _
   const channel = client.channel(`quotes:${workspace}`).on("postgres_changes", {
     event: "*", schema: "public", table: "team_quotes", filter: `workspace_id=eq.${workspace}`,
   }, () => { void store.loadQuotes(); }).subscribe();
-  onCleanup(() => { void client.removeChannel(channel); });
+  const trashChannel = client.channel(`quotes-trash:${workspace}`).on("postgres_changes", {
+    event: "*", schema: "public", table: "team_quote_trash_state", filter: `workspace_id=eq.${workspace}`,
+  }, ({ new: state }) => { void store.observeQuoteTrash(state); }).subscribe();
+  onCleanup(() => {
+    void client.removeChannel(channel);
+    void client.removeChannel(trashChannel);
+  });
 }, { immediate: true });
 
 const DURUMLAR = [
@@ -51,26 +56,54 @@ const suresiGecti = (q: { status: string; valid_until: string | null }) =>
 
 const para = (v: number, c: string) =>
   new Intl.NumberFormat("tr-TR", { style: "currency", currency: c, maximumFractionDigits: 0 })
-    .format(v);
+    .format(v === 0 ? 0 : v);
 
-const acikToplam = computed(() =>
-  store.quotes.filter((q) => q.status === "sent").reduce((t, q) => t + q.grand_total, 0),
-);
-const acikSayi = computed(() => store.quotes.filter((q) => q.status === "sent").length);
+const acikTeklifler = computed(() => store.quotes.filter((quote) => quote.status === "sent"));
+const acikToplamlar = computed(() => {
+  const totals = new Map<string, number>();
+  for (const quote of acikTeklifler.value) {
+    totals.set(quote.currency, (totals.get(quote.currency) ?? 0) + quote.grand_total);
+  }
+  return [...totals].map(([currency, total]) => para(total, currency)).join(" · ");
+});
 const ozet = computed(() => store.quoteSummary);
+const trashOpen = computed(() => !!teamUser.value && teamQuoteCanEdit.value && store.quoteTrashOpen);
+const trashBusy = computed(() => store.quoteLifecycleBusy || teamQuotesOffline.value || teamQuoteSaving.value);
+const dateFormat = new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" });
+const rowsPane = ref<HTMLElement | null>(null);
+
+watch(() => store.quotes, (quotes, previous) => {
+  const selected = store.quote;
+  const newest = quotes[0];
+  if (trashOpen.value || !selected || newest?.id !== selected.id || previous[0]?.id === selected.id) return;
+  const previousRow = previous.find(({ id }) => id === selected.id);
+  if (previousRow && quoteActivity(newest) > quoteActivity(previousRow)
+    && quoteActivity(selected) === quoteActivity(newest) && rowsPane.value?.scrollTop) {
+    rowsPane.value.scrollTop = 0;
+  }
+}, { flush: "post" });
+
+function deletionDate(value: string) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? dateFormat.format(date) : "";
+}
 </script>
 
 <template>
   <section class="list-panel">
     <div class="search-wrap">
       <div class="baslik">
-        <b>{{ store.quotes.length }} teklif</b>
-        <span v-if="acikSayi" class="acik">
-          {{ acikSayi }} açık ·
-          {{ para(acikToplam, store.quotes.find((q) => q.status === "sent")?.currency ?? "USD") }}
+        <b>{{ trashOpen ? "Silinenler" : `${store.quotes.length} teklif` }}</b>
+        <span v-if="!trashOpen && acikTeklifler.length" class="acik">
+          {{ acikTeklifler.length }} açık · {{ acikToplamlar }}
         </span>
       </div>
-      <button class="eylem birincil" title="Yeni teklif" :disabled="!!teamUser && (!teamQuoteCanEdit || teamQuoteSaving)" @click="store.createQuote(null, 'USD')">
+      <button v-if="teamUser && teamQuoteCanEdit" class="secondary-action trash-toggle" type="button"
+        :disabled="trashOpen ? store.quoteLifecycleBusy : trashBusy" @click="store.setQuoteTrashOpen(!trashOpen)">
+        <Icon :name="trashOpen ? 'fileEdit' : 'archive'" :size="14" aria-hidden="true" />
+        {{ trashOpen ? "Tekliflere dön" : "Silinenler" }}
+      </button>
+      <button v-if="!trashOpen" class="eylem birincil" title="Yeni teklif" :disabled="!!teamUser && (!teamQuoteCanEdit || teamQuoteSaving || store.quoteLifecycleBusy)" @click="store.createQuote()">
         <Icon name="plus" :size="15" :stroke-width="2.4" />
       </button>
     </div>
@@ -81,7 +114,7 @@ const ozet = computed(() => store.quoteSummary);
       <span v-if="teamQuoteQueue.conflicts" class="o-sat o-kay">{{ teamQuoteQueue.conflicts }} işlem eşitlenemedi</span>
     </div>
 
-    <div class="filters">
+    <div v-if="!trashOpen" class="filters">
       <button
         v-for="d in DURUMLAR"
         :key="d.key"
@@ -98,7 +131,7 @@ const ozet = computed(() => store.quoteSummary);
 
     <!-- Kazanma/kaybetme özeti: fazın bitiş şartı "kayıp nedeni raporlanabiliyor".
          Hiç kapanmış teklif yokken çizilmiyor — boş rapor gürültüdür. -->
-    <div v-if="ozet && (ozet.won_count || ozet.lost_count)" class="ozet">
+    <div v-if="!trashOpen && ozet && (ozet.won_count || ozet.lost_count)" class="ozet">
       <div class="o-sat">
         <span class="o-kaz">{{ ozet.won_count }} kazanıldı</span>
         <span v-for="[c, v] in ozet.won_totals" :key="c" class="o-tut">{{ para(v, c) }}</span>
@@ -113,8 +146,26 @@ const ozet = computed(() => store.quoteSummary);
       </div>
     </div>
 
-    <div class="rows om-scroll">
-      <template v-if="store.quotes.length">
+    <div ref="rowsPane" class="rows om-scroll">
+      <template v-if="trashOpen">
+        <p v-if="store.quotesBusy" class="trash-state" role="status">Silinen teklifler yükleniyor…</p>
+        <div v-else-if="store.quoteTrashError" class="trash-state" role="alert">
+          <p>{{ store.quoteTrashError }}</p>
+          <button class="secondary-action" type="button" :disabled="trashBusy" @click="store.loadQuotes()">Tekrar dene</button>
+        </div>
+        <ul v-else-if="store.quoteTrash.length" class="trash-list" aria-label="Silinen teklifler">
+          <li v-for="quote in store.quoteTrash" :key="quote.id" class="trash-row">
+            <div class="row-main">
+              <div class="row-name" :title="quote.no">{{ quote.no }}</div>
+              <time class="row-sub" :datetime="quote.deleted_at">{{ deletionDate(quote.deleted_at) }}</time>
+            </div>
+            <button class="secondary-action trash-restore" type="button" :aria-label="`${quote.no} teklifini geri yükle`"
+              :disabled="trashBusy" @click="store.restoreQuote(quote.id)">Geri yükle</button>
+          </li>
+        </ul>
+        <div v-else class="empty">Silinmiş teklif yok.</div>
+      </template>
+      <TransitionGroup v-else-if="store.quotes.length" name="quote-row" tag="div">
         <div
           v-for="q in store.quotes"
           :key="q.id"
@@ -133,7 +184,7 @@ const ozet = computed(() => store.quoteSummary);
             </div>
             <div class="row-sub">
               {{ q.contact_name || "kişi seçilmedi" }} · {{ q.items.length }} kalem
-              <template v-if="q.version_count"> · v{{ q.version_count + 1 }}</template>
+              <template v-if="q.version_count"> · v{{ q.version_count + (q.status === 'draft' ? 1 : 0) }}</template>
             </div>
           </div>
           <div class="tutar">
@@ -144,7 +195,7 @@ const ozet = computed(() => store.quoteSummary);
             </div>
           </div>
         </div>
-      </template>
+      </TransitionGroup>
 
       <div v-else-if="!store.quotesBusy" class="empty">
         <Icon name="fileEdit" :size="30" :stroke-width="1.6" style="margin-bottom: 10px" />
@@ -192,6 +243,11 @@ const ozet = computed(() => store.quoteSummary);
 .eylem:hover {
   opacity: 0.9;
 }
+.trash-toggle, .trash-restore { flex: none; padding: 7px 9px; font-size: 11.5px; }
+.trash-list { padding: 0; margin: 0; list-style: none; }
+.trash-row { display: flex; gap: 8px; align-items: center; padding: 11px 14px; border-bottom: 1px solid var(--c-border); }
+.trash-state { margin: 0; padding: 14px; color: var(--c-mid); font-size: 12px; }
+.trash-state p { margin: 0 0 8px; }
 .ozet {
   padding: 10px 16px 12px;
   border-bottom: 1px solid var(--c-border);
@@ -243,6 +299,12 @@ const ozet = computed(() => store.quoteSummary);
   border-bottom: 1px solid var(--c-border);
   cursor: pointer;
   transition: background 0.14s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.quote-row-move {
+  transition: transform var(--slide-duration) var(--slide-easing), background 0.14s cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .quote-row-move { transition: none; }
 }
 .row:hover {
   background: var(--c-hover);

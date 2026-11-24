@@ -333,8 +333,13 @@ export const api = {
   }) => invoke<void>("save_quote", q),
   deleteQuote: (id: number) => invoke<void>("delete_quote", { id }),
   /** Fiyat ve maliyet teklifin para birimine ÇEVRİLEREK ekleniyor (bir kez, donuyor). */
-  addQuoteItemFromCatalog: (quoteId: number, sku: string, qty: number) =>
-    invoke<void>("add_quote_item_from_catalog", { quoteId, sku, qty }),
+  addQuoteItemFromCatalog: (quoteId: number, sku: string, qty: number, pricing?: {
+    currency: string;
+    fxRate: number | null;
+    fxDate: string | null;
+    expectedCurrency: string;
+    expectedFxRate: number | null;
+  }) => invoke<void>("add_quote_item_from_catalog", { quoteId, sku, qty, pricing }),
   addQuoteItemManual: (quoteId: number, name: string) =>
     invoke<void>("add_quote_item_manual", { quoteId, name }),
   updateQuoteItem: (

@@ -1,4 +1,4 @@
-# SEO Yöneticisi (Faz 1)
+# Inside Manager
 
 kurumsalit.com'un IdeaSoft XML ürün feed'ini okuyup her ürünün meta SEO alanlarını
 (Sayfa Başlığı / Meta Açıklama / Site İçi Arama) validasyondan geçiren **Tauri v2 + Vue 3**
@@ -26,6 +26,8 @@ npm run tauri build    # üretim derlemesi
 
 DB konumu: `%APPDATA%/com.kurumsalit.seo-yoneticisi/seo-yoneticisi.db`
 Varsayılan feed: `https://www.kurumsalit.com/output/2567783262` (Ayarlar'dan değiştirilebilir).
+
+Windows yükleyicisinin `productName` değeri ve uygulama kimliği mevcut kurulumların otomatik güncellenmesi için önceki değerleri kullanır. Pencere başlığı Inside Manager olarak ayarlanır.
 
 ## Testler
 

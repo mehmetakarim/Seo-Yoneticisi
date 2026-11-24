@@ -100,7 +100,7 @@ pub fn catalog_line(
     // Ürünün kendi biriminde fiyat/maliyet oranı: maliyet çevrimi fiyatınkiyle AYNI yoldan
     // gitmeli, yoksa marj kur farkından bozulur.
     let oran = |hedef: f64| -> Option<f64> {
-        let p = price1.filter(|p| *p > 0.0)?;
+        let p = price1.filter(|p| p.is_finite() && *p > 0.0)?;
         Some(hedef / p)
     };
     let tl_net = price_tax_with_cur.map(|t| round2(t / (1.0 + tax_rate / 100.0)));
@@ -111,13 +111,19 @@ pub fn catalog_line(
             if urun_dolarda(product_currency) {
                 price1?
             } else {
-                let k = usd_try.filter(|r| *r > 0.0)?;
+                let k = usd_try.filter(|r| r.is_finite() && *r > 0.0)?;
                 round2(tl_net? / k)
             }
         }
     };
-    let maliyet = cost.and_then(|c| oran(birim).map(|k| round2(c * k)));
-    Some((round2(birim), maliyet))
+    let rounded_price = round2(birim);
+    if !rounded_price.is_finite() || birim < 0.0 {
+        return None;
+    }
+    let maliyet = cost.filter(|value| value.is_finite() && *value >= 0.0)
+        .and_then(|c| oran(birim).map(|k| round2(c * k)))
+        .filter(|value| value.is_finite());
+    Some((rounded_price, maliyet))
 }
 
 /// Altında marjın "düşük" sayıldığı yüzde.

@@ -3,17 +3,24 @@ import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import {
   teamAccessIssue, teamClient, teamProject, teamReachable, teamSession, teamUser, teamWorkspace,
 } from "./teamConnection";
+import { compareServerTimestamps, normalizeServerTimestamp, useTeamMemberStatus, type TeamAvailability } from "./teamMemberStatus";
+
+export type { TeamAvailability } from "./teamMemberStatus";
 
 type Presence = "online" | "offline" | "unknown";
-type Member = { id: string; name: string; presence: Presence; self: boolean };
+type Member = { id: string; name: string; presence: Presence; self: boolean; status: TeamAvailability; lastSeenAt: string | null };
 type Message = { id: string; body: string; createdAt: string; mine: boolean };
-type MessageRow = {
-  id: string; workspace_id: string; sender_id: string; recipient_id: string; body: string; created_at: string;
+type Envelope = {
+  id: string; workspace_id: string; sender_id: string; recipient_id: string; created_at: string;
 };
+type MessageRow = Envelope & { body: string };
 type Cursor = { id: string; createdAt: string };
+type IncomingNotice = { id: string; senderId: string; senderName: string };
+type Inbox = { initialized: boolean; baseline: Cursor | null; cursor: Cursor | null; seen: Set<string> };
 type Transport = {
   client: SupabaseClient; workspace: string; user: string; scope: string;
   channels: RealtimeChannel[]; abort: AbortController;
+  syncingInbox: boolean; inboxRefreshQueued: boolean;
 };
 type Conversation = {
   member: string; ready: boolean; oldest: Cursor | null; latest: Cursor | null;
@@ -23,9 +30,9 @@ type PendingSend = { id: string };
 
 const pageSize = 40;
 const messageLimit = 2_000;
-const messageColumns = "id,workspace_id,sender_id,recipient_id,body,created_at";
+const inboxColumns = "id,workspace_id,sender_id,recipient_id,created_at";
+const messageColumns = `${inboxColumns},body`;
 const uuid = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i;
-const timestamp = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}(?::?\d{2})?)$/;
 const rosterFeedback = {
   setup: "Ekip sohbeti Supabase’te henüz etkin değil. Kurulum tamamlandıktan sonra tekrar deneyin.",
   membership: "Bu çalışma alanında ekip sohbetine erişiminiz doğrulanamadı. Ekip üyeliğinizi kontrol edin.",
@@ -33,25 +40,31 @@ const rosterFeedback = {
 };
 type RosterIssue = keyof typeof rosterFeedback;
 
-function messageRow(value: unknown): MessageRow | null {
+function messageEnvelope(value: unknown): Envelope | null {
   if (!value || typeof value !== "object") return null;
-  const row = value as Partial<MessageRow>;
-  if (typeof row.id !== "string" || !uuid.test(row.id) || typeof row.workspace_id !== "string"
-    || typeof row.sender_id !== "string" || typeof row.recipient_id !== "string" || typeof row.body !== "string"
-    || typeof row.created_at !== "string" || !timestamp.test(row.created_at)) return null;
-  // Realtime can use PostgreSQL's space separator and short UTC offset; normalize for the WebView.
-  const createdAt = row.created_at.replace(" ", "T").replace(/([+-]\d{2})(\d{2})?$/, (_, hours, minutes) => `${hours}:${minutes ?? "00"}`);
-  return Number.isFinite(Date.parse(createdAt)) ? { ...row, created_at: createdAt } as MessageRow : null;
+  const row = value as Partial<Envelope>;
+  const createdAt = normalizeServerTimestamp(row.created_at);
+  if (typeof row.id !== "string" || !uuid.test(row.id) || typeof row.workspace_id !== "string" || !uuid.test(row.workspace_id)
+    || typeof row.sender_id !== "string" || !uuid.test(row.sender_id) || typeof row.recipient_id !== "string" || !uuid.test(row.recipient_id)
+    || !createdAt) return null;
+  const { id, workspace_id, sender_id, recipient_id } = row;
+  return { id, workspace_id, sender_id, recipient_id, created_at: createdAt };
 }
 
-function messageOrder(a: Message, b: Message) {
-  const microseconds = (value: string) => Number((/\.(\d+)/.exec(value)?.[1] ?? "").padEnd(6, "0").slice(3));
-  return Date.parse(a.createdAt) - Date.parse(b.createdAt)
-    || microseconds(a.createdAt) - microseconds(b.createdAt)
-    || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+function messageRow(value: unknown): MessageRow | null {
+  const row = messageEnvelope(value);
+  const body = (value as Partial<MessageRow> | null | undefined)?.body;
+  return row && typeof body === "string" ? { ...row, body } : null;
 }
 
-export function useTeamChat() {
+function messageOrder(a: Cursor, b: Cursor) {
+  return compareServerTimestamps(a.createdAt, b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+const envelopeCursor = (row: Envelope): Cursor => ({ id: row.id, createdAt: row.created_at });
+const emptyInbox = (): Inbox => ({ initialized: false, baseline: null, cursor: null, seen: new Set() });
+
+export function useTeamChat({ isReading }: { isReading?: (memberId: string) => boolean } = {}) {
   const roster = shallowRef<{ id: string; name: string }[]>([]);
   const presence = shallowRef<Record<string, Presence>>({});
   const selectedId = ref("");
@@ -63,12 +76,16 @@ export function useTeamChat() {
   const hasOlder = ref(false);
   const sending = ref(false);
   const actionError = ref("");
-  const realtimeError = ref("");
+  const unread = shallowRef(new Map<string, number>());
+  const incomingNotice = shallowRef<IncomingNotice | null>(null);
+  const unreadByMember = computed<ReadonlyMap<string, number>>(() => unread.value);
+  const unreadTotal = computed(() => [...unread.value.values()].reduce((total, count) => total + count, 0));
   const retryCount = ref(0);
   const pendingSends = new Map<string, PendingSend>();
   let conversation: Conversation | null = null;
   let activeSend: PendingSend | null = null;
   let transport: Transport | null = null;
+  let inbox = emptyInbox();
   let removingChannels: Promise<unknown> = Promise.resolve();
 
   const scope = computed(() => !teamAccessIssue.value && teamProject.value && uuid.test(teamUser.value)
@@ -78,16 +95,107 @@ export function useTeamChat() {
   const availability = computed(() => !scope.value ? "unavailable" : teamReachable.value === false ? "offline"
     : !onlineClient.value || rosterStatus.value === "loading" ? "connecting"
     : rosterStatus.value === "unavailable" ? "unavailable" : "online");
-  const members = computed<Member[]>(() => roster.value.map((member) => ({
-    ...member, self: member.id === teamUser.value, presence: presence.value[member.id] ?? "unknown",
-  })));
+  const memberStatus = useTeamMemberStatus<Transport>(current);
+  const members = computed<Member[]>(() => roster.value.map((member) => {
+    const stored = memberStatus.rows.value.get(member.id);
+    return {
+      ...member, self: member.id === teamUser.value, presence: presence.value[member.id] ?? "unknown",
+      status: stored?.status ?? "available", lastSeenAt: stored?.lastSeenAt ?? null,
+    };
+  }));
   const selectedMember = computed(() => members.value.find(({ id }) => id === selectedId.value) ?? null);
-  const error = computed(() => (rosterIssue.value ? rosterFeedback[rosterIssue.value] : "")
-    || actionError.value || realtimeError.value);
+  const error = computed(() => (rosterIssue.value ? rosterFeedback[rosterIssue.value] : "") || actionError.value);
 
   function current(run: Transport, chat?: Conversation) {
     return transport === run && scope.value === run.scope && onlineClient.value === run.client
       && (!chat || conversation === chat);
+  }
+
+  function resetInbox() {
+    inbox = emptyInbox();
+    unread.value = new Map();
+    incomingNotice.value = null;
+  }
+
+  function markRead(memberId: string) {
+    // History may already display rows before the inbox replay reaches them.
+    if (conversation?.member === memberId) {
+      for (const message of messages.value) {
+        if (!message.mine) inbox.seen.add(message.id);
+      }
+    }
+    if (unread.value.has(memberId)) {
+      const remaining = new Map(unread.value);
+      remaining.delete(memberId);
+      unread.value = remaining;
+    }
+    if (incomingNotice.value?.senderId === memberId) incomingNotice.value = null;
+  }
+
+  function inbound(row: Envelope, run: Transport) {
+    return row.workspace_id === run.workspace && row.recipient_id === run.user && row.sender_id !== run.user;
+  }
+
+  function recordIncoming(row: Envelope, run: Transport) {
+    if (!current(run) || !inbound(row, run) || inbox.seen.has(row.id)
+      || (inbox.baseline && messageOrder(envelopeCursor(row), inbox.baseline) <= 0)) return;
+    const member = roster.value.find(({ id }) => id === row.sender_id);
+    if (!member) return;
+    inbox.seen.add(row.id);
+    if (isReading?.(member.id)) return;
+    unread.value = new Map(unread.value).set(member.id, (unread.value.get(member.id) ?? 0) + 1);
+    return { id: row.id, senderId: member.id, senderName: member.name };
+  }
+
+  async function refreshInbox(run: Transport) {
+    if (!current(run)) return;
+    if (run.syncingInbox) {
+      run.inboxRefreshQueued = true;
+      return;
+    }
+    run.syncingInbox = true;
+    let notice: IncomingNotice | undefined;
+    try {
+      do {
+        const ascending = inbox.initialized;
+        const boundary = inbox.cursor;
+        const query = run.client.from("team_direct_messages").select(inboxColumns)
+          .eq("workspace_id", run.workspace).eq("recipient_id", run.user);
+        if (ascending && boundary) {
+          query.or(`created_at.gt.${boundary.createdAt},and(created_at.eq.${boundary.createdAt},id.gt.${boundary.id})`);
+        }
+        const result = await query.order("created_at", { ascending }).order("id", { ascending })
+          .limit(ascending ? pageSize : 1).abortSignal(run.abort.signal).retry(false);
+        if (!current(run) || result.error) return;
+        const rows = (result.data ?? []).flatMap((entry) => {
+          const row = messageEnvelope(entry);
+          return row && inbound(row, run) && (!boundary || messageOrder(envelopeCursor(row), boundary) > 0) ? [row] : [];
+        });
+        if (!ascending) {
+          // The first successful read establishes a baseline for this scope.
+          inbox.baseline = rows[0] ? envelopeCursor(rows[0]) : null;
+          inbox.cursor = inbox.baseline;
+          inbox.initialized = true;
+          return;
+        }
+        for (const row of rows) notice = recordIncoming(row, run) ?? notice;
+        const latest = rows[rows.length - 1];
+        if (!latest || !current(run)) return;
+        inbox.cursor = envelopeCursor(latest);
+        if ((result.data?.length ?? 0) < pageSize) return;
+      } while (current(run));
+    } catch {
+      // Realtime can still deliver messages. The next successful subscription retries the inbox read.
+    } finally {
+      run.syncingInbox = false;
+      if (current(run)) {
+        if (notice && unread.value.has(notice.senderId) && !isReading?.(notice.senderId)) incomingNotice.value = notice;
+        if (run.inboxRefreshQueued) {
+          run.inboxRefreshQueued = false;
+          void refreshInbox(run);
+        }
+      }
+    }
   }
 
   function inConversation(row: MessageRow, run: Transport, chat: Conversation) {
@@ -259,9 +367,9 @@ export function useTeamChat() {
   function stop(run: Transport) {
     if (transport !== run) return;
     transport = null;
+    memberStatus.stop(run);
     run.abort.abort();
     presence.value = {};
-    realtimeError.value = "";
     loadingMessages.value = false;
     loadingOlder.value = false;
     if (conversation) {
@@ -278,6 +386,8 @@ export function useTeamChat() {
       backToMembers();
       roster.value = [];
       presence.value = {};
+      resetInbox();
+      memberStatus.reset();
       pendingSends.clear();
       activeSend = null;
       sending.value = false;
@@ -289,19 +399,22 @@ export function useTeamChat() {
       config: { private: true, presence: { key: run.user } },
     });
     run.channels.push(channel);
+    let subscription = 0;
     channel.on("presence", { event: "sync" }, () => {
       if (!current(run)) return;
       const online = Object.values(channel.presenceState()).some((entries) => entries.length > 0);
       presence.value = { ...presence.value, [member.id]: online ? "online" : "offline" };
     }).subscribe((status) => {
       if (!current(run)) return;
+      const join = ++subscription;
+      if (member.self) memberStatus.setTracking(run, false);
       if (status !== "SUBSCRIBED") {
         presence.value = { ...presence.value, [member.id]: "unknown" };
       } else if (member.self) {
         void channel.track({ user_id: run.user }).then((result) => {
-          if (result !== "ok" && current(run)) {
-            presence.value = { ...presence.value, [member.id]: "unknown" };
-          }
+          if (!current(run) || join !== subscription) return;
+          if (result === "ok") memberStatus.setTracking(run, true);
+          else presence.value = { ...presence.value, [member.id]: "unknown" };
         }).catch(() => {});
       }
     });
@@ -327,22 +440,32 @@ export function useTeamChat() {
       roster.value = [...byId.values()];
       rosterStatus.value = "ready";
       if (selectedId.value && !byId.has(selectedId.value)) backToMembers();
+      for (const id of unread.value.keys()) {
+        if (!byId.has(id)) markRead(id);
+      }
+      memberStatus.start(run);
       for (const member of members.value) trackMember(run, member);
+
+      if (!inbox.initialized) await refreshInbox(run);
+      if (!current(run)) return;
 
       const channel = run.client.channel(`team-chat:${run.workspace}:${run.user}`);
       run.channels.push(channel);
       const receive = ({ new: value }: { new: unknown }) => {
         const row = messageRow(value);
-        if (row && conversation) mergeRows([row], run, conversation);
+        if (!row) return;
+        if (conversation) mergeRows([row], run, conversation);
+        const notice = recordIncoming(row, run);
+        if (notice) incomingNotice.value = notice;
       };
       channel.on("postgres_changes", {
         event: "INSERT", schema: "public", table: "team_direct_messages", filter: `recipient_id=eq.${run.user}`,
       }, receive).on("postgres_changes", {
         event: "INSERT", schema: "public", table: "team_direct_messages", filter: `sender_id=eq.${run.user}`,
       }, receive).subscribe((status) => {
-        if (!current(run)) return;
-        realtimeError.value = status === "SUBSCRIBED" ? "" : "Canlı mesaj bağlantısı yeniden kuruluyor.";
-        if (status === "SUBSCRIBED") void refreshMessages(run);
+        if (!current(run) || status !== "SUBSCRIBED") return;
+        void refreshInbox(run);
+        void refreshMessages(run);
       });
       void refreshMessages(run);
     } catch {
@@ -355,6 +478,8 @@ export function useTeamChat() {
     roster.value = [];
     rosterIssue.value = null;
     presence.value = {};
+    resetInbox();
+    memberStatus.reset();
     pendingSends.clear();
     activeSend = null;
     sending.value = false;
@@ -364,6 +489,7 @@ export function useTeamChat() {
     if (!key || !client) return;
     const run: Transport = {
       client, scope: key, user: teamUser.value, workspace: teamWorkspace.value, channels: [], abort: new AbortController(),
+      syncingInbox: false, inboxRefreshQueued: false,
     };
     transport = run;
     rosterStatus.value = "loading";
@@ -383,6 +509,8 @@ export function useTeamChat() {
 
   return {
     members, selectedMember, messages, availability, loadingMessages, loadingOlder, hasOlder, sending, error,
-    selectMember, backToMembers, loadOlder, sendMessage, retry,
+    unreadTotal, unreadByMember, incomingNotice, markRead, selectMember, backToMembers, loadOlder, sendMessage, retry,
+    memberStatusAvailable: memberStatus.memberStatusAvailable, memberStatusSaving: memberStatus.memberStatusSaving,
+    memberStatusError: memberStatus.memberStatusError, setMemberStatus: memberStatus.setMemberStatus,
   };
 }

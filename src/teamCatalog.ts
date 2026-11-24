@@ -159,7 +159,7 @@ export async function searchTeamCatalog(term: string): Promise<CatalogMatch[]> {
   return products.filter((item) => [item.name, item.sku].some((value) => value.toLocaleLowerCase("tr").includes(query)))
     .slice(0, 15).map(({ sku, name, facts }) => ({
       sku, name, slug: sku, id: Number(facts.id) || 0, stock: facts.quantity ?? 0,
-      status: Number(facts.status) || 0, canonical: facts.url ?? "",
+      status: Number(facts.status) || 0, canonical: facts.url ?? "", currency_abbr: facts.currency_abbr,
     }));
 }
 
