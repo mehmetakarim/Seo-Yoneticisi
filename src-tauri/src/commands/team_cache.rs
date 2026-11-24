@@ -35,6 +35,11 @@ pub enum CacheRequest {
     Discard {
         ids: Vec<String>,
     },
+    ResolveQuoteConflict {
+        quote_id: String,
+        expected_ids: Vec<String>,
+        remote: Value,
+    },
 }
 
 #[tauri::command]
@@ -149,12 +154,77 @@ fn run(conn: &mut Connection, scope: &str, request: CacheRequest) -> rusqlite::R
         CacheRequest::Discard { ids } => {
             let tx = conn.transaction()?;
             for id in ids {
-                tx.execute("DELETE FROM outbox WHERE scope = ?1 AND id = ?2", params![scope, id])?;
+                tx.execute(
+                    "DELETE FROM outbox WHERE scope = ?1 AND id = ?2",
+                    params![scope, id],
+                )?;
             }
             tx.commit()?;
             Ok(Value::Null)
         }
+        CacheRequest::ResolveQuoteConflict {
+            quote_id,
+            expected_ids,
+            remote,
+        } => {
+            resolve_quote_conflict(conn, scope, &quote_id, &expected_ids, &remote).map(Value::Bool)
+        }
     }
+}
+
+fn resolve_quote_conflict(
+    conn: &mut Connection,
+    scope: &str,
+    quote_id: &str,
+    expected_ids: &[String],
+    remote: &Value,
+) -> rusqlite::Result<bool> {
+    if expected_ids.is_empty()
+        || remote["id"].as_str() != Some(quote_id)
+        || remote["revision"].as_u64().unwrap_or(0) == 0
+    {
+        return Ok(false);
+    }
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let operations = {
+        let mut stmt = tx.prepare(
+            "SELECT id, contact, payload, conflict FROM outbox
+             WHERE scope = ?1 AND json_extract(contact, '$.id') = ?2 ORDER BY seq",
+        )?;
+        let rows = stmt.query_map(params![scope, quote_id], |row| {
+            let contact: Value =
+                serde_json::from_str(&row.get::<_, String>(1)?).map_err(json_error)?;
+            let payload: Value =
+                serde_json::from_str(&row.get::<_, String>(2)?).map_err(json_error)?;
+            Ok(json!({ "id": row.get::<_, String>(0)?, "contact": contact,
+                "payload": payload, "conflict": row.get::<_, Option<String>>(3)? }))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let ids = operations
+        .iter()
+        .map(|op| op["id"].as_str().unwrap_or_default());
+    if !ids.eq(expected_ids.iter().map(String::as_str))
+        || !operations
+            .iter()
+            .any(|op| op["conflict"].as_str().is_some())
+    {
+        return Ok(false);
+    }
+    // Preserve the inspected local operations separately from the sync queue.
+    let recovery = format!(
+        "quote-conflict:{}:{}",
+        quote_id,
+        expected_ids.last().unwrap()
+    );
+    upsert(&tx, scope, &recovery, &Value::Array(operations))?;
+    upsert(&tx, scope, &format!("contact:{quote_id}"), remote)?;
+    tx.execute(
+        "DELETE FROM outbox WHERE scope = ?1 AND json_extract(contact, '$.id') = ?2",
+        params![scope, quote_id],
+    )?;
+    tx.commit()?;
+    Ok(true)
 }
 
 fn upsert(conn: &Connection, scope: &str, key: &str, data: &Value) -> rusqlite::Result<()> {
@@ -216,5 +286,73 @@ fn outbox_is_scoped_and_acknowledged_with_cache_update() {
         )
         .unwrap(),
         contact
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn quote_conflict_resolution_requires_the_exact_queue_and_preserves_other_work() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    let scope = "workspace:a";
+    for (queue_scope, id, quote_id, revision) in [
+        (scope, "first", "target", 2),
+        (scope, "other", "other-quote", 2),
+        (scope, "last", "target", 3),
+        ("workspace:b", "separate", "target", 2),
+    ] {
+        run(
+            &mut conn,
+            queue_scope,
+            CacheRequest::Queue {
+                id: id.into(),
+                contact: json!({ "id": quote_id, "revision": revision }),
+                payload: json!({"expected_revision": revision - 1}),
+            },
+        )
+        .unwrap();
+    }
+    let remote = json!({ "id": "target", "revision": 4 });
+    let resolve = |conn: &mut Connection, ids: &[&str]| {
+        run(
+            conn,
+            scope,
+            CacheRequest::ResolveQuoteConflict {
+                quote_id: "target".into(),
+                expected_ids: ids.iter().map(|id| (*id).into()).collect(),
+                remote: remote.clone(),
+            },
+        )
+        .unwrap()
+    };
+    assert_eq!(resolve(&mut conn, &["first", "last"]), json!(false));
+    run(
+        &mut conn,
+        scope,
+        CacheRequest::Conflict {
+            id: "first".into(),
+            reason: "revision changed".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(resolve(&mut conn, &["first"]), json!(false));
+    assert_eq!(
+        resolve(&mut conn, &["first", "other", "last"]),
+        json!(false)
+    );
+    assert_eq!(resolve(&mut conn, &["first", "last"]), json!(true));
+    let remaining = run(&mut conn, scope, CacheRequest::Pending).unwrap();
+    assert_eq!(remaining.as_array().unwrap().len(), 1);
+    assert_eq!(remaining[0]["id"], "other");
+    assert_eq!(
+        run(&mut conn, "workspace:b", CacheRequest::Pending).unwrap()[0]["id"],
+        "separate"
+    );
+    let read = |conn: &mut Connection, key: &str| {
+        run(conn, scope, CacheRequest::Read { key: key.into() }).unwrap()
+    };
+    assert_eq!(read(&mut conn, "contact:target"), remote);
+    assert_eq!(
+        read(&mut conn, "quote-conflict:target:last")[1]["contact"]["revision"],
+        3
     );
 }

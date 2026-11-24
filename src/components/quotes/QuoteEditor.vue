@@ -19,6 +19,7 @@ import Icon from "../Icon.vue";
 import QuoteDocModal from "./QuoteDocModal.vue";
 import QuoteHistoryModal from "./QuoteHistoryModal.vue";
 import QuoteLifecycleDialog from "./QuoteLifecycleDialog.vue";
+import QuoteConflictModal from "./QuoteConflictModal.vue";
 
 const store = useStore();
 const quoteContacts = ref<Contact[]>([]);
@@ -294,6 +295,9 @@ const historyTrigger = ref<HTMLButtonElement | null>(null);
 const historyQuote = ref<{ id: string; number: string } | null>(null);
 const canViewHistory = computed(() => typeof q.value?.id === "string" && !!teamUser.value && !!teamWorkspace.value && !teamAccessIssue.value);
 const lifecycle = ref<{ action: "revise" | "trash"; id: string; number: string } | null>(null);
+const conflictQuote = ref<{ id: string; number: string } | null>(null);
+const conflictTrigger = ref<HTMLButtonElement | null>(null);
+const heading = ref<HTMLHeadingElement | null>(null);
 const reviseTrigger = ref<HTMLButtonElement | null>(null);
 const trashTrigger = ref<HTMLButtonElement | null>(null);
 const canManageQuote = computed(() => canViewHistory.value && teamQuoteCanEdit.value);
@@ -301,7 +305,27 @@ const canManageQuote = computed(() => canViewHistory.value && teamQuoteCanEdit.v
 watch([() => q.value?.id, teamProject, teamUser, teamWorkspace, teamAccessIssue], () => {
   historyQuote.value = null;
   lifecycle.value = null;
+  conflictQuote.value = null;
 }, { flush: "sync" });
+
+function openConflict() {
+  const quote = q.value;
+  if (conflict.value && typeof quote?.id === "string") conflictQuote.value = { id: quote.id, number: quote.no };
+}
+
+async function closeConflict() {
+  const current = conflictQuote.value;
+  conflictQuote.value = null;
+  await nextTick();
+  if (current?.id === q.value?.id) (conflictTrigger.value ?? heading.value)?.focus();
+}
+
+function useRemoteQuote(remote: Quote) {
+  if (conflictQuote.value?.id !== remote.id || q.value?.id !== remote.id) return;
+  store.useResolvedQuote(remote);
+  store.toast("Ortak teklif sürümü kullanılıyor.", "ok");
+  void closeConflict();
+}
 
 function openHistory() {
   const quote = q.value;
@@ -406,7 +430,7 @@ const eylemler = computed(() => (DURUM_EYLEM[q.value?.status ?? ""] ?? [])
   <section v-if="q" class="ed om-scroll">
     <div class="head">
       <div>
-        <h2>{{ q.no }}</h2>
+        <h2 ref="heading" tabindex="-1">{{ q.no }}</h2>
         <div class="h-alt">
           {{ q.status_label }}
           <template v-if="q.sent_at"> · gönderim {{ q.sent_at.slice(0, 10) }}</template>
@@ -447,9 +471,12 @@ const eylemler = computed(() => (DURUM_EYLEM[q.value?.status ?? ""] ?? [])
       </div>
     </div>
 
-    <p v-if="conflict" class="hint kirli-not" role="status">
-      Bu teklifin yerel değişiklikleri saklandı. Eşitleme çakışması nedeniyle düzenlemeye ara verildi.
-    </p>
+    <div v-if="conflict" class="quote-conflict">
+      <p class="hint" role="status">Bu teklifin cihazdaki değişiklikleri ortak sürümle çakıştı.</p>
+      <button ref="conflictTrigger" class="secondary-action" type="button" aria-haspopup="dialog" @click="openConflict">
+        Çakışmayı incele
+      </button>
+    </div>
     <p v-if="kirli && !locked" class="hint kirli-not">
       <Icon name="info" :size="13" />
       Başlık alanlarında kaydedilmemiş değişiklik var. <b>Satır değişiklikleri anında
@@ -712,6 +739,8 @@ const eylemler = computed(() => (DURUM_EYLEM[q.value?.status ?? ""] ?? [])
     />
     <QuoteLifecycleDialog v-if="lifecycle" :action="lifecycle.action" :number="lifecycle.number" :busy="store.quoteLifecycleBusy"
       @close="closeLifecycle" @confirm="confirmLifecycle" />
+    <QuoteConflictModal v-if="conflictQuote" :key="conflictQuote.id" :id="conflictQuote.id" :number="conflictQuote.number"
+      @close="closeConflict" @accepted="useRemoteQuote" />
   </section>
 
   <section v-else class="bos-sec">
@@ -812,6 +841,19 @@ h2 {
 .kirli-not {
   margin-bottom: 12px;
 }
+.quote-conflict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-card);
+}
+.quote-conflict .hint { margin: 0; }
 .primary:disabled {
   opacity: 0.45;
   cursor: not-allowed;

@@ -118,7 +118,7 @@ const messageRows = computed(() => {
 });
 
 function onlineStatus(member: ChatMember) {
-  return !member.self && member.presence === "online" && memberStatusAvailable.value ? member.status : undefined;
+  return member.presence === "online" && memberStatusAvailable.value ? member.status : undefined;
 }
 
 function memberStatusLabel(member: ChatMember) {
@@ -371,7 +371,9 @@ async function submit() {
                   <div class="member-copy">
                     <span class="member-name" :title="member.name">{{ member.name }} <span class="self-tag">Sen</span></span>
                     <span class="member-status">
-                      <span class="presence-dot" :data-presence="member.presence" aria-hidden="true"></span>{{ presenceLabels[member.presence] }}
+                      <span class="presence-dot" :data-presence="member.presence" :data-status="onlineStatus(member)" aria-hidden="true"></span>
+                      <span v-if="onlineStatus(member)" class="screen-reader-only">Çevrimiçi, </span>
+                      {{ memberStatusLabel(member) }}
                     </span>
                     <span v-if="showLastSeen(member)" class="member-last-seen">
                       <template v-if="member.lastSeenAt">Son görülme · <time :datetime="member.lastSeenAt">{{ lastSeenText(member.lastSeenAt) }}</time></template>
@@ -622,9 +624,9 @@ async function submit() {
 }
 .presence-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--c-faint); }
 .presence-dot[data-presence="online"] { background: var(--green); box-shadow: 0 0 0 2px var(--ok-soft-bg); }
-.presence-dot[data-status="busy"] { background: var(--badge-eksik-c); box-shadow: 0 0 0 2px var(--badge-eksik-bg); }
-.presence-dot[data-status="in_meeting"] { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-tint); }
-.presence-dot[data-status="on_break"] { background: var(--amber); box-shadow: 0 0 0 2px var(--warn-bg); }
+.presence-dot[data-status="busy"] { background: var(--amber); box-shadow: 0 0 0 2px var(--warn-bg); }
+.presence-dot[data-status="in_meeting"] { background: var(--badge-eksik-c); box-shadow: 0 0 0 2px var(--badge-eksik-bg); }
+.presence-dot[data-status="on_break"] { background: var(--badge-bekliyor-c); box-shadow: 0 0 0 2px var(--badge-bekliyor-bg); }
 .presence-dot[data-presence="unknown"] { border: 1px solid var(--c-soft); background: transparent; }
 .member-last-seen {
   display: block;

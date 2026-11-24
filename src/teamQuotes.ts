@@ -23,6 +23,13 @@ export type TeamQuoteVersion = {
 export type TeamTrashedQuote = {
   id: string; no: string; status: string; currency: string; deleted_at: string; revision: number;
 };
+export type TeamQuoteConflict = {
+  scope: string;
+  operationIds: string[];
+  local: Quote;
+  remote: Quote | null;
+  remoteState: "ready" | "offline" | "missing" | "unavailable";
+};
 type QuoteLifecycleAction = "revise" | "trash" | "restore";
 type QuoteTrashMarker = { quote_id: string; revision: number; trashed: boolean };
 
@@ -68,6 +75,89 @@ function assertQuoteScope(ctx: Context) {
   if (teamAccessIssue.value) throw new Error("Bu çalışma alanının tekliflerine erişilemiyor.");
 }
 
+function unpackQuote({ team_contacts, team_quote_items, team_quote_versions, ...quote }: QuoteRow) {
+  return {
+    ...quote,
+    contact_name: team_contacts?.name ?? "",
+    items: team_quote_items.sort((a, b) => a.sort - b.sort || String(a.id).localeCompare(String(b.id))),
+    version_count: team_quote_versions[0]?.count ?? 0,
+  };
+}
+
+function assertConflictScope(ctx: Context, signal?: AbortSignal) {
+  if (signal?.aborted || !sameScope(ctx)) {
+    throw new DOMException("Teklif karşılaştırması iptal edildi.", "AbortError");
+  }
+  assertQuoteScope(ctx);
+}
+
+async function readConflictRemote(ctx: Context, id: string, signal?: AbortSignal):
+    Promise<Pick<TeamQuoteConflict, "remote" | "remoteState">> {
+  const offline = () => teamReachable.value === false;
+  assertConflictScope(ctx, signal);
+  if (!ctx.client || offline()) return { remote: null, remoteState: "offline" };
+  const query = ctx.client.from("team_quotes").select(columns)
+    .eq("workspace_id", ctx.workspace).eq("id", id);
+  if (signal) query.abortSignal(signal);
+  const result = await query.maybeSingle().retry(false);
+  assertConflictScope(ctx, signal);
+  if (offline()) return { remote: null, remoteState: "offline" };
+  if (result.error) {
+    if ([401, 403].includes(result.status) || result.error.code === "42501") {
+      throw new Error("Ortak teklif için erişiminizi doğrulayın.");
+    }
+    return { remote: null, remoteState: "unavailable" };
+  }
+  if (!result.data) return { remote: null, remoteState: "missing" };
+  const row = result.data as unknown as QuoteRow;
+  if (row.id !== id || !Number.isSafeInteger(row.revision) || (row.revision ?? 0) < 1) {
+    return { remote: null, remoteState: "unavailable" };
+  }
+  const [remote] = await invoke<Quote[]>("calculate_team_quotes", { quotes: [unpackQuote(row)] });
+  assertConflictScope(ctx, signal);
+  if (offline()) return { remote: null, remoteState: "offline" };
+  if (!remote || remote.id !== id || remote.revision !== row.revision) {
+    return { remote: null, remoteState: "unavailable" };
+  }
+  return { remote, remoteState: "ready" };
+}
+
+async function inspectConflict(id: string, signal?: AbortSignal): Promise<TeamQuoteConflict> {
+  const ctx = context();
+  assertConflictScope(ctx, signal);
+  const operations = (await pending(ctx.scope)).filter((op) => op.contact.id === id);
+  assertConflictScope(ctx, signal);
+  if (!operations.some((op) => op.conflict)) throw new Error("Bu teklif için bekleyen çakışma kalmadı.");
+  const local = operations[operations.length - 1].contact;
+  return { scope: ctx.scope, operationIds: operations.map((op) => op.id), local, ...await readConflictRemote(ctx, id, signal) };
+}
+
+async function acceptConflict(review: TeamQuoteConflict, signal?: AbortSignal): Promise<Quote> {
+  const ctx = context();
+  const id = review.local.id;
+  if (typeof id !== "string" || !review.remote || review.scope !== ctx.scope) {
+    throw new Error("Teklif karşılaştırmasını yeniden açın.");
+  }
+  if (flushing) await flushing;
+  const { remote, remoteState } = await readConflictRemote(ctx, id, signal);
+  if (!remote || remote.revision !== review.remote.revision || remote.updated_at !== review.remote.updated_at) {
+    const message = remoteState === "ready"
+      ? "Ortak teklif inceleme sırasında değişti. Karşılaştırmayı yenileyin."
+      : "Güncel ortak teklif doğrulanamadı. Karşılaştırmayı yenileyin.";
+    throw new Error(message);
+  }
+  assertConflictScope(ctx, signal);
+  if (teamReachable.value === false) throw new Error("Güncel ortak teklif doğrulanamadı. Karşılaştırmayı yenileyin.");
+  const accepted = await cache<boolean>(ctx.scope, {
+    action: "resolve_quote_conflict", quote_id: id, expected_ids: review.operationIds, remote,
+  });
+  if (!accepted) throw new Error("Yerel teklif inceleme sırasında değişti. Karşılaştırmayı yenileyin.");
+  const remaining = await pending(ctx.scope).catch(() => null);
+  assertConflictScope(ctx, signal);
+  if (remaining) reportQueue(remaining);
+  return remote;
+}
+
 async function overlay(ctx: Context, quotes: Quote[], offline: boolean) {
   const operations = await pending(ctx.scope);
   const rows = new Map(quotes.map((quote) => [quote.id, quote]));
@@ -79,7 +169,8 @@ async function overlay(ctx: Context, quotes: Quote[], offline: boolean) {
     if ((offline || central) && (central?.revision ?? 0) < (quote.revision ?? 0)) rows.set(quote.id, quote);
   }
   for (const op of operations) rows.set(op.contact.id, op.contact);
-  for (const id of hidden) rows.delete(id);
+  const conflicted = new Set(operations.filter((op) => op.conflict).map((op) => op.contact.id));
+  for (const id of hidden) if (!conflicted.has(id)) rows.delete(id);
   const canEdit = await cache<boolean>(ctx.scope, { action: "read", key: "can-edit" });
   assertQuoteScope(ctx);
   teamQuotesOffline.value = offline;
@@ -103,10 +194,10 @@ export function flushTeamQuotes(): Promise<void> {
   if (!ctx.client) return Promise.resolve();
   const client = ctx.client;
   flushing = (async () => {
-    const blocked = new Set<string | number>();
-    for (const op of await pending(ctx.scope)) {
+    const operations = await pending(ctx.scope);
+    const blocked = new Set(operations.filter((op) => op.conflict).map((op) => op.contact.id));
+    for (const op of operations) {
       if (currentScope() !== ctx.scope) return;
-      if (op.conflict) blocked.add(op.contact.id);
       if (blocked.has(op.contact.id)) continue;
       const result = await client.rpc("team_sync_quote", op.payload);
       if (result.error) {
@@ -153,12 +244,7 @@ async function list(): Promise<Quote[]> {
       }
       rows.push(...(result.data as unknown as QuoteRow[]));
       if (result.data.length < pageSize) {
-        const documents = rows.map(({ team_contacts, team_quote_items, team_quote_versions, ...quote }) => ({
-          ...quote,
-          contact_name: team_contacts?.name ?? "",
-          items: team_quote_items.sort((a, b) => a.sort - b.sort || String(a.id).localeCompare(String(b.id))),
-          version_count: team_quote_versions[0]?.count ?? 0,
-        }));
+        const documents = rows.map(unpackQuote);
         const quotes = await invoke<Quote[]>("calculate_team_quotes", { quotes: documents });
         assertQuoteScope(ctx);
         await cache(scope, { action: "write", key: "quotes", data: quotes });
@@ -384,6 +470,8 @@ export function summarizeTeamQuotes(quotes: Quote[]): QuoteSummary {
 export const teamQuotes = {
   list,
   history,
+  inspectConflict,
+  acceptConflict,
   trash: trashedQuotes,
   observeTrash,
   revise: (quote: Quote) => updateLifecycle(quote, "revise"),

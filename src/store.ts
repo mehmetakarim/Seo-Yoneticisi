@@ -1908,6 +1908,13 @@ export const useStore = defineStore("app", {
       }
     },
 
+    useResolvedQuote(quote: Quote) {
+      if (!teamUser.value || this.quote?.id !== quote.id) return;
+      quoteRequest++;
+      this.quote = quote;
+      void this.loadQuotes();
+    },
+
     async createQuote(contactId: number | null = null, currency = "TRY") {
       try {
         if (teamUser.value) {
