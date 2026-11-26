@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { api } from "./api";
-import { flushTeamContacts, teamContactProgress } from "./teamContacts";
+import { flushTeamContacts, teamContactProgress, teamContactSource } from "./teamContacts";
 import { teamAccessIssue, teamProject, teamReachable, teamRestoring, teamUser, teamWorkspace } from "./teamConnection";
 import { getTeamProduct, listTeamProducts, prepareTeamCatalogLine, readOnlineTeamCatalogRevision } from "./teamCatalog";
 import { flushTeamGscSnapshots, seedTeamGscHistory, teamGscAnalysis, teamGscMode, teamMeasurementScope, teamOutcomeInputs } from "./teamGsc";
@@ -1441,6 +1441,34 @@ export const useStore = defineStore("app", {
       }, 600);
     },
 
+    async captureProductSeoConflictEdits(detail: ProductDetail): Promise<ProductMetaEdits> {
+      const pending = metaAutosaves.get(detail);
+      if (!pending) return {};
+      window.clearTimeout(pending.timer);
+      pending.timer = undefined;
+      await pending.saving;
+      return { ...pending.changes };
+    },
+
+    async reloadProductAfterSeoConflict(detail: ProductDetail, remote: TeamSeoRecord): Promise<boolean> {
+      window.clearTimeout(metaAutosaves.get(detail)?.timer);
+      metaAutosaves.delete(detail);
+      const request = productRequest;
+      const current = () => request === productRequest && this.detail === detail && this.selectedSku === detail.sku &&
+        detail.team_seo_scope === teamProductSeoScope();
+      if (!current()) return false;
+      try {
+        const updated = await getTeamProduct(detail.sku, remote);
+        if (!current()) return false;
+        this.detail = updated;
+        this.techDropped = [];
+        void this.reload().catch((error) => this.toast(String(error), "error"));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
     async flushProductMetaEdits(detail: ProductDetail): Promise<boolean> {
       const pending = metaAutosaves.get(detail);
       if (!pending) return true;
@@ -2125,7 +2153,7 @@ export const useStore = defineStore("app", {
       }
     },
 
-    /** Durum geçişi. Kişi bağlıysa zaman çizelgesine de yazılıyor (arka uçta). */
+    /** Gönderimle birlikte kişi teması ve katalog ürünleri arka uçta kaydedilir. */
     async setQuoteStatus(status: string, reason = "") {
       const q = this.quote;
       if (!q) return;
@@ -2141,6 +2169,14 @@ export const useStore = defineStore("app", {
         if (q.contact_id) {
           void this.loadContacts();
           if (this.contact?.id === q.contact_id) void this.openContact(q.contact_id);
+          if (status === "sent") {
+            void this.loadToday();
+            this.toast(q.items.some(({ sku }) => Boolean(sku?.trim()))
+              ? "Teklif gönderildi olarak işaretlendi. Temas ve ürünler kişi kartına işlendi."
+              : "Teklif gönderildi olarak işaretlendi. Temas kişi kartına işlendi.", "ok");
+          }
+        } else if (status === "sent") {
+          this.toast("Teklif gönderildi olarak işaretlendi.", "ok");
         }
         return true;
       } catch (e) {
@@ -2181,18 +2217,20 @@ export const useStore = defineStore("app", {
       void this.loadContacts();
     },
 
-    async openContact(id: ContactId) {
-      const request = ++contactRequest;
+    async openContact(id: ContactId, canRefresh?: () => boolean) {
+      const request = canRefresh ? contactRequest : ++contactRequest;
       try {
         const [contact, events, products] = await Promise.all([
           api.getContact(id), api.getContactEvents(id), api.getContactProducts(id),
         ]);
         if (request !== contactRequest) return;
+        if (canRefresh && (this.contact?.id !== id || !canRefresh()
+          || (contact.revision ?? 0) < (this.contact.revision ?? 0))) return;
         this.contact = contact;
         this.contactEvents = events;
         this.contactProducts = products;
       } catch (e) {
-        if (request === contactRequest) this.toast(String(e), "error");
+        if (request === contactRequest && !canRefresh) this.toast(String(e), "error");
       }
     },
 
@@ -2203,33 +2241,55 @@ export const useStore = defineStore("app", {
       this.contactProducts = [];
     },
 
-    /** Etiketleri toptan yazar — ekle/çıkar ayrı değil (ekranla veri ayrışmasın). */
-    async setContactTags(id: ContactId, tags: string[]) {
-      try {
-        await api.setContactTags(id, tags, this.contact?.id === id ? this.contact.revision : undefined);
-        await this.openContact(id);
-        await this.loadContacts();
-      } catch (e) {
-        this.toast(String(e), "error");
+    async refreshResolvedContact(contact: Contact) {
+      const source = teamContactSource();
+      if (this.contact?.id === contact.id) {
+        this.contact = contact;
+        await this.openContact(contact.id);
       }
+      if (source !== teamContactSource()) return;
+      if (this.page === "contacts") void this.loadContacts();
+      void this.loadToday();
+      this.toast("Ortak kayıt açıldı. Cihazdaki düzenlemeler saklandı.", "ok");
     },
 
-    async linkContactProduct(id: ContactId, sku: string) {
+    async changeContact(
+      id: ContactId,
+      write: (revision: number | undefined) => Promise<"synced" | "pending" | "conflict" | void>,
+      success: string,
+      refreshToday = false,
+    ) {
+      const source = teamContactSource();
+      let result;
       try {
-        await api.linkContactProduct(id, sku, this.contact?.id === id ? this.contact.revision : undefined);
-        await this.openContact(id);
+        result = await write(this.contact?.id === id ? this.contact.revision : undefined);
       } catch (e) {
-        this.toast(String(e), "error");
+        if (source === teamContactSource()) this.toast(String(e), "error");
+        return false;
       }
+      if (source !== teamContactSource()) return false;
+      if (result === "pending") this.toast("Değişiklik bu cihazda kaydedildi. Eşitleme bekliyor.", "info");
+      else if (result === "conflict") this.toast("Değişiklik bu cihazda saklandı. Kişi kaydında eşitleme çakışması var.", "info");
+      else this.toast(success, "ok");
+      await Promise.all([
+        this.contact?.id === id ? this.openContact(id) : undefined,
+        this.page === "contacts" ? this.loadContacts() : undefined,
+      ]);
+      if (source !== teamContactSource()) return false;
+      if (refreshToday) void this.loadToday();
+      return true;
     },
 
-    async unlinkContactProduct(id: ContactId, sku: string) {
-      try {
-        await api.unlinkContactProduct(id, sku, this.contact?.id === id ? this.contact.revision : undefined);
-        await this.openContact(id);
-      } catch (e) {
-        this.toast(String(e), "error");
-      }
+    setContactTags(id: ContactId, tags: string[]) {
+      return this.changeContact(id, (revision) => api.setContactTags(id, tags, revision), "Etiketler güncellendi.");
+    },
+
+    linkContactProduct(id: ContactId, sku: string) {
+      return this.changeContact(id, (revision) => api.linkContactProduct(id, sku, revision), "Ürün bağlandı.");
+    },
+
+    unlinkContactProduct(id: ContactId, sku: string) {
+      return this.changeContact(id, (revision) => api.unlinkContactProduct(id, sku, revision), "Ürün bağlantısı kaldırıldı.");
     },
 
     /** Kişiyi kaydeder ve kartı açık tutar — kaydettikten sonra listeye atmak sinir bozucu. */
@@ -2250,16 +2310,9 @@ export const useStore = defineStore("app", {
       }
     },
 
-    async archiveContact(id: ContactId, archived: boolean) {
-      try {
-        await api.archiveContact(id, archived, this.contact?.id === id ? this.contact.revision : undefined);
-        await this.loadContacts();
-        if (this.contact?.id === id) await this.openContact(id);
-        void this.loadToday();
-        this.toast(archived ? "Kişi arşivlendi." : "Kişi arşivden çıkarıldı.", "ok");
-      } catch (e) {
-        this.toast(String(e), "error");
-      }
+    archiveContact(id: ContactId, archived: boolean) {
+      return this.changeContact(id, (revision) => api.archiveContact(id, archived, revision),
+        archived ? "Kişi arşivlendi." : "Kişi arşivden çıkarıldı.", true);
     },
 
     /** Temas + (varsa) yeni randevu. ⚠️ Kuyruk da tazeleniyor: sonraki adım kuyruğu besliyor. */
@@ -2271,16 +2324,23 @@ export const useStore = defineStore("app", {
       nextStepNote: string | null,
       revision?: number,
     ) {
+      const source = teamContactSource();
+      let result;
       try {
-        await api.addContactEvent(contactId, kind, note, nextStepAt, nextStepNote,
+        result = await api.addContactEvent(contactId, kind, note, nextStepAt, nextStepNote,
           revision ?? (this.contact?.id === contactId ? this.contact.revision : undefined));
-        if (this.contact?.id === contactId) await this.openContact(contactId);
-        if (this.page === "contacts") await this.loadContacts();
-        void this.loadToday();
-        this.toast("Temas kaydedildi.", "ok");
       } catch (e) {
-        this.toast(String(e), "error");
+        if (source === teamContactSource()) this.toast(String(e), "error");
+        return false;
       }
+      if (source !== teamContactSource()) return false;
+      if (result === "pending") this.toast("Temas bu cihazda kaydedildi. Eşitleme bekliyor.", "info");
+      else if (result === "conflict") this.toast("Temas bu cihazda saklandı. Kişi kaydında eşitleme çakışması var.", "info");
+      else this.toast("Temas kaydedildi.", "ok");
+      if (this.contact?.id === contactId) void this.openContact(contactId);
+      if (this.page === "contacts") void this.loadContacts();
+      void this.loadToday();
+      return true;
     },
 
     /** Hedef satır çizildikten sonra ekran bunu çağırır — odak yapışkan olmamalı. */

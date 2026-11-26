@@ -16,6 +16,7 @@ const props = defineProps<{
   history: TechVersionMeta[];
   /** İçeriği üreten Gemini modeli (null = henüz üretilmedi). */
   model: string | null;
+  conflicted?: boolean;
 }>();
 
 const store = useStore();
@@ -41,6 +42,27 @@ function flushSource() {
   return saving;
 }
 
+async function captureSeoConflictSource(detail: ProductDetail) {
+  if (pendingSource?.detail === detail) {
+    window.clearTimeout(srcTimer);
+    srcTimer = undefined;
+  }
+  await sourceSave;
+  if (store.detail !== detail || store.selectedSku !== detail.sku) return undefined;
+  if (source.value !== (detail.tech_source_text ?? "")) return source.value;
+}
+
+function clearSeoConflictSource(detail: ProductDetail) {
+  if (pendingSource?.detail === detail) {
+    window.clearTimeout(srcTimer);
+    srcTimer = undefined;
+    pendingSource = undefined;
+  }
+  if (store.detail === detail) source.value = detail.tech_source_text ?? "";
+}
+
+defineExpose({ captureSeoConflictSource, clearSeoConflictSource });
+
 watch(
   [() => store.selectedSku, () => store.detail?.team_seo_scope],
   () => {
@@ -52,14 +74,14 @@ watch(
   { immediate: true },
 );
 watch(() => props.sourceText, (text) => {
-  if (!pendingSource && !sourceSave) source.value = text ?? "";
+  if (!props.conflicted && !pendingSource && !sourceSave) source.value = text ?? "";
 });
 onBeforeUnmount(() => { void flushSource(); });
 
 const groups = computed(() => props.specs ?? []);
 const rowCount = computed(() => groups.value.reduce((a, g) => a + g.rows.length, 0));
 const hasSpecs = computed(() => rowCount.value > 0);
-const tableLocked = computed(() => store.techStructuring || store.techTableSaving ||
+const tableLocked = computed(() => props.conflicted || store.techStructuring || store.techTableSaving ||
   Boolean(store.detail?.team_seo_scope && (store.generating || store.generatingDetails || store.ideasoftBusy)));
 
 const badgeStyle = computed(() => ({

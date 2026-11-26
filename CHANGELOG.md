@@ -13,6 +13,13 @@ metin, kullanıcının **uygulama içindeki güncelleme ekranında** gördüğü
 
 ---
 
+## v0.22.4
+- **Çevrimdışı kişi işlemleri.** Temas notları, ilgi etiketleri ve ürün bağlantıları cihazda saklanır. Bağlantı geri geldiğinde paylaşılan kayıtlarla eşitlenir.
+- **Tekliften kişi takibi.** Bir teklifi gönderildi olarak işaretlediğinizde temas geçmişine teklif numarası eklenir ve katalog ürünleri müşterinin ilgi listesine bağlanır.
+- **Çakışan değişiklikleri inceleyin.** Kişi kayıtları, ürün SEO taslakları ve kategori, marka ve blog taslakları için cihazdaki sürümü ortak kayıtla karşılaştırın. Saklanan düzenlemeleri çevrimdışı açın.
+- **Teklifte seçili alanları yeniden uygulayın.** Cihazdaki değişikliklerden hangilerinin güncel ortak taslağa taşınacağını seçin.
+- **Günlük arama sorgusu takibi.** Ürünün 7 günlük karşılaştırmasından sorguyu takibe alın. Kesinleşen ve geçici ölçümleri görün. Takibi durdurduğunuzda geçmiş saklanır.
+
 ## v0.22.3
 - **Renkli ekip durumları.** Müsait yeşil, Meşgul sarı, Toplantıda kırmızı, Molada mavi ve çevrimdışı gri görünür. Üye listesi ve sohbet başlığı aynı durum bilgisini gösterir.
 - **Teklif eşitleme çakışmasını inceleyin.** Bu cihazdaki taslağı güncel ortak sürümle karşılaştırın. Ortak sürümü seçtiğinizde yerel taslak cihazda saklanır.

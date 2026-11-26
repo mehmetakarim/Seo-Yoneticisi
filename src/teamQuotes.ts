@@ -30,6 +30,9 @@ export type TeamQuoteConflict = {
   remote: Quote | null;
   remoteState: "ready" | "offline" | "missing" | "unavailable";
 };
+export type TeamQuoteConflictArchive = { id: string; saved_at: string | null; local: Quote; remote: Quote | null };
+export type TeamQuoteConflictField = "number" | "customer" | "pricing" | "validity" | "note";
+export type TeamQuoteConflictRetry = { quote: Quote; sync: "synced" | "pending" | "conflict" };
 type QuoteLifecycleAction = "revise" | "trash" | "restore";
 type QuoteTrashMarker = { quote_id: string; revision: number; trashed: boolean };
 
@@ -74,6 +77,15 @@ function assertQuoteScope(ctx: Context) {
   if (!sameScope(ctx)) throw new Error("Çalışma alanı değişti. Teklifi yeniden açın.");
   if (teamAccessIssue.value) throw new Error("Bu çalışma alanının tekliflerine erişilemiyor.");
 }
+
+function quoteMembership(client: NonNullable<Context["client"]>, workspace: string, signal?: AbortSignal) {
+  const query = client.from("workspace_members").select("role")
+    .eq("workspace_id", workspace).eq("user_id", teamUser.value);
+  if (signal) query.abortSignal(signal);
+  return query.maybeSingle();
+}
+
+const canEditRole = (role: string | null | undefined) => role === "owner" || role === "editor";
 
 function unpackQuote({ team_contacts, team_quote_items, team_quote_versions, ...quote }: QuoteRow) {
   return {
@@ -132,7 +144,16 @@ async function inspectConflict(id: string, signal?: AbortSignal): Promise<TeamQu
   return { scope: ctx.scope, operationIds: operations.map((op) => op.id), local, ...await readConflictRemote(ctx, id, signal) };
 }
 
-async function acceptConflict(review: TeamQuoteConflict, signal?: AbortSignal): Promise<Quote> {
+async function conflictHistory(id: string, signal?: AbortSignal): Promise<TeamQuoteConflictArchive[]> {
+  const ctx = context();
+  assertConflictScope(ctx, signal);
+  const entries = await cache<TeamQuoteConflictArchive[]>(ctx.scope, { action: "quote_conflict_history", quote_id: id })
+    .catch(() => { throw new Error("Saklanan teklif düzenlemeleri okunamadı."); });
+  assertConflictScope(ctx, signal);
+  return entries;
+}
+
+async function confirmReviewedQuote(review: TeamQuoteConflict, signal?: AbortSignal) {
   const ctx = context();
   const id = review.local.id;
   if (typeof id !== "string" || !review.remote || review.scope !== ctx.scope) {
@@ -146,16 +167,95 @@ async function acceptConflict(review: TeamQuoteConflict, signal?: AbortSignal): 
       : "Güncel ortak teklif doğrulanamadı. Karşılaştırmayı yenileyin.";
     throw new Error(message);
   }
+  return { ctx, id, remote };
+}
+
+async function replaceConflictQueue(ctx: Context, id: string, review: TeamQuoteConflict, remote: Quote,
+  signal?: AbortSignal, retry?: Pick<Operation, "id" | "contact" | "payload">) {
   assertConflictScope(ctx, signal);
   if (teamReachable.value === false) throw new Error("Güncel ortak teklif doğrulanamadı. Karşılaştırmayı yenileyin.");
-  const accepted = await cache<boolean>(ctx.scope, {
-    action: "resolve_quote_conflict", quote_id: id, expected_ids: review.operationIds, remote,
+  const common = { quote_id: id, expected_ids: review.operationIds, remote };
+  // Older runtimes can adopt the shared draft, but must reject a retry rather than dequeue it.
+  const request = retry ? { action: "reapply_quote_conflict", ...common, retry }
+    : { action: "resolve_quote_conflict", ...common };
+  const accepted = await cache<boolean>(ctx.scope, request).catch((cause: unknown) => {
+    if (retry && String(cause).includes("unknown variant `reapply_quote_conflict`")) {
+      throw new Error("Yerel alanları uygulamak için güncel masaüstü sürümü gerekiyor.");
+    }
+    throw cause;
   });
   if (!accepted) throw new Error("Yerel teklif inceleme sırasında değişti. Karşılaştırmayı yenileyin.");
+}
+
+async function acceptConflict(review: TeamQuoteConflict, signal?: AbortSignal): Promise<Quote> {
+  const { ctx, id, remote } = await confirmReviewedQuote(review, signal);
+  await replaceConflictQueue(ctx, id, review, remote, signal);
   const remaining = await pending(ctx.scope).catch(() => null);
   assertConflictScope(ctx, signal);
   if (remaining) reportQueue(remaining);
   return remote;
+}
+
+const pricingFields = (quote: Quote) => ({
+  currency: quote.currency, fx_rate: quote.fx_rate, fx_date: quote.fx_date, items: quote.items,
+});
+
+function draftItems(items: QuoteItem[]) {
+  return items.map(({ id, sku, name, qty, unit_price, tax_rate, cost }) => ({ id, sku, name, qty, unit_price, tax_rate, cost }));
+}
+
+export function quoteConflictFields(local: Quote, remote: Quote): TeamQuoteConflictField[] {
+  const changed: TeamQuoteConflictField[] = [];
+  const comparablePricing = (quote: Quote) => ({ ...pricingFields(quote), items: draftItems(quote.items) });
+  if (local.no !== remote.no) changed.push("number");
+  if (local.contact_id !== remote.contact_id) changed.push("customer");
+  if (JSON.stringify(comparablePricing(local)) !== JSON.stringify(comparablePricing(remote))) changed.push("pricing");
+  if (local.valid_until !== remote.valid_until) changed.push("validity");
+  if (local.note !== remote.note) changed.push("note");
+  return changed;
+}
+
+async function reapplyConflict(review: TeamQuoteConflict, fields: readonly TeamQuoteConflictField[],
+  signal?: AbortSignal): Promise<TeamQuoteConflictRetry> {
+  const { ctx, id, remote } = await confirmReviewedQuote(review, signal);
+  if (remote.status !== "draft" || remote.revision == null) {
+    throw new Error("Yerel alanları uygulamak için ortak teklifin taslak olması gerekiyor.");
+  }
+  const local = review.local;
+  const changed = quoteConflictFields(local, remote);
+  if (!fields.length || !fields.every((field) => changed.includes(field))) {
+    throw new Error("Tekrar uygulanacak yerel alanları seçin.");
+  }
+  const draft = {
+    ...remote,
+    ...(fields.includes("number") ? { no: local.no } : {}),
+    ...(fields.includes("customer") ? { contact_id: local.contact_id, contact_name: local.contact_name } : {}),
+    ...(fields.includes("pricing") ? pricingFields(local) : {}),
+    ...(fields.includes("validity") ? { valid_until: local.valid_until } : {}),
+    ...(fields.includes("note") ? { note: local.note } : {}),
+  };
+  validateDraft(draft);
+  const retry = await quoteOperation(ctx, draft, remote.revision);
+  assertConflictScope(ctx, signal);
+  if (!ctx.client || teamReachable.value === false) {
+    throw new Error("Güncel düzenleme yetkisi için Supabase bağlantısı gerekiyor.");
+  }
+  const membership = await quoteMembership(ctx.client, ctx.workspace, signal).retry(false);
+  assertConflictScope(ctx, signal);
+  if (membership.error || !canEditRole(membership.data?.role)) {
+    throw new Error("Güncel teklif düzenleme yetkinizi doğrulayın ve karşılaştırmayı yenileyin.");
+  }
+  await replaceConflictQueue(ctx, id, review, remote, signal, retry);
+  assertConflictScope(ctx, signal);
+  // The selected fields are durable now. If delivery fails, the normal reconnect flow retries them.
+  await flushTeamQuotes().catch(() => {});
+  const remaining = await pending(ctx.scope).catch(() => null);
+  assertConflictScope(ctx, signal);
+  if (!remaining) return { quote: retry.contact, sync: "pending" };
+  reportQueue(remaining);
+  const operation = remaining.find((op) => op.id === retry.id);
+  if (!operation) return { quote: retry.contact, sync: "synced" };
+  return { quote: retry.contact, sync: operation.conflict ? "conflict" : "pending" };
 }
 
 async function overlay(ctx: Context, quotes: Quote[], offline: boolean) {
@@ -248,11 +348,10 @@ async function list(): Promise<Quote[]> {
         const quotes = await invoke<Quote[]>("calculate_team_quotes", { quotes: documents });
         assertQuoteScope(ctx);
         await cache(scope, { action: "write", key: "quotes", data: quotes });
-        const membership = await client.from("workspace_members").select("role").eq("workspace_id", workspace)
-          .eq("user_id", teamUser.value).maybeSingle();
+        const membership = await quoteMembership(client, workspace);
         assertQuoteScope(ctx);
         if (!membership.error) {
-          await cache(scope, { action: "write", key: "can-edit", data: ["owner", "editor"].includes(membership.data?.role ?? "") });
+          await cache(scope, { action: "write", key: "can-edit", data: canEditRole(membership.data?.role) });
         }
         await trashMarkers;
         return overlay(ctx, quotes, false);
@@ -470,8 +569,10 @@ export function summarizeTeamQuotes(quotes: Quote[]): QuoteSummary {
 export const teamQuotes = {
   list,
   history,
+  conflictHistory,
   inspectConflict,
   acceptConflict,
+  reapplyConflict,
   trash: trashedQuotes,
   observeTrash,
   revise: (quote: Quote) => updateLifecycle(quote, "revise"),
@@ -505,36 +606,45 @@ export const teamQuotes = {
   },
 };
 
-async function queueQuote(quote: Quote, expectedRevision: number | null) {
-    const ctx = context();
-    if (typeof quote.id !== "string" || typeof quote.contact_id === "number" || quote.status !== "draft") {
-      throw new Error("Yalnızca çalışma alanındaki taslak teklifler düzenlenebilir.");
-    }
-    if (!(await cache<boolean>(ctx.scope, { action: "read", key: "can-edit" }))) {
-      throw new Error("Teklif düzenleme yetkinizi bağlantı varken doğrulayın.");
-    }
-    if (quote.items.length > 500 || quote.items.some((item) =>
-      !item.name.trim() || !Number.isFinite(item.qty) || item.qty <= 0
-      || !Number.isFinite(item.unit_price) || item.unit_price < 0
-      || !Number.isFinite(item.tax_rate) || item.tax_rate < 0 || item.tax_rate > 100,
-    )) throw new Error("Teklif kalemlerini kontrol edin. Adet pozitif, fiyat sıfır veya üstü ve KDV %0–100 olmalı. En fazla 500 kalem eklenebilir.");
-    const prior = (await pending(ctx.scope)).filter((op) => op.contact.id === quote.id);
-    const previous = prior[prior.length - 1];
-    if (prior.some((op) => op.conflict) || (previous && previous.contact.revision !== expectedRevision)) {
-      throw new Error("Teklifin daha yeni bir yerel sürümü var. Teklifi yeniden açın.");
+function validateDraft(quote: Quote) {
+  if (typeof quote.id !== "string" || typeof quote.contact_id === "number" || quote.status !== "draft") {
+    throw new Error("Yalnızca çalışma alanındaki taslak teklifler düzenlenebilir.");
   }
+  if (quote.items.length > 500 || quote.items.some((item) =>
+    !item.name.trim() || !Number.isFinite(item.qty) || item.qty <= 0
+    || !Number.isFinite(item.unit_price) || item.unit_price < 0
+    || !Number.isFinite(item.tax_rate) || item.tax_rate < 0 || item.tax_rate > 100,
+  )) throw new Error("Teklif kalemlerini kontrol edin. Adet pozitif, fiyat sıfır veya üstü ve KDV %0–100 olmalı. En fazla 500 kalem eklenebilir.");
+}
+
+async function quoteOperation(ctx: Context, quote: Quote, expectedRevision: number | null) {
   const id = crypto.randomUUID();
   const [saved] = await invoke<Quote[]>("calculate_team_quotes", {
     quotes: [{ ...quote, updated_at: new Date().toISOString(), revision: (expectedRevision ?? 0) + 1 }],
   });
   const { no, contact_id, currency, fx_rate, fx_date, valid_until, note } = saved;
-    const items = saved.items.map(({ id, sku, name, qty, unit_price, tax_rate, cost }) =>
-      ({ id, sku, name, qty, unit_price, tax_rate, cost }),
-    );
-    await cache(ctx.scope, { action: "queue", id, contact: saved, payload: {
+  return {
+    id, contact: saved, payload: {
       target_workspace: ctx.workspace, operation_id: id, target_quote: saved.id,
-      expected_revision: expectedRevision, fields: { no, contact_id, currency, fx_rate, fx_date, valid_until, note }, items,
-    } });
-    if (ctx.scope === currentScope()) await flushTeamQuotes();
-    return saved;
+      expected_revision: expectedRevision, fields: { no, contact_id, currency, fx_rate, fx_date, valid_until, note },
+      items: draftItems(saved.items),
+    },
+  };
+}
+
+async function queueQuote(quote: Quote, expectedRevision: number | null) {
+  const ctx = context();
+  validateDraft(quote);
+  if (!(await cache<boolean>(ctx.scope, { action: "read", key: "can-edit" }))) {
+    throw new Error("Teklif düzenleme yetkinizi bağlantı varken doğrulayın.");
+  }
+  const prior = (await pending(ctx.scope)).filter((op) => op.contact.id === quote.id);
+  const previous = prior[prior.length - 1];
+  if (prior.some((op) => op.conflict) || (previous && previous.contact.revision !== expectedRevision)) {
+    throw new Error("Teklifin daha yeni bir yerel sürümü var. Teklifi yeniden açın.");
+  }
+  const operation = await quoteOperation(ctx, quote, expectedRevision);
+  await cache(ctx.scope, { action: "queue", ...operation });
+  if (ctx.scope === currentScope()) await flushTeamQuotes();
+  return operation.contact;
 }

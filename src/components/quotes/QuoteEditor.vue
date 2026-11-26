@@ -8,18 +8,22 @@
  *
  * Teklifin para birimi ilk kalem eklenmeden seçilir. Kalemlerin fiyatı ekleme anında hesaplanır.
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { api } from "../../api";
 import { useStore } from "../../store";
 import { teamAccessIssue, teamProject, teamUser, teamWorkspace } from "../../teamConnection";
 import { searchTeamCatalog } from "../../teamCatalog";
-import { teamQuoteCanEdit, teamQuoteConflicts, teamQuotesOffline, teamQuoteSaving } from "../../teamQuotes";
+import {
+  teamQuoteCanEdit, teamQuoteConflicts, teamQuotes, teamQuotesOffline, teamQuoteSaving,
+  type TeamQuoteConflictArchive, type TeamQuoteConflictRetry,
+} from "../../teamQuotes";
 import type { CatalogMatch, Contact, ContactId, Quote, QuoteItem } from "../../types";
 import Icon from "../Icon.vue";
 import QuoteDocModal from "./QuoteDocModal.vue";
 import QuoteHistoryModal from "./QuoteHistoryModal.vue";
 import QuoteLifecycleDialog from "./QuoteLifecycleDialog.vue";
 import QuoteConflictModal from "./QuoteConflictModal.vue";
+import QuoteConflictArchiveModal from "./QuoteConflictArchiveModal.vue";
 
 const store = useStore();
 const quoteContacts = ref<Contact[]>([]);
@@ -294,6 +298,10 @@ const kapatmaNedeni = ref("");
 const historyTrigger = ref<HTMLButtonElement | null>(null);
 const historyQuote = ref<{ id: string; number: string } | null>(null);
 const canViewHistory = computed(() => typeof q.value?.id === "string" && !!teamUser.value && !!teamWorkspace.value && !teamAccessIssue.value);
+const archiveTrigger = ref<HTMLButtonElement | null>(null);
+const archiveQuote = ref<{ id: string; number: string } | null>(null);
+const archiveEntries = shallowRef<TeamQuoteConflictArchive[]>([]);
+let archiveRequest: AbortController | undefined;
 const lifecycle = ref<{ action: "revise" | "trash"; id: string; number: string } | null>(null);
 const conflictQuote = ref<{ id: string; number: string } | null>(null);
 const conflictTrigger = ref<HTMLButtonElement | null>(null);
@@ -304,9 +312,43 @@ const canManageQuote = computed(() => canViewHistory.value && teamQuoteCanEdit.v
 
 watch([() => q.value?.id, teamProject, teamUser, teamWorkspace, teamAccessIssue], () => {
   historyQuote.value = null;
+  archiveQuote.value = null;
+  archiveEntries.value = [];
   lifecycle.value = null;
   conflictQuote.value = null;
-}, { flush: "sync" });
+  void refreshConflictArchive();
+}, { flush: "sync", immediate: true });
+onBeforeUnmount(() => archiveRequest?.abort());
+
+async function refreshConflictArchive() {
+  archiveRequest?.abort();
+  const id = q.value?.id;
+  if (!canViewHistory.value || typeof id !== "string") return;
+  const controller = new AbortController();
+  archiveRequest = controller;
+  try {
+    const entries = await teamQuotes.conflictHistory(id, controller.signal);
+    if (!controller.signal.aborted && q.value?.id === id && canViewHistory.value) archiveEntries.value = entries;
+  } catch (error) {
+    if (!controller.signal.aborted) console.warn("Teklif taslağı arşivi okunamadı.", error);
+  }
+}
+
+function openConflictArchive() {
+  const quote = q.value;
+  if (canViewHistory.value && typeof quote?.id === "string" && archiveEntries.value.length) {
+    archiveQuote.value = { id: quote.id, number: quote.no };
+  }
+}
+
+async function closeConflictArchive() {
+  const current = archiveQuote.value;
+  archiveQuote.value = null;
+  await nextTick();
+  if (!archiveQuote.value && current?.id === q.value?.id && canViewHistory.value) {
+    (archiveTrigger.value ?? historyTrigger.value)?.focus({ preventScroll: true });
+  }
+}
 
 function openConflict() {
   const quote = q.value;
@@ -324,6 +366,21 @@ function useRemoteQuote(remote: Quote) {
   if (conflictQuote.value?.id !== remote.id || q.value?.id !== remote.id) return;
   store.useResolvedQuote(remote);
   store.toast("Ortak teklif sürümü kullanılıyor.", "ok");
+  void refreshConflictArchive();
+  void closeConflict();
+}
+
+function useReappliedQuote({ quote, sync }: TeamQuoteConflictRetry) {
+  if (conflictQuote.value?.id !== quote.id || q.value?.id !== quote.id) return;
+  store.useResolvedQuote(quote);
+  if (sync === "conflict") {
+    store.toast("Ortak teklif yeniden değişti veya kayıt reddedildi. Yerel alanlar korundu. Çakışmayı tekrar inceleyin.", "error");
+  } else if (sync === "pending") {
+    store.toast("Yerel alanlar kaydedildi. Supabase ile eşitleme bekliyor.", "info");
+  } else {
+    store.toast("Seçilen yerel alanlar ortak taslağa kaydedildi.", "ok");
+  }
+  void refreshConflictArchive();
   void closeConflict();
 }
 
@@ -374,13 +431,15 @@ async function gonderildi() {
   const v = q.value;
   if (!v) return;
   if (!(await store.setQuoteStatus("sent"))) return;
-  if (!v.contact_id) return;
+  if (q.value?.id !== v.id || !v.contact_id) return;
 
   const gun = 7;
   const t = new Date();
   t.setDate(t.getDate() + gun);
   const tarih = t.toISOString().slice(0, 10);
-  const kisi = quoteContacts.value.find((c) => c.id === v.contact_id);
+  const kisi = await api.getContact(v.contact_id)
+    .catch(() => quoteContacts.value.find((c) => c.id === v.contact_id));
+  if (q.value?.id !== v.id) return;
   if (kisi?.next_step_at) {
     // Zaten bir sözü var: üstüne yazmıyoruz, yalnızca hatırlatıyoruz.
     store.toast(`Gönderildi. ${kisi.name} için zaten ${kisi.next_step_at.slice(0, 10)} tarihli bir adım var.`, "ok");
@@ -401,14 +460,14 @@ async function takipKur() {
       if (contact.next_step_at) {
         store.toast(`${contact.name} için zaten bir sonraki adım var.`, "ok");
       } else {
-        await store.addContactEvent(t.contactId, "note", `${v.no} takibi`, t.tarih, `${v.no} teklifini hatırlat`, contact.revision);
+        if (!await store.addContactEvent(t.contactId, "note", `${v.no} takibi`, t.tarih, `${v.no} teklifini hatırlat`, contact.revision)) return;
       }
     } catch (error) {
       store.toast(String(error), "error");
       return;
     }
   } else {
-    await store.addContactEvent(t.contactId, "note", `${v.no} takibi`, t.tarih, `${v.no} teklifini hatırlat`);
+    if (!await store.addContactEvent(t.contactId, "note", `${v.no} takibi`, t.tarih, `${v.no} teklifini hatırlat`)) return;
   }
   takipOnerisi.value = null;
 }
@@ -443,6 +502,10 @@ const eylemler = computed(() => (DURUM_EYLEM[q.value?.status ?? ""] ?? [])
         </button>
         <button v-if="canViewHistory" ref="historyTrigger" type="button" class="ghost with-icon" aria-haspopup="dialog" @click="openHistory">
           <Icon name="clock" :size="14" aria-hidden="true" /> Gönderim geçmişi
+        </button>
+        <button v-if="canViewHistory && archiveEntries.length" ref="archiveTrigger" type="button" class="ghost with-icon"
+          aria-haspopup="dialog" @click="openConflictArchive">
+          <Icon name="archive" :size="14" aria-hidden="true" /> Saklanan düzenlemeler
         </button>
         <button v-if="canManageQuote && q.status !== 'draft'" ref="reviseTrigger" type="button" class="ghost with-icon"
           :disabled="statusLocked" aria-haspopup="dialog" @click="openLifecycle('revise')">
@@ -737,10 +800,12 @@ const eylemler = computed(() => (DURUM_EYLEM[q.value?.status ?? ""] ?? [])
       :quote-number="historyQuote.number"
       @close="closeHistory"
     />
+    <QuoteConflictArchiveModal v-if="archiveQuote" :key="archiveQuote.id" :number="archiveQuote.number"
+      :entries="archiveEntries" @close="closeConflictArchive" />
     <QuoteLifecycleDialog v-if="lifecycle" :action="lifecycle.action" :number="lifecycle.number" :busy="store.quoteLifecycleBusy"
       @close="closeLifecycle" @confirm="confirmLifecycle" />
     <QuoteConflictModal v-if="conflictQuote" :key="conflictQuote.id" :id="conflictQuote.id" :number="conflictQuote.number"
-      @close="closeConflict" @accepted="useRemoteQuote" />
+      @close="closeConflict" @accepted="useRemoteQuote" @reapplied="useReappliedQuote" />
   </section>
 
   <section v-else class="bos-sec">
