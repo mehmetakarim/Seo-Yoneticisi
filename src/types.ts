@@ -866,6 +866,7 @@ export interface StorePageDetail {
   team_scope?: string;
   revision?: number;
   team_conflict?: boolean;
+  team_draft_conflict?: boolean;
   team_pending?: boolean;
   status: number;
   kind: string;
@@ -914,9 +915,26 @@ export interface QueryPeriod {
   ctr: number | null;
 }
 
+export type QueryDayState = "final" | "provisional" | "missing" | "pending";
+
+export interface QueryDailyObservation {
+  day: string;
+  state: QueryDayState;
+  clicks: number | null;
+  impressions: number | null;
+  position: number | null;
+}
+
 export interface QueryComparison {
   event_day: string;
   page?: string;
   before: QueryPeriod | null;
   after: QueryPeriod | null;
+  daily?: {
+    observations: QueryDailyObservation[];
+    tracked: boolean;
+    canTrack: boolean;
+    cached?: boolean;
+    refreshFailed?: boolean;
+  };
 }

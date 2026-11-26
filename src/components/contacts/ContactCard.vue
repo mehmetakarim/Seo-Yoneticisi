@@ -8,12 +8,15 @@
  * ⚠️ Temas ekleme formu **randevuyu da aynı adımda** alıyor ("aradım, iki hafta sonra
  * tekrar"). İkiye bölünseydi kullanıcı ikincisini unutur, kişi sessizce düşerdi.
  */
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { useStore } from "../../store";
 import { api } from "../../api";
-import { contactSync, teamContactConflict, teamContactProgress } from "../../teamContacts";
-import type { CatalogMatch, Quote } from "../../types";
+import { contactSync, teamContactConflictHistory, teamContactProgress, teamContactSource, type TeamContactConflictArchive } from "../../teamContacts";
+import { teamAccessIssue, teamProject, teamUser, teamWorkspace } from "../../teamConnection";
+import { searchTeamCatalog } from "../../teamCatalog";
+import type { CatalogMatch, Contact, Quote } from "../../types";
 import Icon from "../Icon.vue";
+import ContactConflictModal from "./ContactConflictModal.vue";
 
 const store = useStore();
 
@@ -30,6 +33,9 @@ const TEMAS_ETIKET: Record<string, string> = {
   meeting: "Görüşme",
   note: "Not",
   followup_done: "Dönüş yapıldı",
+  quote_sent: "Teklif gönderildi",
+  quote_won: "Teklif kazanıldı",
+  quote_lost: "Teklif kaybedildi",
 };
 
 /** Düzenleme kopyası — kullanıcı kaydetmeden store'daki kayıt değişmesin. */
@@ -44,6 +50,8 @@ const f = ref(bos());
  * boş açılırdı**. Saha hatası, 2026-08-10 — bkz. brain.md.
  */
 const temas = ref({ kind: "call", note: "", nextStepAt: "", nextStepNote: "" });
+const savingEvent = ref(false);
+const savingAction = ref(false);
 function bos() {
   return {
     name: "",
@@ -57,58 +65,95 @@ function bos() {
   };
 }
 
-watch(
-  () => store.contact,
-  (c) => {
-    f.value = c
-      ? {
-          name: c.name,
-          company: c.company,
-          email: c.email,
-          phone: c.phone,
-          channel: c.channel,
-          note: c.note,
-          nextStepAt: c.next_step_at?.slice(0, 10) ?? "",
-          nextStepNote: c.next_step_note,
-        }
-      : bos();
-    temas.value = { kind: "call", note: "", nextStepAt: "", nextStepNote: "" };
-  },
-  { immediate: true },
-);
+function contactForm(c: Contact | null | undefined) {
+  return c ? {
+    name: c.name, company: c.company, email: c.email, phone: c.phone, channel: c.channel,
+    note: c.note, nextStepAt: c.next_step_at?.slice(0, 10) ?? "", nextStepNote: c.next_step_note,
+  } : bos();
+}
+
+watch(() => store.contact, (current, previous) => {
+  const next = contactForm(current);
+  if (current?.id !== previous?.id || JSON.stringify(next) !== JSON.stringify(contactForm(previous))) f.value = next;
+}, { immediate: true });
+watch(() => store.contact?.id, () => {
+  temas.value = { kind: "call", note: "", nextStepAt: "", nextStepNote: "" };
+});
 
 const yeni = computed(() => !store.contact);
 const kaydedilebilir = computed(() => f.value.name.trim().length > 0);
 const savingContact = ref(false);
-const conflict = ref<Awaited<ReturnType<typeof teamContactConflict>>>(null);
 const hasConflict = ref(false);
-watch([() => store.contact, () => contactSync.value.conflicts], async ([person]) => {
-  const id = person?.id;
-  conflict.value = null;
-  hasConflict.value = false;
-  if (typeof id !== "string") return;
-  const progress = await teamContactProgress(id).catch(() => "synced");
-  if (store.contact === person) hasConflict.value = progress === "conflict";
+const contactHistory = shallowRef<TeamContactConflictArchive[]>([]);
+const conflictModal = ref<"review" | "history" | null>(null);
+const contactHeading = ref<HTMLHeadingElement | null>(null);
+const historyButton = ref<HTMLButtonElement | null>(null);
+let conflictTrigger: HTMLElement | null = null;
+const writing = computed(() => savingContact.value || savingEvent.value || savingAction.value);
+const editBlocked = computed(() => writing.value || hasConflict.value);
+const sharedContactId = computed(() => typeof store.contact?.id === "string" ? store.contact.id : undefined);
+
+watch([sharedContactId, teamProject, teamUser, teamWorkspace, teamAccessIssue], ([id, , , , issue]) => {
+  conflictModal.value = null;
+  conflictTrigger = null;
+  contactHistory.value = [];
+  if (id && !issue) void loadContactHistory(id);
 }, { immediate: true });
 
-async function inspectConflict() {
-  const id = store.contact?.id;
-  if (typeof id !== "string") return;
-  try {
-    const info = await teamContactConflict(id);
-    if (store.contact?.id === id) conflict.value = info;
-  } catch (error) {
-    store.toast(String(error), "error");
+watch([() => store.contact, () => contactSync.value.conflicts, teamProject, teamUser, teamWorkspace, teamAccessIssue], async ([person, , , , , issue], previous, onCleanup) => {
+  const id = person?.id;
+  if (typeof id !== "string" || issue) {
+    hasConflict.value = false;
+    return;
+  }
+  if (previous[0]?.id !== id) hasConflict.value = false;
+  let current = true;
+  onCleanup(() => { current = false; });
+  const progress = await teamContactProgress(id).catch(() => "synced");
+  if (current && store.contact === person) hasConflict.value = progress === "conflict";
+}, { immediate: true });
+
+async function loadContactHistory(id: string) {
+  const source = teamContactSource();
+  const history = await teamContactConflictHistory(id).catch(() => null);
+  if (history && sharedContactId.value === id && teamContactSource() === source) contactHistory.value = history;
+}
+
+function showConflictModal(mode: "review" | "history", event: MouseEvent) {
+  if (!sharedContactId.value || writing.value || teamAccessIssue.value) return;
+  conflictTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+  conflictModal.value = mode;
+}
+
+async function closeConflictModal() {
+  conflictModal.value = null;
+  const trigger = conflictTrigger;
+  conflictTrigger = null;
+  await nextTick();
+  if (trigger?.isConnected) trigger.focus();
+}
+
+async function contactResolved(remote: Contact) {
+  const id = sharedContactId.value;
+  if (!id || remote.id !== id) return;
+  const source = teamContactSource();
+  conflictModal.value = null;
+  conflictTrigger = null;
+  hasConflict.value = false;
+  await Promise.all([store.refreshResolvedContact(remote), loadContactHistory(id)]);
+  if (sharedContactId.value === id && teamContactSource() === source) {
+    await nextTick();
+    (historyButton.value ?? contactHeading.value)?.focus({ preventScroll: true });
   }
 }
 
-const conflictFields = {
-  name: "Ad", company: "Firma", email: "E-posta", phone: "Telefon", channel: "Kanal",
-  note: "Not", next_step_at: "Takip tarihi", next_step_note: "Takip notu",
-} as const;
+function canRefreshContact() {
+  return !writing.value && JSON.stringify(f.value) === JSON.stringify(contactForm(store.contact));
+}
+defineExpose({ canRefreshContact });
 
 async function kaydet() {
-  if (!kaydedilebilir.value || savingContact.value || hasConflict.value) return;
+  if (!kaydedilebilir.value || editBlocked.value) return;
   savingContact.value = true;
   try {
     await store.saveContact({
@@ -136,49 +181,82 @@ const etiketOnerileri = computed(() =>
   store.contactTags.filter((t) => !(store.contact?.tags ?? []).includes(t)).slice(0, 8),
 );
 
+async function changeContact(write: () => Promise<boolean>) {
+  if (editBlocked.value) return false;
+  savingAction.value = true;
+  try {
+    return await write();
+  } finally {
+    savingAction.value = false;
+  }
+}
+
 async function etiketEkle(t: string) {
   const c = store.contact;
   const ad = t.trim();
   if (!c || !ad || c.tags.includes(ad)) return;
-  await store.setContactTags(c.id, [...c.tags, ad]);
-  yeniEtiket.value = "";
+  const input = yeniEtiket.value;
+  const saved = await changeContact(() => store.setContactTags(c.id, [...c.tags, ad]));
+  if (saved && store.contact?.id === c.id && yeniEtiket.value === input && input.trim() === ad) yeniEtiket.value = "";
 }
 
 async function etiketCikar(t: string) {
   const c = store.contact;
   if (!c) return;
-  await store.setContactTags(
-    c.id,
-    c.tags.filter((x) => x !== t),
-  );
+  await changeContact(() => store.setContactTags(c.id, c.tags.filter((x) => x !== t)));
 }
 
-// --- "Bu ürünle ilgilendi" (Faz C2) ---
-// ♻️ Arama EOL halef seçicisiyle aynı uçtan: satıştaki ürünlerde arıyor.
 const urunArama = ref("");
 const urunSonuc = ref<CatalogMatch[]>([]);
-const bagliUrunAdlari = computed(() => new Map(store.allRows.map(({ sku, name }) => [sku, name])));
+const urunHatasi = ref("");
+const arananUrunAdlari = ref(new Map<string, string>());
+const bagliUrunAdlari = computed(() => new Map([
+  ...store.allRows.map(({ sku, name }) => [sku, name] as const),
+  ...arananUrunAdlari.value,
+]));
 /** Kişinin teklifleri (Faz T2) — ürün bağıyla aynı fikir: tek kaynaktan sorgu. */
 const teklifler = ref<Quote[]>([]);
 let urunZaman: ReturnType<typeof setTimeout> | null = null;
+let aramaSayaci = 0;
+onBeforeUnmount(() => {
+  aramaSayaci++;
+  if (urunZaman) clearTimeout(urunZaman);
+});
 
 function urunAra(v: string) {
   urunArama.value = v;
+  urunSonuc.value = [];
+  urunHatasi.value = "";
+  const arama = ++aramaSayaci;
   if (urunZaman) clearTimeout(urunZaman);
-  // 3 karakterin altında arka uç zaten boş dönüyor; gereksiz çağrı yapmıyoruz.
-  if (v.trim().length < 3) {
-    urunSonuc.value = [];
-    return;
-  }
+  const id = store.contact?.id;
+  if (id == null || v.trim().length < 3) return;
+  const source = teamContactSource();
+  const guncel = () => arama === aramaSayaci && store.contact?.id === id && source === teamContactSource();
   urunZaman = setTimeout(async () => {
-    urunSonuc.value = await api.searchLiveProducts(v).catch(() => []);
+    try {
+      const results = typeof id === "string" ? await searchTeamCatalog(v) : await api.searchLiveProducts(v);
+      if (!guncel()) return;
+      const linked = new Set(store.contactProducts.map(({ sku }) => sku));
+      urunSonuc.value = results.filter(({ sku }) => sku && !linked.has(sku));
+      for (const { sku, name } of results) arananUrunAdlari.value.set(sku, name);
+    } catch (error) {
+      if (guncel()) urunHatasi.value = error instanceof Error ? error.message : "Ürünler alınamadı. Tekrar deneyin.";
+    }
   }, 220);
 }
 
 watch(
   () => store.contact?.id,
-  async (id) => {
-    teklifler.value = id != null ? await api.quotesOfContact(id).catch(() => []) : [];
+  async (id, _previous, onCleanup) => {
+    urunAra("");
+    yeniEtiket.value = "";
+    teklifler.value = [];
+    if (id == null) return;
+    let current = true;
+    onCleanup(() => { current = false; });
+    const result = await api.quotesOfContact(id).catch(() => []);
+    if (current) teklifler.value = result;
   },
   { immediate: true },
 );
@@ -195,25 +273,35 @@ function teklifAc(id: Quote["id"]) {
 async function urunBagla(m: CatalogMatch) {
   const c = store.contact;
   if (!c) return;
-  // 🔴 `slug` DEĞİL `sku`. Önce slug yazılıyordu ve hata VERMİYORDU: satır ekleniyor ama
-  // `products` ile eşleşmiyor, ürün detayındaki "bu ürünle ilgilenenler" hiç dolmuyordu.
-  // Sessiz hata, gürültülü hatadan tehlikeli (saha hatası, 2026-08-12).
-  await store.linkContactProduct(c.id, m.sku);
-  urunArama.value = "";
-  urunSonuc.value = [];
+  const term = urunArama.value;
+  const saved = await changeContact(() => store.linkContactProduct(c.id, m.sku));
+  if (saved && store.contact?.id === c.id && term === urunArama.value) urunAra("");
+}
+
+function urunBaginiKaldir(sku: string) {
+  const c = store.contact;
+  if (c) void changeContact(() => store.unlinkContactProduct(c.id, sku));
+}
+
+function arsivDurumunuDegistir() {
+  const c = store.contact;
+  if (c) void changeContact(() => store.archiveContact(c.id, !c.archived));
 }
 
 async function temasEkle() {
   const c = store.contact;
-  if (!c) return;
-  await store.addContactEvent(
-    c.id,
-    temas.value.kind,
-    temas.value.note,
-    temas.value.nextStepAt || null,
-    temas.value.nextStepNote || null,
-  );
-  temas.value = { kind: "call", note: "", nextStepAt: "", nextStepNote: "" };
+  if (!c || editBlocked.value) return;
+  const { kind, note, nextStepAt, nextStepNote } = temas.value;
+  savingEvent.value = true;
+  try {
+    const saved = await store.addContactEvent(c.id, kind, note, nextStepAt || null, nextStepNote || null);
+    if (saved && store.contact?.id === c.id && temas.value.kind === kind && temas.value.note === note
+      && temas.value.nextStepAt === nextStepAt && temas.value.nextStepNote === nextStepNote) {
+      temas.value = { kind: "call", note: "", nextStepAt: "", nextStepNote: "" };
+    }
+  } finally {
+    savingEvent.value = false;
+  }
 }
 
 const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
@@ -222,32 +310,30 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
 <template>
   <section class="card om-scroll">
     <div class="head">
-      <h2>{{ yeni ? "Yeni kişi" : store.contact?.name }}</h2>
+      <h2 ref="contactHeading" tabindex="-1">{{ yeni ? "Yeni kişi" : store.contact?.name }}</h2>
       <div class="head-btns">
         <button
           v-if="store.contact"
           class="ghost"
-          @click="store.archiveContact(store.contact.id, !store.contact.archived)"
+          :disabled="editBlocked"
+          @click="arsivDurumunuDegistir"
         >
           {{ store.contact.archived ? "Arşivden çıkar" : "Arşivle" }}
         </button>
-        <button class="primary" :disabled="!kaydedilebilir || savingContact || hasConflict" @click="kaydet">Kaydet</button>
+        <button class="primary" :disabled="!kaydedilebilir || editBlocked" @click="kaydet">Kaydet</button>
       </div>
     </div>
-    <div v-if="hasConflict" class="contact-conflict" role="status">
-      <button type="button" class="secondary-action" @click="inspectConflict">Eşitleme çakışmasını incele</button>
-      <template v-if="conflict">
-        <p>{{ conflict.reason }}</p>
-        <p v-if="!conflict.remote">Sunucudaki kayıt görüntülenemiyor. Yerel düzenleme bu cihazda saklanıyor.</p>
-        <div v-else class="contact-conflict-values">
-          <div><strong>Bu cihaz</strong>
-            <p v-for="(label, key) in conflictFields" :key="key">{{ label }} · {{ conflict.local[key] || "—" }}</p>
-          </div>
-          <div><strong>Supabase</strong>
-            <p v-for="(label, key) in conflictFields" :key="key">{{ label }} · {{ conflict.remote[key] || "—" }}</p>
-          </div>
-        </div>
-      </template>
+    <div v-if="hasConflict || contactHistory.length" class="conflict-actions">
+      <div v-if="hasConflict" class="contact-conflict">
+        <p role="status">Kişi kaydında eşitleme çakışması var. Bu cihazdaki düzenlemeler eşitleme kuyruğunda.</p>
+        <button type="button" class="secondary-action" :disabled="writing" @click="showConflictModal('review', $event)">
+          Eşitleme çakışmasını incele
+        </button>
+      </div>
+      <button v-if="contactHistory.length" ref="historyButton" type="button" class="secondary-action" :disabled="writing"
+        @click="showConflictModal('history', $event)">
+        <Icon name="clock" :size="14" aria-hidden="true" /> Saklanan düzenlemeler
+      </button>
     </div>
 
     <!-- ⚠️ Arşiv SİLME değil: geçmiş temaslar bir kayıt, kişi listeden çıksa da kalmalı. -->
@@ -291,7 +377,7 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
         <div class="et-satir">
           <span v-for="t in store.contact.tags" :key="t" class="chip on">
             {{ t }}
-            <button class="et-x" title="Etiketi kaldır" @click="etiketCikar(t)">
+            <button class="et-x" :disabled="editBlocked" :aria-label="`${t} etiketini kaldır`" @click="etiketCikar(t)">
               <Icon name="x" :size="11" :stroke-width="2.6" />
             </button>
           </span>
@@ -304,7 +390,7 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
         </div>
         <div v-if="etiketOnerileri.length" class="et-oneri">
           <span class="ono">Kullandıklarınız:</span>
-          <button v-for="t in etiketOnerileri" :key="t" class="chip" @click="etiketEkle(t)">
+          <button v-for="t in etiketOnerileri" :key="t" class="chip" :disabled="editBlocked" @click="etiketEkle(t)">
             {{ t }}
           </button>
         </div>
@@ -316,18 +402,20 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
         <div v-for="p in store.contactProducts" :key="p.sku" class="urun-sat">
           <Icon name="box" :size="13" :stroke-width="1.9" />
           <span class="urun-ad">{{ p.name === p.sku ? bagliUrunAdlari.get(p.sku) ?? p.sku : p.name }}</span>
-          <button class="et-x" title="Bağı kaldır" @click="store.unlinkContactProduct(store.contact!.id, p.sku)">
+          <button class="et-x" :disabled="editBlocked" :aria-label="`${bagliUrunAdlari.get(p.sku) ?? p.name} bağlantısını kaldır`" @click="urunBaginiKaldir(p.sku)">
             <Icon name="x" :size="11" :stroke-width="2.6" />
           </button>
         </div>
         <input
           class="fx"
           :value="urunArama"
-          placeholder="Ürün ara ve bağla (en az 3 harf)"
+          :placeholder="typeof store.contact.id === 'string' ? 'Ortak katalogda ürün ara' : 'Ürün ara ve bağla (en az 3 harf)'"
+          aria-label="Bağlanacak ürünü ara"
           @input="urunAra(($event.target as HTMLInputElement).value)"
         />
+        <p v-if="urunHatasi" class="hint" role="status">{{ urunHatasi }}</p>
         <div v-if="urunSonuc.length" class="urun-sonuc om-scroll">
-          <button v-for="m in urunSonuc" :key="m.slug" class="us-sat" @click="urunBagla(m)">
+          <button v-for="m in urunSonuc" :key="m.sku" class="us-sat" :disabled="editBlocked" @click="urunBagla(m)">
             {{ m.name }}
           </button>
         </div>
@@ -356,7 +444,9 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
           <input v-model="temas.nextStepAt" class="fx" type="date" />
           <input v-model="temas.nextStepNote" class="fx" placeholder="Sonraki adım (isteğe bağlı)" />
         </div>
-        <button class="primary" @click="temasEkle">Temas kaydet</button>
+        <button class="primary" :disabled="editBlocked" @click="temasEkle">
+          {{ savingEvent ? "Kaydediliyor…" : "Temas kaydet" }}
+        </button>
       </div>
 
       <!-- Teklifler: kişinin ne aldığı/almadığı temas geçmişinin bir parçası. -->
@@ -386,20 +476,35 @@ const tarih = (s: string) => s.slice(0, 10).split("-").reverse().join(".");
     <p v-else class="hint">
       Kişiyi kaydettikten sonra temas geçmişi ve sonraki adım takibi açılır.
     </p>
+    <ContactConflictModal v-if="sharedContactId && conflictModal" :key="`${sharedContactId}:${conflictModal}`"
+      :id="sharedContactId" :name="store.contact?.name || ''" :mode="conflictModal" :history="contactHistory"
+      @close="closeConflictModal" @accepted="contactResolved" />
   </section>
 </template>
 
 <style scoped>
-.contact-conflict {
-  padding: 12px;
+.conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 14px;
+}
+.contact-conflict {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 12px;
   border: 1px solid var(--warn-border);
   border-radius: 8px;
   background: var(--warn-bg);
   color: var(--warn-text);
   font-size: 12px;
 }
-.contact-conflict-values { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow-wrap: anywhere; }
+.contact-conflict p { margin: 0; }
 .card {
   flex: 1;
   min-width: 0;

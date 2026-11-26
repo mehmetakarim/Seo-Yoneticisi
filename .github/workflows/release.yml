@@ -14,6 +14,10 @@ on:
         options:
           - verify
           - publish
+      retain_candidate:
+        description: Ayrı profilli test paketlerini indirilebilir tut
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.ref_type == 'tag' && 'stable-desktop-release' || format('desktop-verification-{0}', github.ref_name) }}
@@ -97,14 +101,33 @@ jobs:
           grep -F "test $test_name ... ok" "$test_dir/result.log"
       - name: Aday paketlerini yerelde oluştur
         shell: bash
+        env:
+          RETAIN_CANDIDATE: ${{ inputs.retain_candidate }}
         run: |
           node --input-type=module <<'JS'
           import { writeFileSync } from "node:fs";
           import { join } from "node:path";
           const config = { bundle: { createUpdaterArtifacts: false } };
+          if (process.env.RETAIN_CANDIDATE === "true") {
+            config.identifier = "com.kurumsalit.seo-yoneticisi.rehearsal";
+            config.productName = "Inside Manager Aday";
+            config.plugins = { updater: { endpoints: [] } };
+          }
           writeFileSync(join(process.env.RUNNER_TEMP, "tauri-verification.json"), JSON.stringify(config));
           JS
           npm run tauri -- build --ci --no-sign --config "$RUNNER_TEMP/tauri-verification.json" ${{ matrix.args }}
+      - name: Kurulum test paketlerini sakla
+        if: inputs.retain_candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: inside-manager-aday-${{ matrix.platform }}
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
   prepare:
     if: github.ref_type == 'tag' && (github.event_name == 'push' || inputs.mode == 'publish')

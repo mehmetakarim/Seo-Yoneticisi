@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { api } from "./api";
 import { teamAccessIssue, teamClient, teamProject, teamReachable, teamRestoring, teamSession, teamUser, teamWorkspace } from "./teamConnection";
-import type { QueryComparison } from "./types";
+import type { QueryComparison, QueryDailyObservation } from "./types";
 import { refreshTeamCatalog } from "./teamCatalog";
 import { listTeamProductSeo } from "./teamProductSeo";
 
@@ -189,8 +189,55 @@ export function flushTeamGsc(): Promise<void> {
   return flushing;
 }
 
-export async function compareTeamProductQuery(sku: string, query: string): Promise<QueryComparison> {
-  if (!teamGscMode()) return api.compareProductQuery(sku, query);
+const pacificCalendar = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit",
+});
+
+function pacificDay(timestamp: unknown): string {
+  const instant = new Date(String(timestamp));
+  if (!Number.isFinite(instant.getTime())) throw new Error("Ortak mağaza işleminin tarihi okunamadı.");
+  const parts = Object.fromEntries(pacificCalendar.formatToParts(instant).map(({ type, value }) => [type, value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function readDailyObservations(value: unknown, eventDay: string): QueryDailyObservation[] {
+  const invalid = () => new Error("GSC günlük ölçümleri doğrulanamadı.");
+  if (!Array.isArray(value) || value.length !== 14) throw invalid();
+  const event = new Date(`${eventDay}T00:00:00Z`);
+  const expected = new Set<string>();
+  for (let offset = -7; offset <= 7; offset++) {
+    if (!offset) continue;
+    const day = new Date(event);
+    day.setUTCDate(event.getUTCDate() + offset);
+    expected.add(day.toISOString().slice(0, 10));
+  }
+  const isMetric = (metric: unknown) => typeof metric === "number" && Number.isFinite(metric) && metric >= 0;
+  const observations = value.map((row): QueryDailyObservation => {
+    if (!row || typeof row !== "object" || !expected.delete(row.day)) throw invalid();
+    const measured = row.state === "final" || row.state === "provisional";
+    const metrics = [row.clicks, row.impressions, row.position];
+    if (measured ? !metrics.every(isMetric) : !["missing", "pending"].includes(row.state) || metrics.some((metric) => metric !== null)) {
+      throw invalid();
+    }
+    return { day: row.day, state: row.state, clicks: row.clicks, impressions: row.impressions, position: row.position };
+  });
+  return observations.sort((left, right) => left.day.localeCompare(right.day));
+}
+
+type DailyEdgeResult = { configured: boolean; tracked?: boolean; daily?: unknown; refreshFailed?: boolean };
+type CachedDailyComparison = { eventAt: string; measurement: QueryComparison };
+
+function fromCachedComparison(comparison: QueryComparison) {
+  if (!comparison.daily) return comparison;
+  return { ...comparison, daily: { ...comparison.daily, cached: true, canTrack: false } };
+}
+
+export async function compareTeamProductQuery(sku: string, query: string, track?: boolean): Promise<QueryComparison> {
+  const changesTracking = track !== undefined;
+  if (!teamGscMode()) {
+    if (changesTracking) throw new Error("Günlük takip için ortak çalışma alanına bağlanın.");
+    return api.compareProductQuery(sku, query);
+  }
   const workspace = teamWorkspace.value;
   const key = teamMeasurementScope();
   if (!workspace || !key) throw new Error("Ortak GSC ölçümü için ekip oturumunu ve çalışma alanını kontrol edin.");
@@ -198,16 +245,25 @@ export async function compareTeamProductQuery(sku: string, query: string): Promi
     if (key !== teamMeasurementScope()) throw new Error("Çalışma alanı değişti veya ölçüm erişimi kapandı.");
   };
   const slot = JSON.stringify([sku, query]);
+  const dailySlot = JSON.stringify(["daily", sku, query]);
   const client = online();
-  let cached = await cache<QueryComparison | null>(key, { action: "read", key: slot });
-  for (const { payload, conflict } of await cache<Pending[]>(key, { action: "pending" })) {
+  const [cachedDaily, onDevice, operations] = await Promise.all([
+    cache<CachedDailyComparison | null>(key, { action: "read", key: dailySlot }),
+    cache<QueryComparison | null>(key, { action: "read", key: slot }),
+    cache<Pending[]>(key, { action: "pending" }),
+  ]);
+  let cached = onDevice;
+  for (const { payload, conflict } of operations) {
     if (!conflict && payload.sku === sku && payload.query === query && (!cached || payload.event_day > cached.event_day)) {
       cached = payload.measurement;
     }
   }
+  const cachedComparison = cachedDaily && (!cached || cachedDaily.eventAt.slice(0, 10) >= cached.event_day)
+    ? fromCachedComparison(cachedDaily.measurement) : cached;
   checkScope();
   if (!client) {
-    if (cached) return cached;
+    if (changesTracking) throw new Error("Günlük takibi değiştirmek için Supabase bağlantısı gerekiyor.");
+    if (cachedComparison) return cachedComparison;
     throw new Error("Bu çalışma alanında karşılaştırma henüz indirilmedi. Yeni ölçüm için Supabase bağlantısı gerekli.");
   }
 
@@ -223,13 +279,59 @@ export async function compareTeamProductQuery(sku: string, query: string): Promi
     throw new Error("Bu çalışma alanının ortak GSC ölçümlerine erişilemiyor.");
   }
   if (event.error || member.error) {
-    if (cached && [event, member].every(({ error, status }) => !error || status === 0 || status >= 500)) return cached;
+    if (!changesTracking && cachedComparison && [event, member].every(({ error, status }) => !error || status === 0 || status >= 500)) return cachedComparison;
     throw new Error("Ortak mağaza işlem geçmişi okunamadı.");
   }
   if (!event.data) throw new Error("Bu ürün için ortak mağaza işlem kaydı yok.");
-  const eventDay = String(event.data.occurred_at).slice(0, 10);
+  const eventAt = String(event.data.occurred_at);
+  const eventDay = eventAt.slice(0, 10);
+  const dailyEvent = pacificDay(eventAt);
   const page = event.data.url as string | null;
   if (!page) throw new Error("Ortak işlem kaydının sayfa adresi yok.");
+  const canTrack = member.data?.role === "owner" || member.data?.role === "editor";
+  if (changesTracking && !canTrack) throw new Error("Günlük takibi değiştirmek için çalışma alanında düzenleme yetkisi gerekiyor.");
+
+  const dailyResponse = await client.functions.invoke<DailyEdgeResult>("team-gsc", {
+    body: { mode: "daily_comparison", workspace, page, query, event_day: dailyEvent, ...(changesTracking ? { track } : {}) },
+  });
+  checkScope();
+  const notConfigured = dailyResponse.data?.configured === false;
+  if (!dailyResponse.error && !notConfigured) {
+    const data = dailyResponse.data;
+    if (data?.configured !== true || typeof data.tracked !== "boolean" || (changesTracking && data.tracked !== track)) {
+      throw new Error("Ortak GSC günlük ölçümü doğrulanamadı.");
+    }
+    const observations = readDailyObservations(data.daily, dailyEvent);
+    const finalized = observations.filter(({ state }) => state === "final");
+    const measurement: QueryComparison = {
+      ...await api.summarizeTeamQuery(dailyEvent, finalized), page,
+      daily: { observations, tracked: data.tracked, canTrack, ...(data.refreshFailed === true ? { refreshFailed: true } : {}) },
+    };
+    checkScope();
+    await cache(key, { action: "write", key: dailySlot, data: { eventAt, measurement } }).catch(() => {});
+    checkScope();
+    return measurement;
+  }
+
+  const failure = dailyResponse.error?.context;
+  const status = failure instanceof Response ? failure.status : 0;
+  const code = failure instanceof Response
+    ? (await failure.clone().json().catch(() => null))?.error : null;
+  checkScope();
+  if (status === 401 || status === 403) throw new Error("Ortak GSC ölçümü için ekip oturumunu ve yetkinizi kontrol edin.");
+  const dailyUnavailable = code === "invalid_mode" || code === "daily_schema_unavailable" || status === 404;
+  const savedOnlyMessage = notConfigured
+    ? "Bu çalışma alanının ortak Google Search Console bağlantısı henüz kurulmamış."
+    : code === "daily_window_unavailable" ? "Bu tarih Google Search Console’un veri aralığı dışında ve saklanan bir karşılaştırma bulunamadı." : null;
+  if (changesTracking) {
+    if (dailyUnavailable) throw new Error("Bu çalışma alanında günlük GSC takibi henüz etkin değil.");
+    if (code === "daily_track_limit") throw new Error("Bu çalışma alanı günlük takip sınırına ulaştı.");
+    if (savedOnlyMessage) throw new Error(savedOnlyMessage);
+    throw new Error("Günlük takip durumu doğrulanamadı. Karşılaştırmayı yenileyin.");
+  }
+  const connectionFailure = !!dailyResponse.error && (status === 0 || status >= 500);
+  if (!dailyUnavailable && !connectionFailure && !savedOnlyMessage) throw new Error("Ortak GSC günlük ölçümü alınamadı.");
+  if (cachedDaily?.eventAt === eventAt && cachedDaily.measurement.page === page) return fromCachedComparison(cachedDaily.measurement);
 
   const stored = await client.from("team_gsc_comparisons").select("measurement")
     .eq("workspace_id", workspace).eq("sku", sku).eq("query", query).eq("event_day", eventDay)
@@ -244,6 +346,7 @@ export async function compareTeamProductQuery(sku: string, query: string): Promi
   }
   if (cached?.event_day === eventDay) return cached;
   if (stored.error) throw new Error("Ortak GSC karşılaştırması Supabase’den okunamadı.");
+  if (savedOnlyMessage) throw new Error(savedOnlyMessage);
 
   const response = await client.functions.invoke<{ configured: boolean; pending?: boolean; rows?: object[] }>("team-gsc", {
     body: { workspace, page, query, event_day: eventDay },
@@ -261,7 +364,7 @@ export async function compareTeamProductQuery(sku: string, query: string): Promi
   const measurement = await api.summarizeTeamQuery(eventDay, response.data.rows);
   checkScope();
   if (!measurement.before || !measurement.after || !(measurement.before.days || measurement.after.days)) return measurement;
-  if (member.data?.role === "owner" || member.data?.role === "editor") {
+  if (canTrack) {
     const id = crypto.randomUUID();
     await cache(key, { action: "queue", id, contact: { id }, payload: {
       workspace_id: workspace, sku, query, event_day: eventDay, measurement,

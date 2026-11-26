@@ -291,8 +291,8 @@ export const api = {
     contactId: ContactId, kind: string, note: string, nextStepAt: string | null,
     nextStepNote: string | null, revision?: number,
   ) => typeof contactId === "string"
-    ? teamContacts.act(contactId, revision, "event", { kind, note, next_step_at: nextStepAt, next_step_note: nextStepNote })
-    : invoke<void>("add_contact_event", { contactId, kind, note, nextStepAt, nextStepNote }),
+    ? teamContacts.addEvent(contactId, revision, { kind, note, next_step_at: nextStepAt, next_step_note: nextStepNote })
+    : invoke<void>("add_contact_event", { contactId, kind, note, nextStepAt, nextStepNote }).then(() => "synced" as const),
   listContactTags: () =>
     teamUser.value ? teamContacts.tags() : invoke<string[]>("list_contact_tags"),
   setContactTags: (contactId: ContactId, tags: string[], revision?: number) =>

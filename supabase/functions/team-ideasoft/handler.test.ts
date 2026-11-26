@@ -174,6 +174,83 @@ test("duplicate, claimed, and uncertain creations never send a second POST", asy
 const pagePublications = (calls: { url: string; init?: RequestInit }[]) =>
   calls.filter(({ url }) => url.endsWith("/rpc/team_confirm_ideasoft_page_publication"));
 
+test("all three page kinds follow passive creation, shared SEO push, and publication in order", async () => {
+  for (const [kind, resource] of [["category", "categories"], ["brand", "brands"], ["blog", "blogs"]] as const) {
+    const path = `/admin-api/${resource}`;
+    const id = 11;
+    const state: {
+      merchantPage?: Record<string, unknown>;
+      sharedPage?: { kind: typeof kind; remote_id: number; revision: number; details: Record<string, unknown> };
+    } = {};
+    const f = fixture({
+      pageState: () => Response.json(state.sharedPage ? [state.sharedPage] : []),
+      pageRpc: (url, init) => {
+        if (url.endsWith("/rpc/team_claim_ideasoft_page_create")) return Response.json(true);
+        const { target_kind, target_id, confirmed_facts, track_seo } = JSON.parse(String(init?.body));
+        assert.equal(target_kind, kind);
+        assert.equal(target_id, id);
+        assert.equal(confirmed_facts.status, state.merchantPage?.status);
+        if (url.endsWith("_publication")) {
+          assert.equal(confirmed_facts.status, 1);
+          assert.equal(track_seo, false);
+        }
+        state.sharedPage = { kind, remote_id: id, revision: (state.sharedPage?.revision ?? 0) + 1,
+          details: { ...state.sharedPage?.details, ...confirmed_facts } };
+        return Response.json(state.sharedPage.revision);
+      },
+      merchant: (url, init) => {
+        const pathname = new URL(url).pathname;
+        if (pathname === path && init?.method === "GET") return Response.json([]);
+        if (pathname === path && init?.method === "POST") {
+          state.merchantPage = { id, ...JSON.parse(String(init.body)) };
+          return Response.json({ data: state.merchantPage }, { status: 201 });
+        }
+        assert.equal(pathname, `${path}/${id}`);
+        assert.ok(state.merchantPage);
+        if (init?.method === "PUT") {
+          assert.equal(new Headers(init.headers).get("If-Match"), '"page-etag"');
+          Object.assign(state.merchantPage, JSON.parse(String(init.body)));
+          return new Response(null, { status: 204 });
+        }
+        return Response.json(state.merchantPage, { headers: { ETag: '"page-etag"' } });
+      },
+    });
+
+    const create = await f.run({ operation: "page_create", kind, draft: pageDraft });
+    assert.equal(create.status, 200, kind);
+    assert.equal((await create.json()).facts_recorded, true, kind);
+    assert.ok(state.sharedPage);
+    assert.equal(state.sharedPage.details.status, 0, kind);
+    const originalBlogContent = state.merchantPage?.content;
+
+    // The editor has saved the next draft revision to Supabase before sending it to the store.
+    state.sharedPage.revision += 1;
+    Object.assign(state.sharedPage.details, { draft_page_title: "Updated SEO title", draft_meta_description: "Updated SEO description" });
+    const seo = await f.run({ operation: "page_push", kind, id, revision: state.sharedPage.revision });
+    assert.equal(seo.status, 200, kind);
+    assert.equal((await seo.json()).facts_recorded, true, kind);
+    assert.equal(state.sharedPage.details.status, 0, kind);
+    assert.equal(state.sharedPage.details.page_title, "Updated SEO title", kind);
+    assert.equal(state.sharedPage.details.meta_description, "Updated SEO description", kind);
+    assert.equal(pagePublications(f.calls).length, 0, kind);
+
+    const publish = await f.run({ operation: "page_publish", kind, id, revision: state.sharedPage.revision });
+    assert.equal(publish.status, 200, kind);
+    assert.equal((await publish.json()).facts_recorded, true, kind);
+    assert.equal(state.sharedPage.details.status, 1, kind);
+    assert.equal(state.sharedPage.details.page_title, "Updated SEO title", kind);
+    assert.equal(state.merchantPage?.content, originalBlogContent, kind);
+    assert.equal(pagePublications(f.calls).length, 1, kind);
+
+    const repeat = await f.run({ operation: "page_publish", kind, id, revision: state.sharedPage.revision });
+    assert.equal(repeat.status, 200, kind);
+    assert.equal((await repeat.json()).updated, false, kind);
+    const merchantWrites = f.calls.filter(({ url, init }) => url.startsWith(configuredOrigin) && /^(POST|PUT)$/.test(init?.method ?? ""));
+    assert.deepEqual(merchantWrites.map(({ init }) => init?.method), ["POST", "PUT", "PUT"], kind);
+    assert.equal(pagePublications(f.calls).length, 1, kind);
+  }
+});
+
 test("creating a live page starts tracking only after merchant readback confirms the status", async () => {
   for (const status of [1, 0, undefined]) {
     const f = fixture({ pageRpc: (url) => Response.json(url.endsWith("create") ? true : 1), merchant: (url, init) => {

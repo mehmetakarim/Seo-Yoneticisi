@@ -19,6 +19,7 @@ use super::*;
 use serde::Deserialize;
 use seo_core::quote::{self, Currency, Line, Margin, TaxRow, Totals};
 use seo_core::quote_html::{self, OutLine, QuoteOut};
+use std::collections::BTreeSet;
 
 #[derive(Serialize, Clone)]
 pub struct QuoteItem {
@@ -528,24 +529,36 @@ pub fn set_quote_status(
     status: String,
     reason: String,
 ) -> Result<(), String> {
-    let conn = state.conn.lock().unwrap();
-    let (mevcut, no, contact_id): (String, String, Option<i64>) = conn
+    let mut conn = state.conn.lock().unwrap();
+    transition_local_quote(&mut conn, id, &status, &reason)
+}
+
+fn transition_local_quote(
+    conn: &mut Connection,
+    id: i64,
+    status: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| format!("Teklif işlemi başlatılamadı: {e}"))?;
+    let (mevcut, no, contact_id): (String, String, Option<i64>) = tx
         .query_row("SELECT status, no, contact_id FROM quotes WHERE id=?1", params![id], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?))
         })
         .map_err(|e| format!("Teklif bulunamadı: {e}"))?;
 
-    if !quote::can_transition(&mevcut, &status) {
+    if !quote::can_transition(&mevcut, status) {
         return Err(format!(
             "{} durumundan {} durumuna geçilemiyor.",
             quote::status_label(&mevcut),
-            quote::status_label(&status)
+            quote::status_label(status)
         ));
     }
 
     let now = now_str();
-    let kapandi = matches!(status.as_str(), "won" | "lost" | "expired");
-    conn.execute(
+    let kapandi = matches!(status, "won" | "lost" | "expired");
+    tx.execute(
         "UPDATE quotes SET status=?2, updated_at=?6,
              sent_at = CASE WHEN ?2='sent' AND sent_at IS NULL THEN ?3 ELSE sent_at END,
              closed_at = CASE WHEN ?4 THEN ?3 ELSE NULL END,
@@ -556,29 +569,47 @@ pub fn set_quote_status(
     .map_err(|e| format!("Durum yazılamadı: {e}"))?;
 
     if let Some(cid) = contact_id {
-        let toplam = read_quote(&conn, id).map(|q| q.grand_total).unwrap_or(0.0);
-        let para: String = conn
-            .query_row("SELECT currency FROM quotes WHERE id=?1", params![id], |r| r.get(0))
-            .unwrap_or_else(|_| "USD".into());
-        let (kind, metin) = match status.as_str() {
+        let saved = read_quote(&tx, id)?;
+        let toplam = saved.grand_total;
+        let para = &saved.currency;
+        let (kind, metin) = match status {
             "sent" => ("quote_sent", format!("{no} gönderildi · {toplam:.2} {para}")),
             "won" => ("quote_won", format!("{no} KAZANILDI · {toplam:.2} {para}")),
-            "lost" => ("quote_lost", format!("{no} kaybedildi{}", neden(&reason))),
+            "lost" => ("quote_lost", format!("{no} kaybedildi{}", neden(reason))),
             "expired" => ("note", format!("{no} süresi doldu")),
             _ => ("note", format!("{no} taslağa alındı")),
         };
-        // ⚠️ Sonraki adım DEĞİŞTİRİLMİYOR: gönderimde hatırlatmayı kullanıcı onaylıyor
-        // (Faz T2). Buradan sessizce tarih atmak kişinin mevcut randevusunu ezerdi.
-        let _ = conn.execute(
+        // Gönderimde sonraki adımı kullanıcı onaylar. Mevcut randevuyu koru.
+        tx.execute(
             "INSERT INTO contact_events (contact_id, at, kind, note) VALUES (?1,?2,?3,?4)",
             params![cid, now, kind, metin],
-        );
-        let _ = conn.execute(
-            "UPDATE contacts SET last_contact_at = ?2, updated_at = ?2 WHERE id = ?1",
+        )
+        .map_err(|e| format!("Teklif teması kaydedilemedi: {e}"))?;
+        tx.execute(
+            "UPDATE contacts SET last_contact_at = CASE
+                 WHEN julianday(last_contact_at) > julianday(?2) THEN last_contact_at ELSE ?2 END,
+                 updated_at = ?2 WHERE id = ?1",
             params![cid, now],
-        );
+        )
+        .map_err(|e| format!("Son temas tarihi güncellenemedi: {e}"))?;
+
+        if status == "sent" {
+            let skus = saved.items.iter()
+                .filter_map(|item| item.sku.as_deref())
+                .map(str::trim)
+                .filter(|sku| !sku.is_empty())
+                .collect::<BTreeSet<_>>();
+            for sku in skus {
+                tx.execute(
+                    "INSERT INTO contact_products (contact_id, sku, at) VALUES (?1,?2,?3)
+                     ON CONFLICT(contact_id, sku) DO NOTHING",
+                    params![cid, sku, now],
+                )
+                .map_err(|e| format!("Teklif ürünü kişiye bağlanamadı: {e}"))?;
+            }
+        }
     }
-    Ok(())
+    tx.commit().map_err(|e| format!("Teklif işlemi kaydedilemedi: {e}"))
 }
 
 fn neden(r: &str) -> String {
@@ -1057,32 +1088,98 @@ mod tests {
         assert_eq!(read_items(&conn, id).len(), 1);
     }
 
-    /// Kapanmış teklif yeniden açılmıyor ve her geçiş kişinin çizelgesine yazılıyor.
     #[test]
-    fn durum_gecisi_kisinin_cizelgesine_yaziliyor() {
+    fn gonderilen_teklif_temas_ve_katalog_baglarini_bir_kez_yazar() {
         let mut conn = db();
+        let original = "2026-01-10T09:30:00";
+        conn.execute_batch(
+            "INSERT INTO contacts (id, name, next_step_at, next_step_note, created_at, updated_at)
+             VALUES (5,'Ahmet','2027-01-03','Randevu','2026-01-01','2026-01-01'),
+                    (6,'Diğer kişi',NULL,'','2026-01-01','2026-01-01');",
+        )
+        .unwrap();
         conn.execute(
-            "INSERT INTO contacts (id, name, created_at, updated_at) VALUES (5,'Ahmet',?1,?1)",
-            params![now_str()],
+            "INSERT INTO contact_products (contact_id, sku, at) VALUES (5,'USD.1',?1)",
+            [original],
         )
         .unwrap();
         let q = teklif(&conn, "USD", None);
-        conn.execute("UPDATE quotes SET contact_id=5 WHERE id=?1", params![q]).unwrap();
+        conn.execute("UPDATE quotes SET contact_id=5 WHERE id=?1", [q]).unwrap();
         ekle(&mut conn, q, "USD.1").unwrap();
+        for (sku, name) in [
+            (Some("EUR.1"), "Katalog satırı"),
+            (Some(" EUR.1\t"), "Aynı ürün"),
+            (Some("\t "), "Eski boş SKU"),
+            (None, "Montaj"),
+        ] {
+            conn.execute(
+                "INSERT INTO quote_items (quote_id, sku, name) VALUES (?1,?2,?3)",
+                params![q, sku, name],
+            )
+            .unwrap();
+        }
 
-        assert!(quote::can_transition("draft", "sent"));
-        assert!(!quote::can_transition("won", "draft"), "kapanmış teklif geri açılmaz");
+        transition_local_quote(&mut conn, q, "sent", "").unwrap();
+        assert!(transition_local_quote(&mut conn, q, "sent", "").is_err());
+        let saved = read_quote(&conn, q).unwrap();
+        assert_eq!(saved.status, "sent");
+        let sent_at = saved.sent_at.as_deref().unwrap();
+        let event_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM contact_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(event_count, 1);
+        let (contact_id, kind, note, at): (i64, String, String, String) = conn
+            .query_row("SELECT contact_id, kind, note, at FROM contact_events", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap();
+        assert_eq!((contact_id, kind.as_str(), at.as_str()), (5, "quote_sent", sent_at));
+        assert!(note.starts_with(&format!("{} gönderildi", saved.no)));
+        let (last_contact, step, step_note): (String, String, String) = conn
+            .query_row("SELECT last_contact_at, next_step_at, next_step_note FROM contacts WHERE id=5", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap();
+        assert_eq!((last_contact.as_str(), step.as_str(), step_note.as_str()), (sent_at, "2027-01-03", "Randevu"));
+        let mut links = conn.prepare("SELECT contact_id, sku, at FROM contact_products ORDER BY sku").unwrap();
+        let rows = links.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap().collect::<rusqlite::Result<Vec<(i64, String, String)>>>().unwrap();
+        assert_eq!(rows, vec![(5, "EUR.1".into(), sent_at.into()), (5, "USD.1".into(), original.into())]);
+    }
 
-        // Geçişin veritabanı etkisi (komutun gövdesiyle aynı SQL).
-        conn.execute(
-            "INSERT INTO contact_events (contact_id, at, kind, note)
-             VALUES (5,?1,'quote_sent','T-2026-001 gönderildi')",
-            params![now_str()],
+    #[test]
+    fn urun_bagi_hatasi_gonderim_ve_temas_islemlerini_geri_alir() {
+        let mut conn = db();
+        conn.execute_batch(
+            "INSERT INTO contacts (id, name, created_at, updated_at)
+             VALUES (5,'Ahmet','2026-01-01','2026-01-01');
+             CREATE TRIGGER reject_quote_link BEFORE INSERT ON contact_products
+             WHEN NEW.sku = 'USD.1'
+             BEGIN SELECT RAISE(ABORT, 'test link error'); END;",
         )
         .unwrap();
-        let kind: String = conn
-            .query_row("SELECT kind FROM contact_events WHERE contact_id=5", [], |r| r.get(0))
+        let q = teklif(&conn, "TRY", None);
+        conn.execute("UPDATE quotes SET contact_id=5 WHERE id=?1", [q]).unwrap();
+        ekle(&mut conn, q, "EUR.1").unwrap();
+        ekle(&mut conn, q, "USD.1").unwrap();
+        assert!(transition_local_quote(&mut conn, q, "sent", "").unwrap_err().contains("test link error"));
+        let saved = read_quote(&conn, q).unwrap();
+        assert_eq!(saved.status, "draft");
+        assert!(saved.sent_at.is_none());
+        let (event_count, link_count, last_contact): (i64, i64, Option<String>) = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM contact_events),
+                        (SELECT COUNT(*) FROM contact_products), last_contact_at FROM contacts WHERE id=5",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
             .unwrap();
-        assert_eq!(kind, "quote_sent");
+        assert_eq!((event_count, link_count, last_contact), (0, 0, None));
+
+        conn.execute("UPDATE quotes SET contact_id=NULL WHERE id=?1", [q]).unwrap();
+        transition_local_quote(&mut conn, q, "sent", "").unwrap();
+        assert_eq!(read_quote(&conn, q).unwrap().status, "sent");
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM contact_events", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0);
     }
 }

@@ -118,7 +118,8 @@ const sayi = (n: number) => Math.round(n).toLocaleString("tr-TR");
           <span v-if="r.impressions > 0" class="gos" :title="`${sayi(r.impressions)} gösterim · ${sayi(r.clicks)} tıklama`">
             {{ sayi(r.impressions) }}
           </span>
-          <span v-if="r.status === 0" class="mini taslak">Pasif</span>
+          <span v-if="r.team_draft_conflict" class="mini conflict">Taslak çakışması</span>
+          <span v-else-if="r.status === 0" class="mini taslak">Pasif</span>
           <span v-else-if="r.draft_page_title.trim()" class="mini taslak">Taslak</span>
           <span v-else-if="eksik(r)" class="mini eks">Eksik</span>
         </div>
@@ -180,6 +181,10 @@ const sayi = (n: number) => Math.round(n).toLocaleString("tr-TR");
 .mini.taslak {
   background: var(--accent-tint);
   color: var(--accent);
+}
+.mini.conflict {
+  background: var(--warn-bg);
+  color: var(--warn-text);
 }
 .mini.eks {
   background: var(--badge-eksik-bg);

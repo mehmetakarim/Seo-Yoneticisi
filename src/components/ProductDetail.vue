@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../store";
 import { computeBadge } from "../validation";
@@ -15,19 +15,90 @@ import OutcomeTimeline from "./OutcomeTimeline.vue";
 import QueryComparisonModal from "./QueryComparisonModal.vue";
 import ProductContacts from "./contacts/ProductContacts.vue";
 import IdeasoftPushModal from "./IdeasoftPushModal.vue";
-import { teamSeoSync } from "../teamProductSeo";
+import ProductSeoConflictModal from "./ProductSeoConflictModal.vue";
+import type { ProductDetail } from "../types";
+import {
+  productSeoHasConflict, teamProductSeoConflictHistory, teamProductSeoScope, teamSeoSync,
+  type TeamProductSeoConflictArchive, type TeamSeoRecord,
+} from "../teamProductSeo";
 
 const store = useStore();
 const detail = computed(() => store.detail);
 const sharedWithoutDraft = computed(() => Boolean(detail.value?.team_seo_scope && detail.value.seo_revision == null));
-const metaLocked = computed(() => store.generating || Boolean(detail.value?.team_seo_scope &&
+const sharedSku = computed(() => detail.value?.sku === store.selectedSku && detail.value?.team_seo_scope === teamProductSeoScope()
+  ? detail.value.sku : null);
+const hasSeoConflict = computed(() => Boolean(sharedSku.value && productSeoHasConflict(sharedSku.value)));
+const metaLocked = computed(() => hasSeoConflict.value || store.generating || Boolean(detail.value?.team_seo_scope &&
   (store.generatingDetails || store.techStructuring || store.techTableSaving || store.ideasoftBusy)));
 const showResearch = ref(false);
 const showComparison = ref(false);
 const comparisonButton = ref<HTMLButtonElement | null>(null);
+const conflictButton = ref<HTMLButtonElement | null>(null);
+const historyButton = ref<HTMLButtonElement | null>(null);
+const conflictModal = shallowRef<{ mode: "review" | "history"; product: ProductDetail } | null>(null);
+const conflictHistory = shallowRef<TeamProductSeoConflictArchive[]>([]);
+const techTable = ref<InstanceType<typeof TechTableCard> | null>(null);
 const detailPane = ref<HTMLElement | null>(null);
+let historyRequest = 0;
 
 watch(() => store.selectedSku, () => { showComparison.value = false; });
+watch([sharedSku, teamProductSeoScope], () => {
+  conflictModal.value = null;
+  conflictHistory.value = [];
+  void refreshConflictHistory();
+}, { immediate: true });
+
+async function refreshConflictHistory() {
+  const request = ++historyRequest;
+  const sku = sharedSku.value;
+  if (!sku) return;
+  try {
+    const entries = await teamProductSeoConflictHistory(sku);
+    if (request === historyRequest) conflictHistory.value = entries;
+  } catch {
+    if (request === historyRequest) conflictHistory.value = [];
+  }
+}
+
+function openConflictModal(mode: "review" | "history") {
+  if (detail.value && sharedSku.value === detail.value.sku) conflictModal.value = { mode, product: detail.value };
+}
+
+async function closeConflictModal() {
+  const mode = conflictModal.value?.mode;
+  conflictModal.value = null;
+  await nextTick();
+  const action = mode === "history" ? historyButton.value : conflictButton.value ?? historyButton.value;
+  action?.focus({ preventScroll: true });
+}
+
+async function captureSeoEdits() {
+  const product = conflictModal.value?.product;
+  if (!product || detail.value !== product || sharedSku.value !== product.sku) {
+    throw new Error("Ürün değişti. Karşılaştırmayı yeniden açın.");
+  }
+  const [edits, source] = await Promise.all([
+    store.captureProductSeoConflictEdits(product),
+    techTable.value?.captureSeoConflictSource(product),
+  ]);
+  if (detail.value !== product || sharedSku.value !== product.sku) {
+    throw new Error("Ürün değişti. Karşılaştırmayı yeniden açın.");
+  }
+  return source === undefined ? edits : { ...edits, tech_source_text: source };
+}
+
+async function adoptSeoVersion(remote: TeamSeoRecord) {
+  const modal = conflictModal.value;
+  if (!modal || modal.product.sku !== remote.sku) return;
+  techTable.value?.clearSeoConflictSource(modal.product);
+  const restored = await store.reloadProductAfterSeoConflict(modal.product, remote);
+  if (conflictModal.value !== modal) return;
+  await refreshConflictHistory();
+  if (conflictModal.value !== modal) return;
+  await closeConflictModal();
+  store.toast(restored ? "Ortak SEO sürümü açıldı. Bu cihazdaki düzenlemeler saklandı."
+    : "Düzenlemeler saklandı. Ortak SEO sürümünü görmek için ürünü yeniden açın.");
+}
 
 async function closeComparison() {
   showComparison.value = false;
@@ -109,6 +180,7 @@ function onKeyword(e: Event) {
 
 // Araştırma panelinden hedef kelime seçildi → alanı doldur + kaydet.
 function onPickKeyword(kw: string) {
+  if (hasSeoConflict.value) return;
   keyword.value = kw;
   scheduleKeywordSave();
 }
@@ -189,7 +261,7 @@ async function openProduct() {
           <template v-if="store.productIdeasoftAvailable">
             <button
               class="research-btn"
-              :disabled="store.ideasoftBusy"
+              :disabled="hasSeoConflict || store.ideasoftBusy"
               title="Hedef kelimeyi ve varsa teknik tablo verisini IdeaSoft'tan getir"
               @click="store.pullIdeasoftKeyword()"
             >
@@ -198,7 +270,7 @@ async function openProduct() {
             </button>
             <button
               class="research-btn"
-              :disabled="store.ideasoftBusy || !keyword.trim()"
+              :disabled="hasSeoConflict || store.ideasoftBusy || !keyword.trim()"
               title="Hedef kelimeyi IdeaSoft'a gönder (SEO kural skorunu etkiler)"
               @click="store.openIdeasoftPreview(['keyword'])"
             >
@@ -206,6 +278,17 @@ async function openProduct() {
               Gönder
             </button>
           </template>
+        </div>
+        <div v-if="hasSeoConflict || conflictHistory.length" class="seo-conflict-row">
+          <p v-if="hasSeoConflict" class="seo-conflict-label" role="status">
+            <Icon name="alert" :size="14" aria-hidden="true" /> SEO taslağı eşitleme çakışması
+          </p>
+          <button v-if="hasSeoConflict" ref="conflictButton" type="button" class="research-btn"
+            aria-haspopup="dialog" @click="openConflictModal('review')">Sürümleri karşılaştır</button>
+          <button v-if="conflictHistory.length" ref="historyButton" type="button" class="research-btn"
+            aria-haspopup="dialog" @click="openConflictModal('history')">
+            <Icon name="clock" :size="14" aria-hidden="true" /> Saklanan düzenlemeler
+          </button>
         </div>
       </header>
 
@@ -242,17 +325,20 @@ async function openProduct() {
         :details-done="!sharedWithoutDraft && detail.details_status === 'done'"
         :badge="sharedWithoutDraft ? 'eksik' : detail.details_badge"
         :image-count="detail.image_count"
+        :conflicted="hasSeoConflict"
         :model="sharedWithoutDraft ? null : detail.details_model"
         :history="sharedWithoutDraft ? [] : detail.details_history"
       />
 
       <TechTableCard
+        ref="techTable"
         :source-text="detail.tech_source_text ?? ''"
         :specs="detail.tech_specs"
         :model="detail.tech_model"
         :tech-done="detail.tech_status === 'done'"
         :badge="detail.tech_badge"
         :history="detail.tech_history"
+        :conflicted="hasSeoConflict"
       />
 
       <!-- JSON-LD teknik tablodan besleniyor → hemen onun altında -->
@@ -286,6 +372,9 @@ async function openProduct() {
     </div>
 
     <IdeasoftPushModal />
+    <ProductSeoConflictModal v-if="conflictModal" :sku="conflictModal.product.sku" :name="conflictModal.product.name"
+      :mode="conflictModal.mode" :history="conflictHistory" :capture-edits="captureSeoEdits"
+      @close="closeConflictModal" @accepted="adoptSeoVersion" />
 
     <SeoResearchPanel
       :open="showResearch"
@@ -298,6 +387,16 @@ async function openProduct() {
 
 <style scoped>
 .shared-seo-status { margin: 10px 0; font-size: 12px; color: var(--c-mid); }
+.seo-conflict-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.seo-conflict-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 3px 0 0;
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 600;
+}
 .detail {
   flex: 1;
   overflow-y: auto;

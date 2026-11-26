@@ -14,16 +14,31 @@ import ContactList from "./ContactList.vue";
 import ContactCard from "./ContactCard.vue";
 
 const listRef = ref<InstanceType<typeof ContactList> | null>(null);
+const cardRef = ref<InstanceType<typeof ContactCard> | null>(null);
 const store = useStore();
+
+function refreshOpenContact(changedId?: unknown) {
+  const id = store.contact?.id;
+  const canRefresh = () => cardRef.value?.canRefreshContact() === true;
+  if (typeof id === "string" && (changedId === undefined || changedId === id) && canRefresh()) {
+    void store.openContact(id, canRefresh);
+  }
+}
 
 watch([teamClient, teamWorkspace], ([client, workspace], _previous, onCleanup) => {
   if (!client || !workspace || !teamSession.value) return;
   const channel = client.channel(`contact-list:${workspace}`)
     .on("postgres_changes", {
       event: "*", schema: "public", table: "team_contacts", filter: `workspace_id=eq.${workspace}`,
-    }, () => { void store.loadContacts(); })
+    }, (change) => {
+      void store.loadContacts();
+      if ("id" in change.new) refreshOpenContact(change.new.id);
+    })
     .subscribe((state) => {
-      if (state === "SUBSCRIBED") void store.loadContacts();
+      if (state === "SUBSCRIBED") {
+        void store.loadContacts();
+        refreshOpenContact();
+      }
     });
   onCleanup(() => { void client.removeChannel(channel); });
 }, { immediate: true });
@@ -44,7 +59,7 @@ defineExpose({ focusSearch });
     </div>
     <div class="split">
       <ContactList ref="listRef" />
-      <ContactCard />
+      <ContactCard ref="cardRef" />
     </div>
   </div>
 </template>

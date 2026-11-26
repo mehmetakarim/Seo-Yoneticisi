@@ -16,6 +16,7 @@ const props = defineProps<{
   detailsDone: boolean;
   badge: MetaBadge;
   imageCount: number;
+  conflicted?: boolean;
   /** İçeriği üreten Gemini modeli (null = henüz üretilmedi). */
   model: string | null;
   /** Yeniden üretimden önceki hâller (en yeni başta). */
@@ -164,7 +165,7 @@ function genDetails() {
       </button>
     </div>
     <VersionHistory
-      v-if="histOpen && history.length"
+      v-if="histOpen && history.length && !conflicted"
       :items="history.map((v) => ({ at: v.at, summary: `${v.words} kelime`, model: v.model }))"
       noun="açıklama"
       @restore="store.restoreDetailsVersion($event)"
@@ -176,7 +177,7 @@ function genDetails() {
         <button
           class="gen"
           :class="{ busy: store.generatingDetails }"
-          :disabled="store.generatingDetails || !imageGateOk"
+          :disabled="conflicted || store.generatingDetails || !imageGateOk"
           @click="genDetails"
         >
           <Icon :name="store.generatingDetails ? 'loader' : 'sparkles'" :size="15" :stroke-width="store.generatingDetails ? 2.2 : 1.9" :class="{ spin: store.generatingDetails }" />
@@ -186,7 +187,7 @@ function genDetails() {
       <button
         v-if="store.productIdeasoftAvailable"
         class="is-push"
-        :disabled="store.ideasoftBusy"
+        :disabled="conflicted || store.ideasoftBusy"
         title="Bu kartın içeriğini IdeaSoft'a gönder"
         @click="store.openIdeasoftPreview(['details'])"
       >
@@ -194,7 +195,7 @@ function genDetails() {
         IdeaSoft'a Gönder
       </button>
       <div style="flex:1"></div>
-      <button class="done" :class="{ active: detailsDone }" :disabled="store.generatingDetails" @click="store.toggleDetailsDone()">
+      <button class="done" :class="{ active: detailsDone }" :disabled="conflicted || store.generatingDetails" @click="store.toggleDetailsDone()">
         <Icon name="badgeCheck" :size="15" :stroke-width="2.2" />
         {{ detailsDone ? "Açıklama tamamlandı ✓" : "Açıklamayı Tamamlandı işaretle" }}
       </button>

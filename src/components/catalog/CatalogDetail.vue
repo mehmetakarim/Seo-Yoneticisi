@@ -15,18 +15,22 @@
  * çıktı" diye sorabilmeli. Sorgu listesi boşsa üretim zayıf bağlamla çalışmıştır ve panel
  * bunu söylüyor — sessizce zayıf metin üretmek, üretmemekten kötü.
  */
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../../api";
 import { useStore } from "../../store";
 import { generateCatalogDraft } from "../../teamGemini";
 import { TeamStorePageWriteUnconfirmed, writeTeamIdeasoftPage } from "../../teamIdeasoft";
-import { checkStorePageDraft, flushTeamStorePages, queueTeamPageDraft, recordTeamStorePage, teamStorePageScope, type TeamStorePageWriteTarget } from "../../teamStorePages";
+import {
+  acceptTeamStorePageConflict, checkStorePageDraft, flushTeamStorePages, inspectTeamStorePageConflict,
+  queueTeamPageDraft, recordTeamStorePage, teamStorePageConflictHistory, teamStorePageScope, type TeamStorePageWriteTarget,
+} from "../../teamStorePages";
 import type { StorePageDetail } from "../../types";
 import { TIP_AD, tanitimMetniVar } from "../../catalog";
 import Icon from "../Icon.vue";
 import ModalShell from "../ModalShell.vue";
 import SeoCard from "../SeoCard.vue";
+import SeoConflictModal from "../SeoConflictModal.vue";
 
 const props = defineProps<{ kind: string }>();
 const store = useStore();
@@ -34,6 +38,7 @@ const store = useStore();
 const veri = computed(() => store.storePage);
 const uretiliyor = ref(false);
 const gonderiliyor = ref(false);
+const kaydediliyor = ref(false);
 const yayimOnayi = ref(false);
 const yayimlaniyor = ref(false);
 watch([() => veri.value?.remote_id, teamStorePageScope], () => { yayimOnayi.value = false; });
@@ -61,7 +66,7 @@ function updateSharedPage(original: StorePageDetail, saved: StorePageDetail) {
 
 async function yayimla() {
   const page = veri.value;
-  if (!page || page.status !== 0 || yayimlaniyor.value || gonderiliyor.value) return;
+  if (!page || page.status !== 0 || writing.value || hasDraftConflict.value) return;
   yayimlaniyor.value = true;
   try {
     const target = await checkStorePageDraft(page);
@@ -90,13 +95,101 @@ const tAciklama = ref("");
 const tKelime = ref("");
 const tMetin = ref("");
 const draftChangedElsewhere = ref(false);
-const writing = computed(() => uretiliyor.value || gonderiliyor.value || yayimlaniyor.value);
+const writing = computed(() => uretiliyor.value || gonderiliyor.value || yayimlaniyor.value || kaydediliyor.value);
+const hasDraftConflict = computed(() => Boolean(veri.value?.team_draft_conflict || draftChangedElsewhere.value));
+watch(hasDraftConflict, (blocked) => { if (blocked) yayimOnayi.value = false; });
 
 /** Ürün kuralıyla aynı sınırlar (`validation::TITLE_MAX` / `DESC_MAX`). */
 const BASLIK_MAX = 60;
 const ACIKLAMA_MAX = 155;
 
 const metinAlaniVar = computed(() => tanitimMetniVar(props.kind));
+
+const draftFields = [
+  { key: "draft_page_title", label: "Sayfa başlığı", input: tBaslik },
+  { key: "draft_meta_description", label: "Meta açıklama", input: tAciklama },
+  { key: "draft_target_keyword", label: "Hedef kelime", input: tKelime },
+  { key: "draft_showcase", label: "Tanıtım metni", input: tMetin },
+] as const;
+const conflictFields = computed(() => draftFields.filter(({ key }) => key !== "draft_showcase" || metinAlaniVar.value)
+  .map(({ key, label }) => ({ key, label, value: (version: StorePageDetail) => version[key] })));
+let draftBase: StorePageDetail | null = null;
+
+function samePage(a: StorePageDetail, b?: StorePageDetail | null) {
+  return Boolean(b && a.kind === b.kind && a.remote_id === b.remote_id && a.team_scope === b.team_scope);
+}
+
+function draftEdits(base: StorePageDetail) {
+  return Object.fromEntries(draftFields.filter(({ key, input }) => input.value !== (base[key] ?? ""))
+    .map(({ key, input }) => [key, input.value]));
+}
+
+type ConflictMode = "review" | "history";
+const conflictModal = shallowRef<{ mode: ConflictMode; page: StorePageDetail } | null>(null);
+const conflictHistory = shallowRef<Awaited<ReturnType<typeof teamStorePageConflictHistory>>>([]);
+const conflictButton = ref<HTMLButtonElement | null>(null);
+const historyButton = ref<HTMLButtonElement | null>(null);
+const sharedSelection = computed(() => {
+  const page = veri.value;
+  return page?.team_scope === teamStorePageScope() && page.kind === props.kind ? `${page.kind}:${page.remote_id}` : null;
+});
+let historyRequest = 0;
+
+watch([sharedSelection, teamStorePageScope], () => {
+  conflictModal.value = null;
+  conflictHistory.value = [];
+  void refreshConflictHistory();
+}, { immediate: true });
+onBeforeUnmount(() => {
+  historyRequest++;
+  conflictModal.value = null;
+});
+
+async function refreshConflictHistory() {
+  const request = ++historyRequest;
+  const page = veri.value;
+  if (!sharedSelection.value || !page) return;
+  try {
+    const entries = await teamStorePageConflictHistory(page);
+    if (request === historyRequest && sharedSelection.value && samePage(page, veri.value)) conflictHistory.value = entries;
+  } catch {
+    if (request === historyRequest) conflictHistory.value = [];
+  }
+}
+
+function openConflictModal(mode: ConflictMode) {
+  const page = veri.value;
+  if (!page || !sharedSelection.value || writing.value) return;
+  conflictModal.value = { mode, page };
+}
+
+async function closeConflictModal() {
+  const mode = conflictModal.value?.mode;
+  conflictModal.value = null;
+  await nextTick();
+  const trigger = mode === "history" ? historyButton.value : conflictButton.value ?? historyButton.value;
+  trigger?.focus({ preventScroll: true });
+}
+
+function loadConflict(signal: AbortSignal) {
+  const pending = conflictModal.value;
+  const page = veri.value;
+  if (!pending || !page || !sharedSelection.value || !samePage(pending.page, page)) {
+    throw new Error("Seçili sayfa değişti. Karşılaştırmayı yeniden açın.");
+  }
+  return inspectTeamStorePageConflict(page, draftEdits(draftBase ?? page), signal);
+}
+
+async function adoptSharedDraft(remote: StorePageDetail) {
+  const modal = conflictModal.value;
+  if (!modal || !sharedSelection.value || !samePage(remote, modal.page) || !samePage(remote, veri.value)) return;
+  loadDraft(remote);
+  store.patchStorePage(remote);
+  await refreshConflictHistory();
+  if (conflictModal.value !== modal) return;
+  await closeConflictModal();
+  store.toast("Ortak SEO sürümü açıldı. Bu cihazdaki düzenlemeler saklandı.", "ok");
+}
 
 const kirli = computed(
   () =>
@@ -115,11 +208,11 @@ const taslakVar = computed(() => !!(tBaslik.value.trim() || tMetin.value.trim())
  * seçmek alanları sıfırlamazdı.
  */
 function matchesDraft(d: StorePageDetail) {
-  return tBaslik.value === d.draft_page_title && tAciklama.value === d.draft_meta_description &&
-    tKelime.value === d.draft_target_keyword && tMetin.value === d.draft_showcase;
+  return draftFields.every(({ key, input }) => input.value === (d[key] ?? ""));
 }
 
 function loadDraft(d: StorePageDetail | null) {
+  draftBase = d;
   tBaslik.value = d?.draft_page_title ?? "";
   tAciklama.value = d?.draft_meta_description ?? "";
   tKelime.value = d?.draft_target_keyword ?? "";
@@ -127,10 +220,9 @@ function loadDraft(d: StorePageDetail | null) {
   draftChangedElsewhere.value = false;
 }
 
-watch(() => store.storePage, (d, previous) => {
-  if (d?.team_scope && previous?.team_scope === d.team_scope && previous.kind === d.kind && previous.remote_id === d.remote_id &&
-      !matchesDraft(previous) && !matchesDraft(d) && !uretiliyor.value) {
-    if (d.revision !== previous.revision) draftChangedElsewhere.value = true;
+watch(() => store.storePage, (d) => {
+  if (d?.team_scope && draftBase && samePage(d, draftBase) && !matchesDraft(draftBase) && !matchesDraft(d)) {
+    if (d.revision !== draftBase.revision) draftChangedElsewhere.value = true;
     return;
   }
   loadDraft(d);
@@ -138,15 +230,28 @@ watch(() => store.storePage, (d, previous) => {
 
 async function uret() {
   const page = veri.value;
-  if (!page || uretiliyor.value) return;
+  if (!page || writing.value || hasDraftConflict.value) return;
+  const current = () => {
+    const selected = veri.value;
+    return selected && samePage(page, selected) && (!page.team_scope ||
+      (page.team_scope === teamStorePageScope() && page.revision === selected.revision && !hasDraftConflict.value)) ? selected : null;
+  };
   uretiliyor.value = true;
   try {
     const draft = await generateCatalogDraft(page);
-    const saved = page.team_scope ? await queueTeamPageDraft(page, {
+    const selected = current();
+    if (!selected) {
+      if (samePage(page, veri.value)) store.toast("Üretim sırasında ortak SEO taslağı değişti. Güncel sürümü inceleyin.", "info");
+      return;
+    }
+    const saved = page.team_scope ? await queueTeamPageDraft(selected, {
       draft_page_title: draft.draft_page_title, draft_meta_description: draft.draft_meta_description,
       draft_target_keyword: draft.draft_target_keyword, draft_showcase: draft.draft_showcase, draft_model: draft.draft_model,
     }) : draft;
-    if (veri.value === page) store.patchStorePage(saved);
+    if (current()) {
+      loadDraft(saved);
+      store.patchStorePage(saved);
+    }
     if (page.team_scope) void flushTeamStorePages().then(() => store.loadStorePages(page.kind)).catch(console.warn);
     store.toast("Taslak üretildi — göndermeden önce okuyun.", "ok");
   } catch (e) {
@@ -158,7 +263,8 @@ async function uret() {
 
 async function kaydet(): Promise<boolean> {
   const page = veri.value;
-  if (!page || draftChangedElsewhere.value) return false;
+  if (!page || kaydediliyor.value || hasDraftConflict.value) return false;
+  kaydediliyor.value = true;
   try {
     if (page.team_scope) {
       const saved = await queueTeamPageDraft(page, {
@@ -185,6 +291,8 @@ async function kaydet(): Promise<boolean> {
   } catch (e) {
     store.toast(String(e), "error");
     return false;
+  } finally {
+    kaydediliyor.value = false;
   }
 }
 
@@ -195,7 +303,7 @@ async function kaydet(): Promise<boolean> {
  */
 async function gonder() {
   const page = veri.value;
-  if (!page || gonderiliyor.value || yayimlaniyor.value) return;
+  if (!page || writing.value || hasDraftConflict.value) return;
   gonderiliyor.value = true;
   try {
     if (kirli.value && !(await kaydet())) return;
@@ -274,17 +382,25 @@ const yayinTarihi = new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeS
             <span class="gonderildi">GSC takibi başladı · {{ yayinTarihi.format(new Date(veri.published_at)) }}</span>
           </template>
         </div>
-        <button v-if="veri.status === 0" type="button" class="primary-action publish-action" :disabled="writing" @click="yayimOnayi = true">
+        <button v-if="veri.status === 0" type="button" class="primary-action publish-action" :disabled="writing || hasDraftConflict" @click="yayimOnayi = true">
           <Icon name="upload" :size="15" /> Yayımla
         </button>
       </div>
 
-      <p v-if="veri.team_conflict || veri.team_pending" class="d-bas" role="status">
-        {{ veri.team_conflict ? "Kayıt çakışması var. Bu cihazdaki değişiklik sırada saklanıyor." : "Kayıt eşitleme bekliyor." }}
+      <p v-if="!veri.team_draft_conflict && (veri.team_conflict || veri.team_pending)" class="sync-status" role="status">
+        {{ veri.team_conflict ? "Mağaza kaydı doğrulanamadı. Mağaza envanterini yenileyin." : "Kayıt eşitleme bekliyor." }}
       </p>
-      <div v-if="draftChangedElsewhere" class="uyari" role="status">
-        Ortak taslak başka bir oturumda güncellendi. Ekrandaki metni kopyaladıktan sonra güncel taslağı yükleyebilirsiniz.
-        <button type="button" class="secondary-action" :disabled="writing" @click="loadDraft(veri)">Güncel taslağı yükle</button>
+      <div v-if="sharedSelection && (hasDraftConflict || conflictHistory.length)" class="conflict-toolbar">
+        <p v-if="hasDraftConflict" class="conflict-note" role="status">
+          <Icon name="alert" :size="14" aria-hidden="true" />
+          {{ veri.team_draft_conflict ? "SEO taslağı eşitleme çakışması" : "Ortak SEO taslağı başka bir oturumda güncellendi" }}
+        </p>
+        <button v-if="hasDraftConflict" ref="conflictButton" type="button" class="secondary-action"
+          :disabled="writing" aria-haspopup="dialog" @click="openConflictModal('review')">Sürümleri karşılaştır</button>
+        <button v-if="conflictHistory.length" ref="historyButton" type="button" class="secondary-action"
+          :disabled="writing" aria-haspopup="dialog" @click="openConflictModal('history')">
+          <Icon name="clock" :size="14" aria-hidden="true" /> Saklanan düzenlemeler
+        </button>
       </div>
 
       <SeoCard icon="type" title="Sayfa SEO" :model="veri.draft_model" stack>
@@ -327,19 +443,19 @@ const yayinTarihi = new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeS
               {{ tBaslik.length }}/{{ BASLIK_MAX }}
             </span>
           </label>
-          <input id="catalog-page-title" v-model="tBaslik" :readonly="writing" class="fx" />
+          <input id="catalog-page-title" v-model="tBaslik" :readonly="writing || hasDraftConflict" class="fx" />
           <label class="lbl" for="catalog-meta-description">
             Meta açıklama
             <span class="say" :class="{ asti: tAciklama.length > ACIKLAMA_MAX }">
               {{ tAciklama.length }}/{{ ACIKLAMA_MAX }}
             </span>
           </label>
-          <textarea id="catalog-meta-description" v-model="tAciklama" :readonly="writing" class="fx" rows="3"></textarea>
+          <textarea id="catalog-meta-description" v-model="tAciklama" :readonly="writing || hasDraftConflict" class="fx" rows="3"></textarea>
           <label class="lbl" for="catalog-target-keyword">Hedef kelime</label>
-          <input id="catalog-target-keyword" v-model="tKelime" :readonly="writing" class="fx" />
+          <input id="catalog-target-keyword" v-model="tKelime" :readonly="writing || hasDraftConflict" class="fx" />
           <template v-if="metinAlaniVar">
             <label class="lbl" for="catalog-showcase-content">Tanıtım metni</label>
-            <textarea id="catalog-showcase-content" v-model="tMetin" :readonly="writing" class="fx" rows="8"></textarea>
+            <textarea id="catalog-showcase-content" v-model="tMetin" :readonly="writing || hasDraftConflict" class="fx" rows="8"></textarea>
           </template>
           <!-- ⚠️ Blogda alan YOK; olmayan bir alanı boş kutu olarak göstermek yerine
                nedenini yazıyoruz, yoksa "neden dolduramıyorum" sorusu doğar. -->
@@ -358,17 +474,20 @@ const yayinTarihi = new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeS
       </p>
 
       <template #actions>
-        <button class="primary-action" :disabled="writing || draftChangedElsewhere" @click="uret">
+        <button class="primary-action" :disabled="writing || hasDraftConflict" @click="uret">
           <Icon name="sparkles" :size="14" :class="{ spin: uretiliyor }" />
           {{ uretiliyor ? "Üretiliyor…" : taslakVar ? "Yeniden üret" : "Taslak üret" }}
         </button>
-        <button class="secondary-action" :disabled="!kirli || writing || draftChangedElsewhere" @click="kaydet">Taslağı kaydet</button>
-        <button class="secondary-action" :disabled="!taslakVar || writing || draftChangedElsewhere" @click="gonder">
+        <button class="secondary-action" :disabled="!kirli || writing || hasDraftConflict" @click="kaydet">Taslağı kaydet</button>
+        <button class="secondary-action" :disabled="!taslakVar || writing || hasDraftConflict" @click="gonder">
           <Icon name="upload" :size="14" />
           {{ gonderiliyor ? "Gönderiliyor…" : "Mağazaya gönder" }}
         </button>
       </template>
       </SeoCard>
+      <SeoConflictModal v-if="conflictModal" :name="conflictModal.page.name" :mode="conflictModal.mode" :history="conflictHistory"
+        :fields="conflictFields" :load="loadConflict" :accept="acceptTeamStorePageConflict"
+        @close="closeConflictModal" @accepted="adoptSharedDraft" />
       <Teleport to="body">
         <ModalShell
           :open="yayimOnayi"
@@ -382,7 +501,7 @@ const yayinTarihi = new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeS
           <p class="publish-note">Kayıt, IdeaSoft’taki mevcut içeriğiyle mağazada görünür olacak.</p>
           <template #footer>
             <button type="button" class="secondary-action" :disabled="yayimlaniyor" @click="yayimOnayi = false">Vazgeç</button>
-            <button type="button" class="primary-action" :disabled="yayimlaniyor" @click="yayimla">
+            <button type="button" class="primary-action" :disabled="yayimlaniyor || hasDraftConflict" @click="yayimla">
               <Icon :name="yayimlaniyor ? 'loader' : 'upload'" :size="15" :class="{ spin: yayimlaniyor }" />
               {{ yayimlaniyor ? "Yayımlanıyor…" : "Yayımla" }}
             </button>
@@ -476,6 +595,27 @@ h1 {
   margin: 0;
   color: var(--c-mid);
   line-height: 1.55;
+}
+.sync-status {
+  font-size: 12px;
+  color: var(--c-soft);
+  margin: 10px 0;
+}
+.conflict-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.conflict-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 auto 0 0;
+  color: var(--warn-text);
+  font-size: 12px;
+  font-weight: 560;
 }
 .ayrac {
   color: var(--c-faint);
